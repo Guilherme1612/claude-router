@@ -1,0 +1,125 @@
+[
+  {
+    "id": 1,
+    "prompt": "the flaky payment test keeps failing intermittently",
+    "right": {
+      "mode": "/gsd-debug",
+      "skills": ["systematic-debugging"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "bug cluster (slash kind)"
+    }
+  },
+  {
+    "id": 2,
+    "prompt": "commit my staged changes and open a PR",
+    "right": {
+      "mode": "/commit-push-pr",
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "git cluster — verified slash name: commit-push-pr exists in manifest commands[]"
+    }
+  },
+  {
+    "id": 3,
+    "prompt": "redesign the dashboard to look high-end",
+    "right": {
+      "mode": "/gsd-ui-phase",
+      "skills": ["high-end-visual-design"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "design cluster (skill + slash)"
+    }
+  },
+  {
+    "id": 4,
+    "prompt": "modernize the legacy jQuery auth module",
+    "right": {
+      "mode": "/modernize-assess",
+      "skills": [],
+      "agents": ["scaffolder"],
+      "tier": "high",
+      "status": "route",
+      "edge": "modernize + agent — verified slash name: modernize-assess exists in manifest commands[]; scaffolder agent exists in manifest agents[]"
+    }
+  },
+  {
+    "id": 5,
+    "prompt": "how does the router hook decide which mode to run? architecture question",
+    "right": {
+      "mode": "/gsd-explore",
+      "skills": [],
+      "agents": [],
+      "tier": "medium",
+      "status": "route",
+      "edge": "ralph two-gate NEGATIVE — no verifiable done-criteria → must NOT route to /ralph-loop"
+    }
+  },
+  {
+    "id": 6,
+    "prompt": "keep running tests until they all pass, max 20 tries",
+    "right": {
+      "mode": "/ralph-loop",
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "completion_promise": "all tests pass",
+      "max_iterations": 20,
+      "edge": "ralph two-gate POSITIVE — verbatim --completion-promise \"all tests pass\" extracted from prompt (D-15 quote-don't-synthesize)"
+    }
+  },
+  {
+    "id": 7,
+    "prompt": "find me a skill that does X",
+    "right": {
+      "mode": null,
+      "skills": ["find-skills"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "Skill-tool channel (NOT slash) — find-skills is invoke_kind: skill in mode-map"
+    }
+  },
+  {
+    "id": 8,
+    "prompt": "thanks, that's great",
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "trivial",
+      "status": "pass_through",
+      "edge": "trivial pass-through — trivialPromptDetect short-circuits before routing"
+    }
+  },
+  {
+    "id": 9,
+    "prompt": "review this PR for security issues before merge",
+    "right": {
+      "mode": "/gsd-secure-phase",
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "secondary_mode": "/review-pr",
+      "edge": "security cluster — verified slash name: review-pr exists in manifest commands[]; gsd-secure-phase maps to secure-phase mode-map entry"
+    }
+  },
+  {
+    "id": 10,
+    "prompt": "/gsd-debug fix the flaky test",
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "user_explicit",
+      "status": "user_explicit",
+      "edge": "explicit override (GRD-04) — prompt starts with /, pass-through + log user_explicit, NO injection"
+    }
+  }
+]
