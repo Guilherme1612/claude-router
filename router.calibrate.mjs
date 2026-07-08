@@ -1,9 +1,18 @@
 // router.calibrate.mjs — dry-run calibration harness for the Phase 1 exit gate.
 //
-// Loads the 10 user-approved calibration right-picks (calibration-tasks.json),
-// runs each prompt through the SAME pipeline functions as router.mjs (DRY —
-// imported via ESM, not duplicated) UP TO the route decision, compares the
-// router's pick against the right-pick, and prints `X/10 right`.
+// Loads the 13-15 user-approved calibration right-picks (calibration-tasks.json;
+// 10 Phase-1 originals + 3-5 Phase-2 codebase fixtures), runs each prompt
+// through the SAME pipeline functions as router.mjs (DRY — imported via ESM,
+// not duplicated) UP TO the route decision, compares the router's pick against
+// the right-pick, and prints `X/N right`.
+//
+// Phase 2 extension (Plan 02-03 / D-15, D-16): codebase fixtures carry a
+// `cwd` field and a `graph_status_expected` field. The harness exercises
+// graphifyHeuristic + applyGraphBoost on every fixture and prints a per-fixture
+// `graph_status` + symbol-count column. The pass threshold is dynamic:
+// originalCount + 1 (so the original 10 must remain 10/10 AND at least 1 of the
+// new codebase fixtures must be right). Phase-1's 8/10-of-originals gate (VRF-02)
+// is preserved as the lower bound.
 //
 // Dry-run (D-13): does NOT emit additionalContext, does NOT write to a live
 // session, does NOT touch the cache or telemetry. Threshold tuning is a DATA
@@ -11,9 +20,9 @@
 // mode-map.json) — this harness does NOT auto-mutate mode-map (Phase 3 adds
 // auto-mutation).
 //
-// Exit code: 0 iff ≥8/10 right (VRF-02 — the Phase 1 exit gate), non-zero
-// otherwise. A non-zero exit prints the wrong high-confidence picks so the
-// user can raise T_high (D-09: prefer false pass-through over wrong auto-route).
+// Exit code: 0 iff rightCount >= originalCount + 1 (D-16), non-zero otherwise.
+// A non-zero exit prints the wrong high-confidence picks so the user can raise
+// T_high (D-09: prefer false pass-through over wrong auto-route).
 
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -42,32 +51,45 @@ const setEq = (a, b) => {
 };
 
 // Replicate main()'s route computation UP TO the route decision, dry-run.
-// Returns { tier, route, guards_fired, top3, margin, skipReason }.
-function dryRun(prompt, manifest, modeMap) {
+// Phase 2 (Plan 02-03 / D-15, D-16): accepts a `cwd` parameter and threads
+// graphifyHeuristic + applyGraphBoost into the scoring path. Returns
+// { tier, route, guards_fired, top3, margin, skipReason, graph_status, graph_symbols, elapsed_ms }.
+function dryRun(prompt, manifest, modeMap, cwd = process.cwd()) {
   // Trivial short-circuit
   if (R.trivialPromptDetect(prompt)) {
-    return { tier: 'trivial', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'trivial' };
+    return { tier: 'trivial', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'trivial', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
   }
   // Explicit /-prefix override (GRD-04 first half)
   if (R.explicitOverrideDetect(prompt).override) {
-    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit' };
+    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
   }
   // Re-entry dedupe
   if (R.sentinelScan(prompt)) {
-    return { tier: 'reentry_skipped', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'reentry' };
+    return { tier: 'reentry_skipped', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'reentry', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
   }
   // Named-name override (GRD-04 second half) — runs before scoring
   const knownNames = R.buildKnownNames(modeMap);
   if (R.explicitOverrideDetect(prompt, knownNames).override) {
-    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit_named' };
+    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit_named', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
   }
   // Scoring
   const corpus = R.buildCorpus(manifest, modeMap);
   const queryTokens = R.tokenize(prompt);
   const scored = R.bm25Score(queryTokens, corpus);
-  const normed = R.normalize(scored);
+  // Phase 2 / D-07: fold graph boost into the scored list. Only applies if
+  // graphifyHeuristic actually fired (queried=true) and produced a non-empty
+  // boostIds set. Otherwise `scored` is unchanged.
+  const t0 = process.hrtime.bigint();
+  const graph = R.graphifyHeuristic(prompt, cwd);
+  const manifestIdSet = new Set((corpus || []).map((c) => String(c.name || '').toLowerCase()));
+  const hasBoost = graph.boostIds && graph.boostIds.size > 0;
+  const scoredBoosted = hasBoost
+    ? R.applyGraphBoost(scored, graph.boostIds, manifestIdSet, 0.15)
+    : scored;
+  const normed = R.normalize(scoredBoosted);
+  const graphElapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
   if (normed.length === 0) {
-    return { tier: 'low', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'no_match' };
+    return { tier: 'low', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'no_match', graph_status: graph.status, graph_symbols: graph.symbols || [], elapsed_ms: graphElapsedMs };
   }
   const top = normed[0];
   const runnerUp = normed[1];
@@ -107,6 +129,9 @@ function dryRun(prompt, manifest, modeMap) {
     top3,
     margin,
     skipReason: null,
+    graph_status: graph.status,
+    graph_symbols: graph.symbols || [],
+    elapsed_ms: graphElapsedMs,
   };
 }
 
@@ -162,53 +187,103 @@ function evaluate(task, result) {
   return { ok, detail: parts.length ? parts.join('; ') : 'exact match' };
 }
 
+// --- isMain guard (D-16 / Wave 0 prerequisite) -----------------------------
+// Run the CLI entry only when this file is executed directly, not when
+// imported as a module by tests or the Phase-3 worker. Mirrors router.mjs
+// line 32 isMain pattern.
+const isMain = () => {
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1] || '').href;
+  } catch {
+    return false;
+  }
+};
+
 // --- main -----------------------------------------------------------------
 
-const manifest = R.loadManifest(MANIFEST);
-const modeMap = R.loadModeMap(MODE_MAP);
-const tasks = JSON.parse(readFileSync(CALIBRATION, 'utf8'));
+if (isMain()) {
+  const manifest = R.loadManifest(MANIFEST);
+  const modeMap = R.loadModeMap(MODE_MAP);
+  const tasks = JSON.parse(readFileSync(CALIBRATION, 'utf8'));
 
-if (!manifest) { console.error('FATAL: manifest missing at ' + MANIFEST); process.exit(2); }
-if (!modeMap) { console.error('FATAL: mode-map missing at ' + MODE_MAP); process.exit(2); }
-if (!Array.isArray(tasks) || tasks.length !== 10) {
-  console.error('FATAL: calibration-tasks.json must have 10 entries, got ' + (Array.isArray(tasks) ? tasks.length : 'non-array'));
-  process.exit(2);
-}
-
-console.log(`# Calibration dry-run — thresholds T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
-console.log(`# Manifest: ${manifest.skills ? manifest.skills.length : 0} skills, ${manifest.commands ? manifest.commands.length : 0} commands, ${manifest.agents ? manifest.agents.length : 0} agents`);
-console.log('');
-
-let rightCount = 0;
-const wrongHigh = [];
-for (const task of tasks) {
-  const result = dryRun(task.prompt, manifest, modeMap);
-  const { ok, detail } = evaluate(task, result);
-  if (ok) rightCount++;
-  if (!ok && result.tier === 'high') wrongHigh.push({ id: task.id, prompt: task.prompt, detail });
-
-  const top3Str = result.top3.length
-    ? result.top3.map((s) => `${s.name}=${s.norm}`).join(', ')
-    : '(no match)';
-  const modeStr = result.route && result.route.mode ? result.route.mode : (result.tier === 'trivial' ? 'trivial' : result.tier === 'user_explicit' ? 'user_explicit' : 'null');
-  const skillsStr = result.route && result.route.recommended_skills && result.route.recommended_skills.length
-    ? result.route.recommended_skills.join(',') : '';
-  const agentsStr = result.route && result.route.recommended_agents && result.route.recommended_agents.length
-    ? result.route.recommended_agents.join(',') : '';
-  const mark = ok ? 'OK ' : 'XX ';
-  console.log(`${mark}#${task.id} tier=${result.tier} mode=${modeStr} skills=[${skillsStr}] agents=[${agentsStr}] margin=${result.margin} top3=[${top3Str}]`);
-  console.log(`     right: mode=${task.right.mode || 'null'} skills=[${(task.right.skills || []).join(',')}] agents=[${(task.right.agents || []).join(',')}] status=${task.right.status}`);
-  console.log(`     ${detail}`);
-  console.log('');
-}
-
-console.log(`=== ${rightCount}/10 right ===`);
-if (wrongHigh.length) {
-  console.log('!! Wrong HIGH-confidence auto-routes (raise T_high per D-09):');
-  for (const w of wrongHigh) {
-    console.log(`   #${w.id} "${w.prompt}" — ${w.detail}`);
+  if (!manifest) { console.error('FATAL: manifest missing at ' + MANIFEST); throw new Error('manifest missing at ' + MANIFEST); }
+  if (!modeMap) { console.error('FATAL: mode-map missing at ' + MODE_MAP); throw new Error('mode-map missing at ' + MODE_MAP); }
+  if (!Array.isArray(tasks) || tasks.length < 13 || tasks.length > 15) {
+    console.error('FATAL: calibration-tasks.json must have 13-15 entries (10 Phase-1 originals + 3-5 Phase-2 codebase fixtures), got ' + (Array.isArray(tasks) ? tasks.length : 'non-array'));
+    throw new Error('calibration-tasks.json must have 13-15 entries, got ' + (Array.isArray(tasks) ? tasks.length : 'non-array'));
   }
-}
-console.log(`Thresholds: T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
 
-process.exit(rightCount >= 8 ? 0 : 1);
+  const originalCount = tasks.filter((t) => !t.codebase).length;
+  const codebaseCount = tasks.filter((t) => t.codebase === true).length;
+  const passThreshold = originalCount + 1; // D-16: at least 1 codebase fixture right
+
+  console.log(`# Calibration dry-run — thresholds T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
+  console.log(`# Manifest: ${manifest.skills ? manifest.skills.length : 0} skills, ${manifest.commands ? manifest.commands.length : 0} commands, ${manifest.agents ? manifest.agents.length : 0} agents`);
+  console.log(`# Fixtures: ${tasks.length} total (${originalCount} Phase-1 originals + ${codebaseCount} Phase-2 codebase); pass threshold = ${passThreshold} of ${tasks.length} (originalCount + 1)`);
+  console.log('');
+
+  let rightCount = 0;
+  let codebaseRightCount = 0;
+  const wrongHigh = [];
+  const codebaseMismatches = []; // graph_status_expected vs actual
+  for (const task of tasks) {
+    const result = dryRun(task.prompt, manifest, modeMap, task.cwd || process.cwd());
+    const { ok, detail } = evaluate(task, result);
+    if (ok) rightCount++;
+    if (ok && task.codebase === true) codebaseRightCount++;
+    if (!ok && result.tier === 'high') wrongHigh.push({ id: task.id, prompt: task.prompt, detail });
+
+    // Track graph_status_expected vs actual for codebase fixtures
+    if (task.codebase === true && task.graph_status_expected) {
+      const expected = task.graph_status_expected;
+      const actual = result.graph_status;
+      if (expected !== actual) {
+        codebaseMismatches.push({ id: task.id, expected, actual, prompt: task.prompt });
+      }
+    }
+
+    const top3Str = result.top3.length
+      ? result.top3.map((s) => `${s.name}=${s.norm}`).join(', ')
+      : '(no match)';
+    const modeStr = result.route && result.route.mode ? result.route.mode : (result.tier === 'trivial' ? 'trivial' : result.tier === 'user_explicit' ? 'user_explicit' : 'null');
+    const skillsStr = result.route && result.route.recommended_skills && result.route.recommended_skills.length
+      ? result.route.recommended_skills.join(',') : '';
+    const agentsStr = result.route && result.route.recommended_agents && result.route.recommended_agents.length
+      ? result.route.recommended_agents.join(',') : '';
+    const symbolCount = (result.graph_symbols || []).length;
+    const elapsed = Number((result.elapsed_ms || 0).toFixed(1));
+    const mark = ok ? 'OK ' : 'XX ';
+    const codebaseTag = task.codebase ? ' [codebase]' : '';
+    console.log(`${mark}#${task.id}${codebaseTag} tier=${result.tier} mode=${modeStr} skills=[${skillsStr}] agents=[${agentsStr}] margin=${result.margin} top3=[${top3Str}] graph=${result.graph_status} syms=${symbolCount} elapsed_ms=${elapsed}`);
+    console.log(`     right: mode=${task.right.mode || 'null'} skills=[${(task.right.skills || []).join(',')}] agents=[${(task.right.agents || []).join(',')}] status=${task.right.status} graph_status_expected=${task.graph_status_expected || 'n/a'}`);
+    console.log(`     ${detail}`);
+    console.log('');
+  }
+
+  console.log(`=== ${rightCount}/${tasks.length} right (threshold ${passThreshold}) ===`);
+  console.log(`=== Codebase subset: ${codebaseRightCount}/${codebaseCount} right (was 0/${codebaseCount} pre-Phase-2) ===`);
+  if (codebaseMismatches.length) {
+    console.log('!! graph_status mismatches (expected vs actual):');
+    for (const m of codebaseMismatches) {
+      console.log(`   #${m.id} expected=${m.expected} actual=${m.actual} prompt="${m.prompt}"`);
+    }
+  }
+  if (wrongHigh.length) {
+    console.log('!! Wrong HIGH-confidence auto-routes (raise T_high per D-09):');
+    for (const w of wrongHigh) {
+      console.log(`   #${w.id} "${w.prompt}" — ${w.detail}`);
+    }
+  }
+  console.log(`Thresholds: T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
+
+  process.exit(rightCount >= passThreshold ? 0 : 1);
+}
+
+// --- Named exports (D-16 DRY: Phase-3 worker imports these) ----------------
+// Re-exports of router.mjs scoring helpers (same fn identity — no re-impl).
+// loadManifest and loadModeMap are imported from router.mjs (R); we re-export
+// them so the worker can import the full calibration surface from one place.
+export const loadManifest = R.loadManifest;
+export const loadModeMap = R.loadModeMap;
+// Pure pipeline fns (already in scope; make importable).
+export { dryRun, evaluate };
