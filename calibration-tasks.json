@@ -68,9 +68,9 @@
       "agents": [],
       "tier": "high",
       "status": "route",
-      "completion_promise": "all tests pass",
+      "completion_promise": "they all pass",
       "max_iterations": 20,
-      "edge": "ralph two-gate POSITIVE — verbatim --completion-promise \"all tests pass\" extracted from prompt (D-15 quote-don't-synthesize)"
+      "edge": "ralph two-gate POSITIVE — verbatim --completion-promise \"they all pass\" extracted from prompt (D-15 quote-don't-synthesize)"
     }
   },
   {

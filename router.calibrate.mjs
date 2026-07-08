@@ -62,7 +62,7 @@ function dryRun(prompt, manifest, modeMap) {
     return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit_named' };
   }
   // Scoring
-  const corpus = R.buildCorpus(manifest);
+  const corpus = R.buildCorpus(manifest, modeMap);
   const queryTokens = R.tokenize(prompt);
   const scored = R.bm25Score(queryTokens, corpus);
   const normed = R.normalize(scored);
@@ -97,6 +97,7 @@ function dryRun(prompt, manifest, modeMap) {
   const guarded = R.applyGuards(route, prompt, manifest, modeMap, {
     queryTokens,
     thresholds: modeMap.thresholds,
+    autoTopScore: top.score,
   });
 
   return {

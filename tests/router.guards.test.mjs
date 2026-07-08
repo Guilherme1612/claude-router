@@ -248,14 +248,16 @@ test('GRD-04: prompt without any known name → no override', () => {
   assert.equal(r.override, false);
 });
 
-test('buildKnownNames: collects mode, slash form, id, skills, agents', () => {
+test('buildKnownNames: collects slash form + multi-token mode/id/skills/agents; drops bare single-word ids', () => {
   const known = buildKnownNames(fixtureModeMap());
-  assert.ok(known.has('gsd-debug'));
-  assert.ok(known.has('/gsd-debug'));
-  assert.ok(known.has('ralph-loop'));
+  assert.ok(known.has('gsd-debug'));      // multi-token mode (has '-')
+  assert.ok(known.has('/gsd-debug'));    // slash form always added
+  assert.ok(known.has('ralph-loop'));    // multi-token id
   assert.ok(known.has('/ralph-loop'));
-  assert.ok(known.has('debug')); // id
-  assert.ok(known.has('systematic-debugging')); // recommended_skill
+  assert.ok(known.has('systematic-debugging')); // multi-token recommended_skill
+  // Bare single-word ids/modes are deliberately dropped (Gap 3) so a common
+  // verb like "commit" in a routing prompt does not falsely trip user_explicit.
+  assert.equal(known.has('debug'), false, 'bare single-word id dropped');
 });
 
 // --- GRD-05: deny-rule paths filtered -------------------------------------
