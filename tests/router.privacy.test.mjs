@@ -46,12 +46,35 @@ test('privacy: no raw secret appears in any telemetry line', () => {
     };
     const line = JSON.stringify(entry);
     assert.ok(
-      !line.includes(secret),
+      !line.toLowerCase().includes(secret.toLowerCase()),
       `[${label}] raw secret "${secret}" appeared in telemetry line — redaction failed`
     );
-    // Also assert the redacted prompt has no secret substring
-    assert.ok(!redact(normalized).includes(secret), `[${label}] redact() leaked the secret`);
+    // Also assert the redacted prompt has no secret substring. Case-insensitive:
+    // redact() runs on the LOWERCASED normalized prompt, so the secret is
+    // lowercased before redaction. A case-sensitive .includes(secret) would
+    // pass on a case mismatch even when redaction failed (CR-02 false positive).
+    const redacted = redact(normalized);
+    assert.ok(
+      !redacted.toLowerCase().includes(secret.toLowerCase()),
+      `[${label}] redact() leaked the secret "${secret}" (normalized="${normalized}", redacted="${redacted}")`
+    );
   }
+});
+
+// --- (a.2) explicit lowercase AWS key is redacted before hashing (CR-02) ---
+// The normalized prompt is lowercased before redact(), so AKIA... becomes
+// akia... The case-sensitive SECRET_RE /AKIA[0-9A-Z]{16}/ misses it and the
+// 32+ char fallback misses 20-char AWS keys. This must NOT leak.
+test('privacy: lowercase AWS access key id (akia...) is redacted from normalized prompt (CR-02)', () => {
+  const prompt = 'deploy with aws key AKIAIOSFODNN7EXAMPLE in env';
+  const normalized = String(prompt).toLowerCase().replace(/\s+/g, ' ').trim();
+  // normalized contains "akiaiosfodnn7example" (20 chars) — the CR-02 bug shape
+  const redacted = redact(normalized);
+  assert.ok(
+    !redacted.toLowerCase().includes('akiaiosfodnn7example'),
+    `CR-02: lowercase akia key leaked into hash input — redacted="${redacted}"`
+  );
+  assert.ok(redacted.includes('[REDACTED]'), `CR-02: akia key was not replaced with [REDACTED] — redacted="${redacted}"`);
 });
 
 // --- (b) signature is stable under re-redaction -----------------------------
