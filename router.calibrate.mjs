@@ -143,12 +143,21 @@ function evaluate(task, result) {
   if (right.completion_promise) {
     promiseOk = route.completion_promise === right.completion_promise;
   }
-  const ok = modeOk && skillsOk && agentsOk && promiseOk;
+  // CR-01: a ralph-loop route must populate `task` from the prompt (not the
+  // literal "the task" placeholder) so the injected slash line is meaningful.
+  // Calibration gate catches regressions of the CR-01 placeholder bug.
+  let taskOk = true;
+  if (rightMode === 'ralph-loop') {
+    const t = route.task || '';
+    taskOk = t.length > 0 && t !== 'the task';
+  }
+  const ok = modeOk && skillsOk && agentsOk && promiseOk && taskOk;
   const parts = [];
   if (!modeOk) parts.push(`mode: got ${gotMode} want ${rightMode}${altMode ? ' or ' + altMode : ''}`);
   if (!skillsOk) parts.push(`skills: got ${JSON.stringify(route.recommended_skills)} want ${JSON.stringify(right.skills)}`);
   if (!agentsOk) parts.push(`agents: got ${JSON.stringify(route.recommended_agents)} want ${JSON.stringify(right.agents)}`);
   if (!promiseOk) parts.push(`completion_promise: got ${JSON.stringify(route.completion_promise)} want ${JSON.stringify(right.completion_promise)}`);
+  if (!taskOk) parts.push(`task: got ${JSON.stringify(route.task)} want non-placeholder derived from prompt`);
   if (result.guards_fired.length) parts.push(`guards: ${result.guards_fired.join(',')}`);
   return { ok, detail: parts.length ? parts.join('; ') : 'exact match' };
 }

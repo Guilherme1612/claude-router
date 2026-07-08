@@ -10,9 +10,42 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
-const { formatInjection, tokenCount, SENTINEL } = await import(HOOK);
+const { formatInjection, tokenCount, SENTINEL, applyGuards } = await import(HOOK);
 
 const SIG = 'abc12345';
+
+// --- CR-01: ralph-loop injection must NOT emit the literal "the task" placeholder ---
+// main() builds the route without a `task` field and applyGuards() GRD-03 sets
+// `completion_promise` but NOT `task`. The live path (no stubbed fixture) must
+// still derive a real task from the prompt so slashLine() does not fall back to
+// the literal "the task". This test exercises applyGuards → formatInjection
+// (the real pipeline pieces), NOT a stubbed route with `task` preset.
+test('CR-01: ralph-loop live path emits a real task, not the "the task" placeholder', () => {
+  const prompt = 'keep running tests until they all pass, max 20 tries';
+  // Route as main() constructs it — NO `task` field (the bug shape).
+  const route = {
+    mode: 'ralph-loop',
+    invoke_kind: 'slash',
+    tier: 'high',
+    recommended_skills: [],
+    recommended_agents: [],
+    args_hint: '"<task>" --completion-promise "<criteria>"',
+  };
+  const guarded = applyGuards(route, prompt, null, null, {});
+  assert.ok(guarded.route, 'GRD-03 must keep the route (verifiable promise present)');
+  assert.equal(guarded.route.completion_promise, 'they all pass');
+  const out = formatInjection(guarded.route, prompt, SIG);
+  assert.match(out, /Run \/ralph-loop "/, 'ralph-loop slash line present');
+  assert.ok(
+    !out.includes('"the task"'),
+    `CR-01: literal "the task" placeholder leaked into injection — out="${out}"`
+  );
+  // The real task must be derived from the prompt (tests/running) — not the promise.
+  assert.ok(
+    /Run \/ralph-loop ".*tests?/i.test(out) || /Run \/ralph-loop ".*running/i.test(out),
+    `CR-01: injected task should reference the prompt content — out="${out}"`
+  );
+});
 
 // --- slash × High ----------------------------------------------------------
 
