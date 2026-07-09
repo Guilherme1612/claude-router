@@ -1,20 +1,20 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-current_phase: 0
-status: Awaiting next milestone
-stopped_at: Phase 4 context gathered (--auto)
-last_updated: "2026-07-09T13:51:26.357Z"
+milestone: v1.1
+milestone_name: Inspectable Routing Control Layer
+current_phase: 05
+current_phase_name: route-coverage-expansion
+status: executing
+stopped_at: v1.1 milestone initialized
+last_updated: "2026-07-09T19:15:33Z"
 last_activity: 2026-07-09
-last_activity_desc: Milestone v1.0 completed and archived
+last_activity_desc: Phase 05 execution started
 progress:
-  total_phases: 4
-  completed_phases: 4
-  total_plans: 14
-  completed_plans: 14
-  percent: 100
-current_phase_name: Ancestor Reuse
+  total_phases: 6
+  completed_phases: 0
+  total_plans: 4
+  completed_plans: 1
+  percent: 25
 ---
 
 # STATE: Claude Router
@@ -30,14 +30,14 @@ current_phase_name: Ancestor Reuse
 
 ## Current Position
 
-Phase: Milestone v1.0 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-09 — Milestone v1.0 completed and archived
+Phase: 05 (route-coverage-expansion) — EXECUTING
+Plan: 2 of 4
+Status: Executing Phase 05
+Last activity: 2026-07-09 — Completed plan 05-01 inventory coverage and target validation test scaffold
 
 ## Performance Metrics
 
-- **Phases complete:** 0 / 4
+- **Phases complete:** 0 / 6
 - **Requirements satisfied:** 30 / 30 (v1) — HOOK-01..04, INJ-05, COX-01, MAN-01, MAN-02 (Plan 01-01) + RTE-01..07, GRF-01 (Plan 01-02) + INJ-01..04, INJ-06, GRD-01..05 (Plan 01-03) + TEL-01..03, VRF-01..02 (Plan 01-04)
 - **Plans executed:** 5 (01-01, 01-02, 01-03, 01-04, 03-02) — Plan 03-02 wires the 12 evolve primitives (Plan 03-01) into both the hot path and a new worker main(). 33 new tests added; full suite 284/286 (2 pre-existing failures unrelated).
 
@@ -79,24 +79,24 @@ Last activity: 2026-07-09 — Milestone v1.0 completed and archived
 
 ### TODOs
 
-- [ ] Plan Phase 1 (decompose into executable plans respecting the 7-step sub-sequencing)
-- [ ] Phase 1 research flags: read `caveman-mode-tracker.js` (sub-step 2 sentinel), mode-map draft + user review (sub-step 3), 10-task right-pick sign-off (sub-step 6)
-- [ ] Phase 2 research: graphify query API + `graphify-out/` schema + token-budget folding
-- [ ] Phase 3 design: outcome-feedback time window; auto-apply vs human-approve split for map mutations
+- [ ] Plan Phase 5: Route Coverage Expansion.
+- [x] Audit full inventory manifest against `mode-map.json` before adding coverage.
+- [x] Add tests for direct `agent` and `warn` route entries.
+- [ ] Preserve v1.0 calibration and hot-path safety while expanding codebase-task coverage.
 
 ### Blockers
 
-- **Plan 01-04 Task 3 — calibration gate at 3/10 (Rule 4 architectural):** `mode-map.json signal_patterns` are NOT wired into the BM25 scoring pipeline (`grep -n "signal_patterns" ~/.claude/hooks/router.mjs` → 0 matches; `buildCorpus` scores manifest descriptions only), so 6 of 7 failing route tasks have the wrong manifest entry as top and threshold tuning cannot redirect them. mode-map entry ids (`debug`/`explore`/`secure-phase`/`ui-phase`) do not match the manifest skill names that would score top once signal_patterns are wired (`gsd-debug`/`gsd-explore`/`gsd-secure-phase`/`gsd-ui-phase`) → `mmEntry` returns null → mode null. `explicitOverrideDetect` fires on generic single-word ids like `commit` → #2 false `user_explicit`. Fixing requires `router.mjs` code changes the plan's Task 3 prohibits ("data edit, no code change"). See `01-04-SUMMARY.md` → "Task 3 Blocker" for the full diagnosis + 3 options (recommended: Option A — wire signal_patterns into `buildCorpus` + realign entry ids + refine `buildKnownNames`). Awaiting user decision.
+(None for v1.1 planning.)
 
 ## Session Continuity
 
-**Last session:** 2026-07-09T08:32:35.287Z
-**Stopped at:** Phase 4 context gathered (--auto)
-**Resume file:** .planning/phases/04-ancestor-reuse/04-CONTEXT.md
+**Last session:** 2026-07-09T19:15:33Z
+**Stopped at:** Completed 05-01-PLAN.md
+**Resume file:** .planning/ROADMAP.md
 
-- **Last action:** Continued Plan 01-04 Task 3 — built `router.calibrate.mjs` (dry-run harness importing the SAME pipeline fns as router.mjs, DRY), ran calibration against the 10 user-approved right-picks: 3/10 (OK #7/#8/#10). Diagnosed that threshold tuning alone cannot reach ≥8/10 because `mode-map.json signal_patterns` are not wired into BM25 scoring (router.mjs gap vs plan intent), mode-map entry ids are misaligned with manifest skill names, and explicitOverrideDetect fires on generic ids. Committed harness as ab733c3 (no router.mjs / mode-map.json changes — surfaced as Rule 4). 159/159 tests still pass.
-- **Next action:** User picks an option for the Task 3 blocker (recommended: Option A — wire signal_patterns into `buildCorpus(manifest, modeMap)` + realign mode-map entry ids to `gsd-*` + refine `buildKnownNames` to not add bare single-word ids). Then implement, re-run tests, iterate thresholds to ≥8/10, commit router.mjs fix, mark 01-04 complete, advance STATE to 4/5 (80%), mark TEL-01/02/03 + VRF-01/02 done.
-- **Open questions carried forward:** exact `T_high`/`T_low`/`M` thresholds (blocked on the code fix); whether Option A breaks any of the 159 existing route-asserting tests (to be assessed after the change); Phase 3 outcome-feedback time window; Phase 3 auto-apply vs human-approve split.
+- **Last action:** Completed plan 05-01 with inventory coverage audit and route-target validation tests.
+- **Next action:** Continue Phase 05 with 05-02 mode-map route cluster expansion.
+- **Open questions carried forward:** exact route cluster boundaries after manifest audit; codebase calibration target threshold beyond "materially better than 2/5"; final command surface naming if scripts rather than a single `router` CLI are used.
 
 ---
 
@@ -108,7 +108,8 @@ Last activity: 2026-07-09 — Milestone v1.0 completed and archived
 |-------|------|----------|-------|
 | Phase 01 P05 | 35min | 2 tasks | 1 files |
 | Phase 03 P02 | ~45min | 3 tasks | 6 files (router.mjs + router.evolve.mjs + 4 test files) |
+| Phase 05 P01 | ~15min | 2 tasks | 2 files |
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Continue Phase 05 with `05-02-PLAN.md`.
