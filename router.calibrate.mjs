@@ -294,20 +294,27 @@ if (isMain()) {
 
   if (!manifest) { console.error('FATAL: manifest missing at ' + MANIFEST); throw new Error('manifest missing at ' + MANIFEST); }
   if (!modeMap) { console.error('FATAL: mode-map missing at ' + MODE_MAP); throw new Error('mode-map missing at ' + MODE_MAP); }
-  if (!Array.isArray(tasks) || tasks.length < 16 || tasks.length > 20) {
-    console.error('FATAL: calibration-tasks.json must have 16-20 entries (10 Phase-1 originals + 5 Phase-2 codebase + 3-5 Phase-3 evolution), got ' + (Array.isArray(tasks) ? tasks.length : 'non-array'));
-    throw new Error('calibration-tasks.json must have 16-20 entries, got ' + (Array.isArray(tasks) ? tasks.length : 'non-array'));
+  if (!Array.isArray(tasks)) {
+    console.error('FATAL: calibration-tasks.json must be an array');
+    throw new Error('calibration-tasks.json must be an array');
   }
 
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution).length;
+  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
+  if (tasks.length < 16 || tasks.length > 32 || originalCount !== 10 || codebaseCount < 3 || codebaseCount > 5 || evolutionCount < 3 || evolutionCount > 5 || phase05Count < 9) {
+    console.error(`FATAL: calibration-tasks.json expected 10 originals, 3-5 codebase, 3-5 evolution, and >=9 Phase-05 COV fixtures; got total=${tasks.length} originals=${originalCount} codebase=${codebaseCount} evolution=${evolutionCount} phase05=${phase05Count}`);
+    throw new Error(`calibration-tasks.json fixture counts invalid: total=${tasks.length} originals=${originalCount} codebase=${codebaseCount} evolution=${evolutionCount} phase05=${phase05Count}`);
+  }
   // Phase 3 (D-13, D-25): pass threshold = originalCount + 1 (codebase) + 1 (evolution) = N + 2
-  const passThreshold = originalCount + (codebaseCount > 0 ? 1 : 0) + (evolutionCount > 0 ? 1 : 0);
+  // Phase 5: every added COV fixture is a standing route-coverage regression
+  // fixture, so the threshold also includes the full Phase-05 subset.
+  const passThreshold = originalCount + (codebaseCount > 0 ? 1 : 0) + (evolutionCount > 0 ? 1 : 0) + phase05Count;
 
   console.log(`# Calibration dry-run — thresholds T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
   console.log(`# Manifest: ${manifest.skills ? manifest.skills.length : 0} skills, ${manifest.commands ? manifest.commands.length : 0} commands, ${manifest.agents ? manifest.agents.length : 0} agents`);
-  console.log(`# Fixtures: ${tasks.length} total (${originalCount} Phase-1 originals + ${codebaseCount} Phase-2 codebase + ${evolutionCount} Phase-3 evolution); pass threshold = ${passThreshold} of ${tasks.length} (originalCount + 1 codebase + 1 evolution)`);
+  console.log(`# Fixtures: ${tasks.length} total (${originalCount} Phase-1 originals + ${codebaseCount} Phase-2 codebase + ${evolutionCount} Phase-3 evolution + ${phase05Count} Phase-05 route coverage); pass threshold = ${passThreshold} of ${tasks.length} (originalCount + 1 codebase + 1 evolution + all Phase-05 coverage)`);
   console.log('');
 
   let rightCount = 0;

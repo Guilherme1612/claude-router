@@ -257,5 +257,113 @@
       "status": "pass_through",
       "edge": "no lexical match in prompt ('continue the work' too generic) + tier=low (no_match) — pass-through expected; mock's good/bad labels are orthogonal to the fixture's rightness (this fixture validates tier=low + mode=null, not outcome correlation)"
     }
+  },
+  {
+    "id": 19,
+    "prompt": "bug crash stack trace not working exception regression reproduce diagnose the failure",
+    "right": {
+      "mode": "/gsd-debug",
+      "skills": ["systematic-debugging"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-03 debug/bugfix cluster - Phase 05 gsd-debug regression fixture"
+    }
+  },
+  {
+    "id": 20,
+    "prompt": "add tests for write tests for generate test coverage add regression tests create unit tests for this behavior",
+    "right": {
+      "mode": "/gsd-add-tests",
+      "skills": ["test-driven-development"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-04 tests/test-generation cluster - Phase 05 gsd-add-tests fixture"
+    }
+  },
+  {
+    "id": 21,
+    "prompt": "review changed code code review this audit this diff find bugs in this patch review for regressions",
+    "right": {
+      "mode": "/gsd-code-review",
+      "skills": ["requesting-code-review"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-05 review/audit cluster - Phase 05 gsd-code-review fixture"
+    }
+  },
+  {
+    "id": 22,
+    "prompt": "review the ui audit the interface visual audit polish the design ui review pass check responsive layout",
+    "right": {
+      "mode": "/gsd-ui-review",
+      "skills": ["frontend-design"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-06 UI/design cluster - Phase 05 gsd-ui-review fixture"
+    }
+  },
+  {
+    "id": 23,
+    "prompt": "commit push pr open a pr from my changes commit and push and open a pr prepare pull request",
+    "right": {
+      "mode": "/commit-push-pr",
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-07 GitHub/PR/CI cluster - Phase 05 commit-push-pr fixture"
+    }
+  },
+  {
+    "id": 24,
+    "prompt": "map this codebase build the code graph graphify this repo inspect code relationships trace file dependencies explain the architecture graph",
+    "right": {
+      "mode": "/gsd-graphify",
+      "skills": ["graphify"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-08 Graphify/codebase-understanding cluster - Phase 05 gsd-graphify fixture"
+    }
+  },
+  {
+    "id": 25,
+    "prompt": "write the spec for define requirements for clarify what this phase delivers create a phase spec spec out this work",
+    "right": {
+      "mode": "/gsd-spec-phase",
+      "skills": ["writing-plans"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-09 docs/spec/planning cluster - Phase 05 gsd-spec-phase fixture"
+    }
+  },
+  {
+    "id": 26,
+    "prompt": "spawn codebase mapper dispatch codebase mapper run codebase mapper agent analyze architecture with an agent",
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": ["gsd-codebase-mapper"],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-10 COV-12 direct agent dispatch cluster - Phase 05 safe agent fixture"
+    }
+  },
+  {
+    "id": 27,
+    "prompt": "dispatch gsd planner spawn gsd planner agent run planner agent directly use gsd planner subagent",
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "COV-11 COV-12 missing-MCP warn cluster - Phase 05 non-dispatching warn fixture; tests/router.direct-agent-warn.test.mjs owns warning-string assertion"
+    }
   }
 ]
