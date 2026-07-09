@@ -37,6 +37,12 @@ test('cacheKey: changing manifestMtime produces a different key (RTE-07 invalida
   assert.notEqual(a, b);
 });
 
+test('cacheKey: changing surfaceMtime produces a different key (surface profile invalidation)', () => {
+  const a = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000);
+  const b = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4001);
+  assert.notEqual(a, b);
+});
+
 test('cacheKey: changing normalizedPrompt produces a different key', () => {
   const a = cacheKey('fix bug', ['fix'], 1000, 2000);
   const b = cacheKey('ship pr', ['fix'], 1000, 2000);
