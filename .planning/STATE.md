@@ -6,15 +6,15 @@ current_phase: 05
 current_phase_name: route-coverage-expansion
 status: executing
 stopped_at: v1.1 milestone initialized
-last_updated: "2026-07-09T19:15:33Z"
+last_updated: "2026-07-09T19:27:04Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 3
+  percent: 75
 ---
 
 # STATE: Claude Router
@@ -31,9 +31,9 @@ progress:
 ## Current Position
 
 Phase: 05 (route-coverage-expansion) — EXECUTING
-Plan: 2 of 4
+Plan: 4 of 4
 Status: Executing Phase 05
-Last activity: 2026-07-09 — Completed plan 05-01 inventory coverage and target validation test scaffold
+Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and warning propagation
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Last activity: 2026-07-09 — Completed plan 05-01 inventory coverage and target
 - **Plan 01-03: GRD-05 deny-path regex** requires a non-alphanumeric boundary on both sides of `.env`/`.secrets` so `.environment`/`.envoy` do NOT trigger; `settings.permissions.deny` entries matched as literal substrings with glob markers stripped. Deny wins precedence over GRD-01 demote (no signature logged either — Pitfall 8 belt-and-braces).
 - **Plan 01-03: Token-cap warn-truncation fallback** uses a 2-token safety margin so a 2000-char warning still lands ≤500 tokens via the ~4-chars-per-token approximation.
 - **Plan 01-03: formatInjection block layout** — `\n\n` prepend → open sentinel with mode/tier/sig metadata → `Reasoning: <one sentence>` → per-invoke_kind instruction line(s) → close sentinel. Low tier emits nothing (true pass-through, no sentinel). Medium tier has NO `Run /` instruction line (Pitfall 2 — a slash at Medium would auto-fire when the model reads it).
+- **Plan 05-03: direct warn entries score as mode-map-owned corpus entries** because they deliberately have no dispatch target to associate with a manifest skill or agent. The route object copies `mmEntry.warning` in both the live hook and calibration dry-run so custom warning text reaches injection.
 - **4 phases, sequential** derived from requirements (traceability table + idea doc). Phase 1 is load-bearing and large but coherent — one closed loop; not safely splittable. Internal 7-step sub-sequencing captured as a phase note, NOT as separable shippable phases.
 - **Hook-contract correction (load-bearing):** `UserPromptSubmit` can ONLY append `additionalContext` (model-read). Harness does NOT auto-run appended slashes. The MODEL executes every channel. "High-confidence auto-invoke" = a strong model instruction, not harness execution. Reflected in all phase goals + success criteria.
 - **Phase 3 is usage-gated**, not Phase-2-gated: sequence after a ~2-week telemetry window, not strictly after Phase 2.
@@ -90,12 +91,12 @@ Last activity: 2026-07-09 — Completed plan 05-01 inventory coverage and target
 
 ## Session Continuity
 
-**Last session:** 2026-07-09T19:15:33Z
-**Stopped at:** Completed 05-01-PLAN.md
+**Last session:** 2026-07-09T19:27:04Z
+**Stopped at:** Completed 05-03-PLAN.md
 **Resume file:** .planning/ROADMAP.md
 
-- **Last action:** Completed plan 05-01 with inventory coverage audit and route-target validation tests.
-- **Next action:** Continue Phase 05 with 05-02 mode-map route cluster expansion.
+- **Last action:** Completed plan 05-03 with direct agent/warn route tests and custom warning propagation.
+- **Next action:** Continue Phase 05 with 05-04 calibration fixtures and regression gates.
 - **Open questions carried forward:** exact route cluster boundaries after manifest audit; codebase calibration target threshold beyond "materially better than 2/5"; final command surface naming if scripts rather than a single `router` CLI are used.
 
 ---
@@ -109,7 +110,8 @@ Last activity: 2026-07-09 — Completed plan 05-01 inventory coverage and target
 | Phase 01 P05 | 35min | 2 tasks | 1 files |
 | Phase 03 P02 | ~45min | 3 tasks | 6 files (router.mjs + router.evolve.mjs + 4 test files) |
 | Phase 05 P01 | ~15min | 2 tasks | 2 files |
+| Phase 05 P03 | ~12min | 2 tasks | 3 files |
 
 ## Operator Next Steps
 
-- Continue Phase 05 with `05-02-PLAN.md`.
+- Continue Phase 05 with `05-04-PLAN.md`.

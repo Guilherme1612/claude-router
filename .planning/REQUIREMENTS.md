@@ -16,7 +16,7 @@
 - [ ] **COV-07**: Router has route clusters for GitHub, PR, and CI workflows.
 - [ ] **COV-08**: Router has route clusters for Graphify and codebase-understanding work.
 - [ ] **COV-09**: Router has route clusters for docs, spec, and planning workflows.
-- [ ] **COV-10**: Router has route clusters for agent-dispatch workflows.
+- [x] **COV-10**: Router has route clusters for agent-dispatch workflows.
 - [x] **COV-11**: Router has missing-MCP warning flows that use `warn` route entries rather than auto-dispatching blocked agents.
 - [x] **COV-12**: Router supports direct `agent` and `warn` route entries where those targets are the correct execution channel.
 
@@ -94,7 +94,7 @@
 | COV-07 | Phase 5 | Pending |
 | COV-08 | Phase 5 | Pending |
 | COV-09 | Phase 5 | Pending |
-| COV-10 | Phase 5 | Pending |
+| COV-10 | Phase 5 | Complete |
 | COV-11 | Phase 5 | Complete |
 | COV-12 | Phase 5 | Complete |
 | INS-01 | Phase 6 | Pending |
