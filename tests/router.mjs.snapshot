@@ -1,0 +1,1539 @@
+// ~/.claude/hooks/router.mjs — always-on UserPromptSubmit hook skeleton.
+//
+// Caveman coexistence boundary (D-12):
+//   caveman's plugin-scoped `caveman-mode-tracker.js` and this router both fire
+//   in parallel as separate `UserPromptSubmit` hooks. Their `additionalContext`
+//   strings accumulate (Claude receives both). Router owns "what should run";
+//   caveman owns "what mode is active". Router NEVER reads, parses, modifies,
+//   or strips caveman's output block. The router sentinel
+//   `<!-- router-inject -->` is lexically distinct from caveman's plain-text
+//   output (caveman emits no HTML comments — confirmed by reading
+//   caveman-mode-tracker.js).
+//
+// Fail-open policy (D-02):
+//   On any internal throw, exit 0 with no additionalContext (the original prompt
+//   passes through unchanged). NEVER exit code 2, NEVER emit a block decision — that
+//   would erase the user's prompt. Each pipeline step degrades independently;
+//   the outer try/catch is the belt-and-braces backstop.
+//
+// This plan (01-01) ships the fail-open skeleton only — no BM25, no mode-map,
+// no injection, no cache, no telemetry. Subsequent plans slot routing logic
+// into a pipeline that is already provably non-blocking and coexistence-safe.
+
+import { readFileSync, writeFileSync, existsSync, statSync, renameSync, appendFileSync, chmodSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+
+// ESM->CJS bridge for the gsd-surface primitive lazy-required from applySurfaceFilter.
+// Resolves relative to this file (router.mjs), not process.cwd() — safe across
+// symlink layouts. The three CJS modules are required lazily on first use of
+// applySurfaceFilter (Pitfall 3 / D-04). Sentinel `false` = unimportable.
+const _require = createRequire(import.meta.url);
+let _surfaceMod = null;
+let _clustersMod = null;
+let _registryMod = null;
+
+// Run the entry point only when this file is executed directly (as a hook),
+// not when imported as a module by tests. Without this guard, `await import()`
+// in a test would attach stdin listeners that never close and hang the runner.
+const isMain = () => {
+  try {
+    return import.meta.url === pathToFileURL(process.argv[1]).href;
+  } catch {
+    return false;
+  }
+};
+
+// --- Constants (no /Users/guilherme hardcoding — use os.homedir()) ---------
+const ROUTER_DIR = join(homedir(), '.claude', 'router');
+const MANIFEST = join(ROUTER_DIR, 'claude-inventory-manifest.json');
+const BUILD_PY = join(ROUTER_DIR, 'build_manifest.py');
+const CACHE = join(ROUTER_DIR, 'cache.json');
+const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
+const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
+const WEIGHTS = join(ROUTER_DIR, 'weights.json');
+// Phase 3 / EVO-02/EVO-03 evolution worker plumbing.
+const EVOLUTION_STATE = join(ROUTER_DIR, 'evolution-state.json');
+const TRIGGER = join(ROUTER_DIR, '.evolve-trigger');
+const HOOKS_DIR = join(homedir(), '.claude', 'hooks');
+const WORKER_PATH = join(HOOKS_DIR, 'router.evolve.mjs');
+const EVOLVE_TRIGGER_N = 200;
+
+// Phase 4 / ANC-01: surface filter plumbing. RUNTIME_CONFIG_DIR is the home of
+// the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
+// SURFACE_FILE is the cache-key path (mtime only — never read directly; the
+// router always goes through surface.cjs:resolveSurface per D-03).
+const RUNTIME_CONFIG_DIR = join(homedir(), '.claude');
+const SURFACE_FILE = join(RUNTIME_CONFIG_DIR, '.gsd-surface.json');
+
+// Lazy require getters. Each caches its result (or the sentinel `false`) so
+// the per-prompt cost is one Map lookup after the first call. surface.cjs and
+// clusters.cjs are required together (both mandatory for resolveSurface);
+// capability-registry.cjs is optional (the helper still works without it).
+function getSurfaceMod() {
+  if (_surfaceMod === null) {
+    try { _surfaceMod = _require('gsd-core/bin/lib/surface.cjs'); }
+    catch (_) { _surfaceMod = false; }
+  }
+  return _surfaceMod || null;
+}
+function getClustersMod() {
+  if (_clustersMod === null) {
+    try { _clustersMod = _require('gsd-core/bin/lib/clusters.cjs'); }
+    catch (_) { _clustersMod = false; }
+  }
+  return _clustersMod || null;
+}
+function getRegistryMod() {
+  if (_registryMod === null) {
+    try { _registryMod = _require('gsd-core/bin/lib/capability-registry.cjs'); }
+    catch (_) { _registryMod = false; }
+  }
+  return _registryMod || null;
+}
+
+export const SENTINEL = '<!-- router-inject -->';
+
+const STALE_MS = 7 * 24 * 3600 * 1000; // 7 days
+const STALE_REMINDER =
+  '<!-- router: manifest may be stale — run: python3 ~/.claude/router/build_manifest.py -->';
+
+const TRIVIAL = new Set([
+  'thanks', 'ok', 'great', 'cool', 'nice', 'yes', 'no', 'done', 'sgtm',
+]);
+
+// --- Pure helpers (exported for direct unit testing) ----------------------
+
+// True for empty/whitespace-only prompts or a small set of trivial phrases.
+// Used as a pass-through short-circuit BEFORE any routing.
+export function trivialPromptDetect(prompt) {
+  if (typeof prompt !== 'string') return true;
+  const trimmed = prompt.trim();
+  if (trimmed === '') return true;
+  return TRIVIAL.has(trimmed.toLowerCase());
+}
+
+// Explicit user override (GRD-04). The /-prefix half ships in Plan 01; the
+// named-skill/mode half is completed here in Plan 03 (it needs mode-map's
+// known-names list). Returns {override:true, reason:"user_explicit"} when the
+// prompt starts with `/` after trim OR contains a known mode-map skill/mode
+// name as a whole-word token. Cheap, authoritative, runs BEFORE any routing.
+export function explicitOverrideDetect(prompt, knownNames = null) {
+  if (typeof prompt !== 'string') return { override: false };
+  const trimmed = prompt.trim();
+  if (trimmed.startsWith('/')) {
+    return { override: true, reason: 'user_explicit' };
+  }
+  if (knownNames && knownNames.size) {
+    for (const name of knownNames) {
+      if (!name) continue;
+      const re = new RegExp(`(^|[^A-Za-z0-9/_-])${escapeRegex(name)}($|[^A-Za-z0-9/_-])`);
+      if (re.test(prompt)) {
+        return { override: true, reason: 'user_explicit', matched: name };
+      }
+    }
+  }
+  return { override: false };
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Build the known-names set from a mode-map (GRD-04 named-name half).
+// Collects: each entry's /<mode> slash form (always), plus multi-token names
+// (id, mode, recommended_skills/agents that contain a hyphen or underscore).
+// Bare single-word ids/modes (e.g. "commit", "ship", "quick", "undo") are
+// deliberately EXCLUDED so a common English verb appearing naturally in a
+// routing prompt does not falsely trip user_explicit (Task 3 blocker Gap 3 —
+// e.g. "commit my staged changes and open a PR" must route, not pass-through).
+// The slash form /<mode> is always added so an explicit "/gsd-debug" still fires.
+function isMultiToken(s) {
+  return /[-_]/.test(String(s || ''));
+}
+export function buildKnownNames(modeMap) {
+  const set = new Set();
+  if (!modeMap || !Array.isArray(modeMap.entries)) return set;
+  for (const e of modeMap.entries) {
+    if (e.mode) {
+      set.add(`/${e.mode}`); // slash form always — explicit "/gsd-debug" must fire
+      if (isMultiToken(e.mode)) set.add(e.mode); // bare multi-token mode name
+    }
+    if (e.id && isMultiToken(e.id)) set.add(e.id); // drop bare single-word ids
+    for (const s of (e.recommended_skills || [])) if (s && isMultiToken(s)) set.add(s);
+    for (const a of (e.recommended_agents || [])) if (a && isMultiToken(a)) set.add(a);
+  }
+  return set;
+}
+
+// Re-entry dedupe (INJ-05). Returns true iff the exact router sentinel
+// `<!-- router-inject -->` is a substring of the prompt. Scans ONLY for the
+// exact sentinel — never for arbitrary HTML comments (would mis-detect).
+// Called at the START of formatInjection in later plans; this plan ships it as
+// a pure exported helper so Plan 02/03 can wire it in.
+export function sentinelScan(prompt) {
+  if (typeof prompt !== 'string') return false;
+  return prompt.includes(SENTINEL);
+}
+
+// Manifest freshness verdict (D-19 / MAN-01 / MAN-02).
+//   manifest_missing -> pass-through, no reminder
+//   stale           -> pass-through + one-line HTML-comment reminder
+//                       (no slash, so the model cannot auto-invoke it — D-01)
+//   fresh           -> no reminder
+// Accepts optional path args so tests can run against temp dirs without
+// touching the real manifest on disk.
+export function checkFreshness(manifestPath = MANIFEST, buildPyPath = BUILD_PY) {
+  try {
+    if (!existsSync(manifestPath)) {
+      return { status: 'manifest_missing' };
+    }
+    const manifestMtime = statSync(manifestPath).mtimeMs;
+    const buildPyMtime = existsSync(buildPyPath) ? statSync(buildPyPath).mtimeMs : 0;
+    const now = Date.now();
+    const ageIsOld = now - manifestMtime > STALE_MS;
+    const builderNewer = buildPyMtime > manifestMtime;
+    if (ageIsOld || builderNewer) {
+      return { status: 'stale', reminder: STALE_REMINDER };
+    }
+    return { status: 'fresh' };
+  } catch {
+    return { status: 'error' };
+  }
+}
+
+// --- stdin reader (caveman pattern: broken pipe -> exit 0, never throw) ---
+
+function readStdin(onDone) {
+  let input = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (c) => { input += c; });
+  process.stdin.on('error', () => process.exit(0)); // broken pipe -> pass-through
+  process.stdin.on('end', () => onDone(input));
+}
+
+// --- Wave 2: scoring / decision pipeline (BM25 + cache + graphify) --------
+// Plan 01-02: scoring/decision half. The route is computed but NOT yet emitted
+// as additionalContext — Plan 03 adds formatInjection. main() returns
+// pass-through (no additionalContext) until then. Tests exercise the exported
+// pure functions directly.
+
+// Tokenizer (RTE-02/D-04, §3 STOP set). Lowercase → split on non-alphanumerics
+// → drop stop words + 1-char tokens.
+const STOP = new Set([
+  'the', 'a', 'an', 'and', 'or', 'to', 'of', 'in', 'for', 'on', 'with',
+  'is', 'are', 'be', 'by', 'at', 'it', 'this', 'that', 'from', 'as',
+  'your', 'you', 'i', 'via', 'using', 'use',
+]);
+
+export function tokenize(text) {
+  return String(text || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 1 && !STOP.has(t));
+}
+
+// Load the manifest JSON; on any throw return null (caller passes through).
+export function loadManifest(path = MANIFEST) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Load mode-map JSON; on any throw return null.
+export function loadModeMap(path = MODE_MAP) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+// Phase 3 / EVO-01: weighted BM25 (D-08/D-09/D-11). Fail-open: returns null on any error.
+export function loadWeights(path = WEIGHTS) {
+  try {
+    if (!existsSync(path)) return null;
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    if (!parsed || typeof parsed !== 'object') return null;
+    // Accept both v1 (empty weights, no blend) and v2 (full schema). Refuse v3+ (forward-incompatible).
+    if (parsed.schema_version && parsed.schema_version > 2) return null;
+    if (!parsed.weights || typeof parsed.weights !== 'object') {
+      parsed.weights = {};
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+// LOCKED 3-ARG SIGNATURE (RESEARCH §3 / D-09): `applyWeightBlend(normed, weights, blend)`.
+// The modeMap is resolved inside the function via a module-level reference
+// (MODE_MAP) so the per-prompt hot path does not need to pass it explicitly.
+// (BLOCKER 3 fix: 4-arg signature was an over-eager refinement; the 3-arg
+// signature is the locked decision in 03-RESEARCH.md §3.)
+let _modeMapForBlend = null; // module-level; updated once per hook invocation
+export function setModeMapForBlend(modeMap) { _modeMapForBlend = modeMap; }
+
+export function applyWeightBlend(normed, weights, blend = 0.15) {
+  if (!Array.isArray(normed) || !weights || !weights.weights) return normed;
+  const weightsMap = weights.weights;
+  const mmById = new Map();
+  if (_modeMapForBlend && Array.isArray(_modeMapForBlend.entries)) {
+    for (const e of _modeMapForBlend.entries) {
+      if (e && e.id) mmById.set(e.id, e);
+    }
+  }
+  return normed.map(n => {
+    const entryId = n.entry && n.entry.id;
+    const w = entryId && weightsMap[entryId];
+    if (!w) return { ...n };
+    const mmEntry = mmById.get(entryId);
+    if (mmEntry && mmEntry.invoke_kind === 'warn') return { ...n };  // D-12: no weights for warn
+    const newNorm = (1 - blend) * (n.norm || 0) + blend * (typeof w.score === 'number' ? w.score : 0);
+    return { ...n, norm: newNorm, weight_applied: w.score };
+  });
+}
+
+// Build the matchable corpus (RTE-01/D-05/§3). Corpus = skills (scope!=="project")
+// + plugin_skills (no scope field) + agents_store_skills (scope!=="project" AND
+// scope!=="agents-store (not globally symlinked)") + agents + commands. Hooks
+// EXCLUDED (no description). Each corpus entry carries the token frequency Map,
+// document length, and original manifest entry. Name tokens are weighted 3×
+// (concatenated 3 times into the document text before tokenizing) so name hits
+// dominate — cheap field-boost without BM25F. When `summary` is absent (commands,
+// plugin_skills), fall back to name+description.
+export function buildCorpus(manifest, modeMap = null) {
+  if (!manifest || typeof manifest !== 'object') return [];
+  // Pre-index mode-map entries by the manifest entry names they map to, so each
+  // manifest entry's associated mode-map signal_patterns can be appended to its
+  // BM25 document text. Association: mode-map entry whose id, mode, or
+  // recommended_skills/agents contains the manifest entry's name (case-insensitive).
+  // When modeMap is null/absent (e.g. unit tests calling buildCorpus(manifest)),
+  // no signal_patterns are appended → identical v1 behavior (159 tests stay green).
+  const mmByName = new Map();
+  if (modeMap && Array.isArray(modeMap.entries)) {
+    for (const me of modeMap.entries) {
+      const candidates = new Set();
+      if (me.id) candidates.add(String(me.id).toLowerCase());
+      if (me.mode) candidates.add(String(me.mode).toLowerCase());
+      for (const s of (me.recommended_skills || [])) if (s) candidates.add(String(s).toLowerCase());
+      for (const a of (me.recommended_agents || [])) if (a) candidates.add(String(a).toLowerCase());
+      const sp = Array.isArray(me.signal_patterns) ? me.signal_patterns : [];
+      for (const c of candidates) {
+        if (!mmByName.has(c)) mmByName.set(c, []);
+        mmByName.get(c).push(...sp);
+      }
+    }
+  }
+  const out = [];
+  const push = (e) => {
+    if (!e || !e.name) return;
+    const name = String(e.name || '');
+    const desc = String(e.description || '');
+    const summary = e.summary ? String(e.summary) : `${name} ${desc}`;
+    // signal_patterns from the associated mode-map entry (if any) — appended so
+    // signal tokens become part of the BM25 doc without changing name/desc/summary.
+    const sigs = mmByName.get(name.toLowerCase()) || [];
+    const sigText = sigs.length ? ' ' + sigs.join(' ') : '';
+    // name weighted 3× → concatenate name three times before tokenizing the rest
+    const docText = `${name} ${name} ${name} ${desc} ${summary}${sigText}`;
+    const toks = tokenize(docText);
+    const tf = new Map();
+    for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
+    out.push({ entry: e, name, tokens: tf, dl: toks.length });
+  };
+  const skills = Array.isArray(manifest.skills) ? manifest.skills : [];
+  for (const e of skills) {
+    if (e && e.scope === 'project') continue; // GRD-02
+    push(e);
+  }
+  const pluginSkills = Array.isArray(manifest.plugin_skills) ? manifest.plugin_skills : [];
+  for (const e of pluginSkills) push(e); // no scope field; summary absent → fallback
+  const agentsStore = Array.isArray(manifest.agents_store_skills) ? manifest.agents_store_skills : [];
+  for (const e of agentsStore) {
+    if (!e) continue;
+    if (e.scope === 'project') continue; // GRD-02
+    if (e.scope === 'agents-store (not globally symlinked)') continue; // conservative (§3)
+    push(e);
+  }
+  const agents = Array.isArray(manifest.agents) ? manifest.agents : [];
+  // GRD-01: hard-filter agents whose requires_mcp_not_in_manifest is non-empty
+  // OUT of the auto-dispatch pool BEFORE scoring. Such agents are never
+  // auto-dispatched; applyGuards separately checks whether one would have been
+  // the top candidate and demotes the route to warn if so.
+  for (const e of agents) {
+    if (e && Array.isArray(e.requires_mcp_not_in_manifest) && e.requires_mcp_not_in_manifest.length > 0) {
+      continue; // MCP-missing — excluded from auto-dispatch pool
+    }
+    push(e);
+  }
+  const commands = Array.isArray(manifest.commands) ? manifest.commands : [];
+  for (const e of commands) push(e); // summary absent → name+description fallback
+  // hooks[] deliberately EXCLUDED — no description field, event-bound (§3).
+  return out;
+}
+
+// Okapi BM25 score (k1=1.5, b=0.75, §3). Returns array of {entry, name, score}
+// sorted descending by score. df[t] = number of corpus entries containing t.
+// IDF(t) = ln(1 + (N - df + 0.5)/(df + 0.5)). Per-entry score =
+// Σ_{t∈Q} IDF(t) · (tf·(k1+1)) / (tf + k1·(1 - b + b·dl/avgdl)).
+export function bm25Score(queryTokens, corpus, k1 = 1.5, b = 0.75) {
+  const q = Array.isArray(queryTokens) ? queryTokens : [];
+  if (!Array.isArray(corpus) || corpus.length === 0 || q.length === 0) return [];
+  const N = corpus.length;
+  // df map
+  const df = new Map();
+  for (const c of corpus) {
+    for (const t of c.tokens.keys()) df.set(t, (df.get(t) || 0) + 1);
+  }
+  const avgdl = corpus.reduce((s, c) => s + c.dl, 0) / (N || 1);
+  const scored = [];
+  for (const c of corpus) {
+    let score = 0;
+    for (const t of q) {
+      const tf = c.tokens.get(t);
+      if (!tf) continue;
+      const dft = df.get(t) || 0;
+      const idf = Math.log(1 + (N - dft + 0.5) / (dft + 0.5));
+      const denom = tf + k1 * (1 - b + (b * c.dl) / (avgdl || 1));
+      score += idf * ((tf * (k1 + 1)) / (denom || 1));
+    }
+    if (score > 0) scored.push({ entry: c.entry, name: c.name, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored;
+}
+
+// Per-query normalization (RTE-02). Divides by max → top = 1.0. Returns array
+// of {entry, name, score, norm}. Runner-up margin = 1 - norm(runner_up).
+export function normalize(scored) {
+  if (!Array.isArray(scored) || scored.length === 0) return [];
+  const max = scored[0].score; // scored is sorted descending
+  const out = scored.map((s) => ({
+    entry: s.entry,
+    name: s.name,
+    score: s.score,
+    norm: max > 0 ? s.score / max : 0,
+  }));
+  return out;
+}
+
+// Confidence tier (RTE-05/D-09). High = top ≥ T_high AND margin ≥ M.
+// Low = top < T_low OR top-2 within tie margin (margin < M).
+// Medium = everything else (T_low ≤ top < T_high with decisive margin, or
+// top ≥ T_high but margin < M = decisive-but-moderate).
+export function confidenceTier(topScore, runnerUpScore, thresholds, hasCanonicalMatch = false) {
+  const T = thresholds || { T_high: 0.6, T_low: 0.3, M: 0.2 };
+  const top = Number(topScore) || 0;
+  const runner = Number(runnerUpScore) || 0;
+  const margin = top - runner;
+  if (top < T.T_low) return 'low';
+  if (margin < T.M) {
+    // Tie — but if the top candidate is a known canonical mode-map entry, the
+    // user clearly meant SOMETHING in the canonical set. Promote to 'medium'
+    // so the model receives the suggestion. Preserves fail-open (model can
+    // ignore a medium suggestion; it just doesn't get suppressed to nothing).
+    return hasCanonicalMatch ? 'medium' : 'low';
+  }
+  if (top >= T.T_high && margin >= T.M) return 'high';
+  return 'medium';
+}
+
+// --- LRU intent-signature cache (RTE-06/07/§8) ----------------------------
+
+const CACHE_MAX = 256;
+
+function newCache() {
+  return { schema_version: 1, entries: {}, order: [], size: 0 };
+}
+
+export function loadCache(path = CACHE) {
+  try {
+    if (!existsSync(path)) return newCache();
+    const c = JSON.parse(readFileSync(path, 'utf8'));
+    if (!c || typeof c !== 'object' || !c.entries) return newCache();
+    if (!Array.isArray(c.order)) c.order = [];
+    if (typeof c.size !== 'number') c.size = c.order.length;
+    return c;
+  } catch {
+    return newCache();
+  }
+}
+
+// Pure lookup: returns the cached route or null. Does not mutate.
+export function cacheLookup(sig, cache) {
+  if (!cache || !cache.entries || !cache.entries[sig]) return null;
+  const e = cache.entries[sig];
+  return e && e.route ? e.route : null;
+}
+
+// Cache key (RTE-07). sha256(normalizedPrompt + "|" + intentKeywords.join(" ")
+// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime). Folding mtimes
+// means a mode-map edit, manifest rebuild, OR a graph.json rebuild for cwd
+// invalidates stale entries (key changes). graphMtime defaults to 0 to keep
+// Phase-1 callers backward-compatible.
+export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0) {
+  const np = String(normalizedPrompt || '');
+  const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
+  const joined = `${np}|${ik}|${modeMapMtime}|${manifestMtime}|${graphMtime}`;
+  return createHash('sha256').update(joined).digest('hex');
+}
+
+// Read graph.json mtime for cwd (best-effort; returns 0 on any failure or
+// when the file is missing). Used to fold the graph's mtime into the cache
+// key so a project-side `graphify build` invalidates stale routes.
+function readGraphMtime(cwd) {
+  try {
+    const dir = (cwd && String(cwd)) || process.cwd();
+    const p = join(dir, 'graphify-out', 'graph.json');
+    if (!existsSync(p)) return 0;
+    return statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+// Insert/update a cache entry with LRU eviction at CACHE_MAX. Mutates and
+// returns the cache. hit_count is preserved across re-inserts.
+export function writeCache(cache, sig, route, maxSize = CACHE_MAX) {
+  if (!cache || typeof cache !== 'object') cache = newCache();
+  if (!cache.entries) cache.entries = {};
+  if (!Array.isArray(cache.order)) cache.order = [];
+  const prev = cache.entries[sig];
+  cache.entries[sig] = {
+    route,
+    ts: Date.now(),
+    hit_count: prev ? prev.hit_count : 0,
+  };
+  // LRU: move to end (most-recent)
+  const idx = cache.order.indexOf(sig);
+  if (idx >= 0) cache.order.splice(idx, 1);
+  cache.order.push(sig);
+  while (cache.order.length > maxSize) {
+    const evicted = cache.order.shift();
+    delete cache.entries[evicted];
+  }
+  cache.size = cache.order.length;
+  return cache;
+}
+
+// Atomic write (RTE-06): temp-file + renameSync (atomic on POSIX).
+export function saveCache(cache, path = CACHE) {
+  const tmp = `${path}.tmp.${process.pid}`;
+  writeFileSync(tmp, JSON.stringify(cache));
+  renameSync(tmp, path);
+}
+
+// --- Telemetry privacy layer (D-20/TEL-01/02/03/Pitfall 8) ----------------
+// Plan 01-04 Task 1: hash-only signatures, secret redaction BEFORE hashing,
+// 0600 perms on first creation, atomic appendFileSync (each line < 4KB <
+// macOS PIPE_BUF 4096), outcome + downstream_invocations present-but-null v1
+// so Phase 3 evolution needs no schema migration (TEL-03 seam preservation).
+// A deny-rule prompt (.env/secrets) → NO signature logged (deny_filtered only)
+// — Pitfall 8 belt-and-braces: even the hash of a secrets-referencing prompt
+// is not persisted.
+
+// Secret/PII redaction BEFORE hashing (Pitfall 8 defense-in-depth). Catches
+// the common credential shapes: sk-... (OpenAI/Anthropic-style), AKIA... (AWS),
+// ghp_.../gho_... (GitHub PAT), xoxb-... (Slack), glpat-... (GitLab), and a
+// conservative long-run fallback [A-Za-z0-9_\-]{32,}={0,2} that catches generic
+// high-entropy tokens. Replaced with the literal `[REDACTED]` so the hash input
+// never includes raw secrets, even if the hash itself is irreversible.
+// Case-insensitive (`i` flag) so the patterns still match after `main()`
+// lowercases the prompt for `normalizedPrompt` — e.g. `AKIAIOSFODNN7EXAMPLE`
+// becomes `akiaiosfodnn7example`, which the case-sensitive `AKIA[0-9A-Z]{16}`
+// form would silently miss (CR-02). The 20-char AWS key also falls below the
+// 32+ char generic fallback, so without the `i` flag it leaked into the hash.
+const SECRET_RE = /(?:sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xoxb-[0-9A-Za-z]+|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|[A-Za-z0-9_\-]{32,}={0,2})/gi;
+export function redact(s) {
+  return String(s).replace(SECRET_RE, '[REDACTED]');
+}
+
+// prompt_signature = sha256(redact(normalizedPrompt) + "|" + intentKeywords.join(" "))
+// NEVER raw prompt, NEVER a prefix, NEVER a substring (Pitfall 8 / D-20).
+// intentKeywords is [] in v1 (Phase 3 populates); the join keeps the shape stable.
+export function promptSignature(normalizedPrompt, intentKeywords) {
+  const redacted = redact(String(normalizedPrompt || ''));
+  const iks = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
+  return createHash('sha256').update(`${redacted}|${iks}`).digest('hex');
+}
+
+// Append one JSON line to telemetry.jsonl. Atomic appendFileSync (flag 'a'),
+// each line < 4KB (well under macOS PIPE_BUF 4096) → concurrent sessions don't
+// interleave (Pitfall 16). On first creation chmod 0600 (owner read/write only,
+// Pitfall 8) — idempotent guard: only chmod when we just created the file.
+// Wrapped in try/catch — a telemetry write error MUST NOT block injection
+// (fail-open: still return the additionalContext to the caller).
+export function logTelemetry(entry, telemetryPath = TELEMETRY) {
+  try {
+    const line = JSON.stringify(entry) + '\n';
+    const existedBefore = existsSync(telemetryPath);
+    appendFileSync(telemetryPath, line, { flag: 'a' });
+    if (!existedBefore) {
+      try { chmodSync(telemetryPath, 0o600); } catch { /* perms best-effort */ }
+    }
+  } catch {
+    // Never block injection on a telemetry write failure (fail-open).
+  }
+}
+
+// Phase 3 / EVO-02: atomic counter + worker spawn (D-03). Increments the
+// .evolve-trigger file on every prompt; on counter % 200 === 0, spawns the
+// worker detached + stdio:'ignore' + unref() so the hook returns immediately
+// (Pitfall 6: the worker must not block the hot path).
+function bumpEvolveTrigger() {
+  let n = 0;
+  try { n = parseInt(readFileSync(TRIGGER, 'utf8').trim(), 10) || 0; } catch { n = 0; }
+  n += 1;
+  const tmp = `${TRIGGER}.tmp.${process.pid}`;
+  writeFileSync(tmp, String(n));
+  renameSync(tmp, TRIGGER);
+  if (n % EVOLVE_TRIGGER_N === 0) {
+    try {
+      spawn(process.execPath, [WORKER_PATH], { detached: true, stdio: 'ignore' }).unref();
+    } catch {}
+  }
+}
+
+// --- Graphify stub heuristic (GRF-01/§12) ---------------------------------
+
+// Phase 1 stub: heuristic fires on codebase prompts (symbols/file paths/
+// "how does"/refactor/architecture). When it fires, status is graph_missing
+// (Phase 1 NEVER issues a real query — that is Phase 2/GRF-02). Returns
+// {queried, status} where queried=true means the heuristic fired (considered
+// the graph), and status ∈ not_triggered | graph_missing.
+const GRAPH_REGEX_PRIMARY =
+  /\b(how\s+does|how\s+do|where\s+is|refactor|architecture|symbol|file\s+path)\b/i;
+const GRAPH_REGEX_PATH = /\/([a-z0-9_-]+\/)+[a-z0-9_-]+\.[a-z]{1,4}/i;
+const GRAPH_REGEX_SYMBOL =
+  /(^|[^\w])([A-Z][a-z]+[A-Z]\w*|class\s+\w+|def\s+\w+|function\s+\w+)/;
+
+export function graphifyHeuristic(prompt, cwd) {
+  const p = String(prompt || '');
+  if (!p) return { queried: false, status: 'not_triggered', symbols: [], elapsed_ms: 0, boostIds: new Set() };
+  const fired =
+    GRAPH_REGEX_PRIMARY.test(p) ||
+    GRAPH_REGEX_PATH.test(p) ||
+    GRAPH_REGEX_SYMBOL.test(p);
+  if (!fired) return { queried: false, status: 'not_triggered', symbols: [], elapsed_ms: 0, boostIds: new Set() };
+  // Phase 2: delegate to graphifyQuery (Plan 02-01 primitive). Public signature
+  // preserved (D-18): `queried: true` means "the heuristic considered the graph"
+  // (Phase-1 contract — graphify-stub.test.mjs depends on this). graphifyQuery's
+  // `graph_queried` field reports whether the file was actually read, which is
+  // what telemetry now logs as `graphify_queried` via `decision.graphify_queried`.
+  // New fields (symbols, elapsed_ms, boostIds) feed applyGraphBoost + formatGraphBlock
+  // + telemetry graph_status enum.
+  const result = graphifyQuery(p, cwd, 8);
+  return {
+    queried: true,
+    status: result.graph_status,
+    symbols: result.symbols,
+    elapsed_ms: result.elapsed_ms,
+    boostIds: result.boostIds,
+  };
+}
+
+// composeWithCap (Plan 02-02 / D-13): combines a route block and a graph block
+// under the 500-token cap with graph-first drop on conflict. The route block
+// is always preserved (D-13 priority order: graph → route). Pure + exported
+// for direct unit testing.
+export function composeWithCap(routeBlock, graphBlock) {
+  if (!routeBlock && !graphBlock) return '';
+  if (!routeBlock) return graphBlock;
+  if (!graphBlock) return routeBlock;
+  const routeTok = tokenCount(routeBlock);
+  const graphTok = tokenCount(graphBlock);
+  const cap = TOKEN_CAP - 2; // 2-token safety margin (Phase 1 D from Plan 01-03)
+  if (routeTok + graphTok <= cap) return routeBlock + '\n\n' + graphBlock;
+  return routeBlock; // graph dropped first
+}
+
+// --- Graphify query primitives (Plan 02-01 / GRF-02) ---------------------
+// Pure functions: graphifyQuery, formatGraphBlock, applyGraphBoost.
+// collectGraphNodes is a private helper exported only for unit-test reach.
+
+// Flatten graphJson.nodes[] + graphJson.graph.hyperedges[] into candidate
+// rows for BM25. Per RESEARCH.md §2: ignore the top-level `hyperedges` (legacy
+// duplicate) and `links` (edge metadata). Hyperedges are cluster anchors and
+// get community = -1 sentinel (they are not members of any single community).
+export function collectGraphNodes(graphJson) {
+  if (!graphJson || typeof graphJson !== 'object') return [];
+  const out = [];
+  const nodes = Array.isArray(graphJson.nodes) ? graphJson.nodes : [];
+  for (const n of nodes) {
+    if (!n || !n.id) continue;
+    const id = String(n.id);
+    const label = n.label != null ? String(n.label) : id;
+    const community = typeof n.community === 'number' ? n.community : -1;
+    out.push({ id, label, community });
+  }
+  const hyperedges =
+    graphJson.graph && Array.isArray(graphJson.graph.hyperedges)
+      ? graphJson.graph.hyperedges
+      : [];
+  for (const h of hyperedges) {
+    if (!h || !h.id) continue;
+    const id = String(h.id);
+    const label = h.label != null ? String(h.label) : id;
+    out.push({ id, label, community: -1 });
+  }
+  return out;
+}
+
+// Score the graph against the prompt via inline BM25 (D-01, D-04). Pure given
+// a cwd: reads cwd/graphify-out/graph.json, enforces 50MB + 20K guards, and
+// returns {symbols, graph_queried, graph_status, elapsed_ms, boostIds}.
+// Never throws (D-10): any failure returns graph_status: 'error' or
+// 'graph_missing' and the caller routes on the manifest alone.
+export function graphifyQuery(prompt, cwd, k = 8) {
+  const t0 = process.hrtime.bigint();
+  const elapsed = () => Number(process.hrtime.bigint() - t0) / 1e6;
+  const dir = (cwd && String(cwd)) || process.cwd();
+  const graphPath = join(dir, 'graphify-out', 'graph.json');
+  if (!existsSync(graphPath)) {
+    return {
+      symbols: [],
+      graph_queried: false,
+      graph_status: 'graph_missing',
+      elapsed_ms: elapsed(),
+      boostIds: new Set(),
+    };
+  }
+  let stat;
+  try {
+    stat = statSync(graphPath);
+  } catch {
+    return {
+      symbols: [],
+      graph_queried: true,
+      graph_status: 'error',
+      elapsed_ms: elapsed(),
+      boostIds: new Set(),
+    };
+  }
+  if (stat && typeof stat.size === 'number' && stat.size > GRAPH_FILE_SIZE_GUARD) {
+    return {
+      symbols: [],
+      graph_queried: true,
+      graph_status: 'error',
+      elapsed_ms: elapsed(),
+      boostIds: new Set(),
+    };
+  }
+  try {
+    const raw = readFileSync(graphPath, 'utf8');
+    const graphJson = JSON.parse(raw);
+    const candidates = collectGraphNodes(graphJson);
+    if (candidates.length > GRAPH_NODE_COUNT_GUARD) {
+      return {
+        symbols: [],
+        graph_queried: true,
+        graph_status: 'error',
+        elapsed_ms: elapsed(),
+        boostIds: new Set(),
+      };
+    }
+    // Build a BM25 corpus over (id + ' ' + label) per candidate. Reuses
+    // tokenize + bm25Score from Phase 1 verbatim (D-01, D-04).
+    const corpus = candidates.map((c) => {
+      const toks = tokenize(`${c.id} ${c.label}`);
+      const tf = new Map();
+      for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
+      return { entry: c, name: c.id, tokens: tf, dl: toks.length };
+    });
+    const queryTokens = tokenize(prompt);
+    const scored = bm25Score(queryTokens, corpus);
+    const topK = scored.slice(0, k).map((s) => ({
+      id: s.name,
+      label: s.entry.label,
+      community: s.entry.community,
+      score: s.score,
+    }));
+    if (topK.length === 0) {
+      return {
+        symbols: [],
+        graph_queried: true,
+        graph_status: 'empty',
+        elapsed_ms: elapsed(),
+        boostIds: new Set(),
+      };
+    }
+    const boostIds = new Set(topK.map((s) => s.id));
+    return {
+      symbols: topK,
+      graph_queried: true,
+      graph_status: 'ok',
+      elapsed_ms: elapsed(),
+      boostIds,
+    };
+  } catch {
+    return {
+      symbols: [],
+      graph_queried: true,
+      graph_status: 'error',
+      elapsed_ms: elapsed(),
+      boostIds: new Set(),
+    };
+  }
+}
+
+// Format a graph block (D-05) capped at (GRAPH_TOKEN_CAP - 2) * 4 chars via
+// the same ~4-chars-per-token approximation Phase 1 uses (tokenCount).
+// Drops lowest-scored symbols first on overflow. Truncates each label to
+// 50 chars with an ellipsis suffix. Returns '' for empty / non-array input.
+// D-06: no file paths in the output.
+export function formatGraphBlock(symbols) {
+  if (!Array.isArray(symbols) || symbols.length === 0) return '';
+  const cap = (GRAPH_TOKEN_CAP - 2) * 4; // 2-token safety margin, 4 chars/token
+  const sorted = symbols
+    .slice()
+    .sort((a, b) => (b.score || 0) - (a.score || 0));
+  let out = 'Symbols: ';
+  for (let i = 0; i < sorted.length; i++) {
+    const s = sorted[i];
+    const rawLabel = s.label != null ? String(s.label) : '';
+    const label = rawLabel.length > 50 ? rawLabel.slice(0, 49) + '…' : rawLabel;
+    const id = s.id != null ? String(s.id) : '';
+    const community = typeof s.community === 'number' ? s.community : -1;
+    const piece = `${label} (${id}, ${community})`;
+    const sep = i === 0 ? '' : ', ';
+    if ((out + sep + piece).length > cap) {
+      if (i === 0 && out.length + piece.length > cap) {
+        // Even a single symbol is too long: emit as much as fits, no trailing separator.
+        return out + piece.slice(0, Math.max(0, cap - out.length));
+      }
+      break; // drop the rest (lowest-scored first)
+    }
+    out += sep + piece;
+  }
+  return out;
+}
+
+// Add `amount` to the score of any entry whose name is in the intersection of
+// topK and manifestIdSet (D-07). PURE: returns a new array of shallow-cloned
+// objects; the input is never mutated. Case-insensitive name match. Accepts
+// Array or Set/Iterable for topK and manifestIdSet.
+export function applyGraphBoost(scored, topK, manifestIdSet, amount = GRAPH_BOOST) {
+  if (!Array.isArray(scored)) return [];
+  const toArr = (x) => (Array.isArray(x) ? x : (x && typeof x[Symbol.iterator] === 'function') ? Array.from(x) : []);
+  const topKSet = new Set(toArr(topK).map((x) => String(x).toLowerCase()));
+  const manifestSet = new Set(toArr(manifestIdSet).map((x) => String(x).toLowerCase()));
+  return scored.map((s) => {
+    const nameLower = String(s.name || '').toLowerCase();
+    if (topKSet.has(nameLower) && manifestSet.has(nameLower)) {
+      return { ...s, score: (s.score || 0) + amount };
+    }
+    return { ...s };
+  });
+}
+
+// --- Wave 3: guards + injection formatting (Plan 01-03) -------------------
+
+// GRD-05 deny-rule path detection (D-17). Returns true if the prompt references
+// a deny-rule path: `.env`, `.secrets`, or any path in the settings.json
+// permissions.deny list (glob markers stripped for the substring test). When
+// true, the router skips routing entirely and logs `deny_filtered` — no
+// signature is logged either (Pitfall 8 belt-and-braces). `settings` is an
+// optional parsed settings.json object (only its permissions.deny array is
+// consulted). Pure + exported for direct unit testing.
+const DENY_PATH_RE = /(^|[^A-Za-z0-9])(\.env|\.secrets)([^A-Za-z0-9]|$)/i;
+export function denyPathDetect(prompt, settings = null) {
+  if (typeof prompt !== 'string') return false;
+  if (DENY_PATH_RE.test(prompt)) return true;
+  if (settings && settings.permissions && Array.isArray(settings.permissions.deny)) {
+    for (const p of settings.permissions.deny) {
+      if (!p) continue;
+      // strip glob markers for a literal substring test
+      const cleaned = String(p).replace(/[*?]/g, '');
+      if (cleaned && prompt.includes(cleaned)) return true;
+    }
+  }
+  return false;
+}
+
+// GRD-03 ralph two-gate: extract a genuine verifiable done-criterion as a
+// LITERAL verbatim phrase from the prompt (D-15: quote, never synthesize).
+// Returns the literal substring if a verifiable criterion is present, else
+// null (→ do NOT route to ralph-loop, fall back to inline mode). Each regex
+// captures (group 1) the exact phrase as it appears in the prompt.
+const VERIFIABLE_PATTERNS = [
+  /\b(all tests pass)\b/i,
+  /\b(tests? (?:all )?pass)\b/i,
+  /\b(they all pass)\b/i,
+  /\b(pytest exits 0)\b/i,
+  /\b(npm run build && npm test)\b/i,
+  /\b(git diff --quiet)\b/i,
+  /\b(coverage\s*[>=]+\s*\d+%?)\b/i,
+  /\b(dist\/[a-z0-9_.-]+\.html exists)\b/i,
+  /\b(max \d+ tries)\b/i,
+  /\b(max \d+ iterations)\b/i,
+  /\b(exit code 0)\b/i,
+];
+export function extractVerifiablePromise(prompt) {
+  if (typeof prompt !== 'string') return null;
+  for (const re of VERIFIABLE_PATTERNS) {
+    const m = prompt.match(re);
+    if (m && m[1]) return m[1]; // literal substring the user provided
+  }
+  return null;
+}
+
+// Apply all guards to a computed route. Returns { route, guards_fired }.
+//   route       — the route object from scoring (may be null on no-match)
+//   prompt      — the raw user prompt (for deny/ralph checks)
+//   manifest    — parsed manifest (for GRD-01 flagged-agent re-score)
+//   modeMap     — parsed mode-map (for thresholds on the flagged re-score)
+//   ctx         — optional { queryTokens, thresholds } for the GRD-01 demote
+//                 check (re-scores the flagged-only pool against the query)
+// Pure + exported for direct unit testing. Does NOT implement telemetry.
+export function applyGuards(route, prompt, manifest, modeMap, ctx = {}) {
+  const guards_fired = [];
+
+  // GRD-05 deny-rule — skip routing entirely, no signature logged.
+  if (denyPathDetect(prompt)) {
+    guards_fired.push('deny_filtered');
+    return { route: null, guards_fired };
+  }
+
+  // GRD-01 MCP demote: re-score the flagged-only pool; if the top flagged
+  // agent would have scored High, demote the route to warn. The auto-pool
+  // (buildCorpus) already excludes flagged agents, so a flagged agent can
+  // never be the auto-route's top — this check surfaces the "would have been
+  // the top candidate" case as a warn-tier injection instead of a silent miss.
+  if (route && route.invoke_kind !== 'warn' && ctx.queryTokens && manifest) {
+    const flaggedAgents = (manifest.agents || []).filter(
+      (a) => Array.isArray(a.requires_mcp_not_in_manifest) && a.requires_mcp_not_in_manifest.length > 0
+    );
+    if (flaggedAgents.length) {
+      const flaggedCorpus = [];
+      for (const a of flaggedAgents) {
+        const name = String(a.name || '');
+        const desc = String(a.description || '');
+        const summary = a.summary ? String(a.summary) : `${name} ${desc}`;
+        const docText = `${name} ${name} ${name} ${desc} ${summary}`;
+        const toks = tokenize(docText);
+        const tf = new Map();
+        for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
+        flaggedCorpus.push({ entry: a, name, tokens: tf, dl: toks.length });
+      }
+      const fScored = bm25Score(ctx.queryTokens, flaggedCorpus);
+      if (fScored.length) {
+        const fNormed = normalize(fScored);
+        const fTop = fNormed[0];
+        const fRunner = fNormed[1];
+        const T = ctx.thresholds || (modeMap && modeMap.thresholds) || { T_high: 0.6, T_low: 0.3, M: 0.2 };
+        const fTier = confidenceTier(fTop.norm, fRunner ? fRunner.norm : 0, T);
+        // Only demote when the flagged agent would actually have been the top
+        // auto-pool candidate (its raw BM25 score >= the auto-pool top's raw
+        // score). Without this, a single-agent flagged pool normalizes fTop.norm
+        // to 1.0 → margin 1.0 → always 'high' → demotes correct routes whose
+        // real winner is a valid skill/command (GRD-01 intent, not over-fire).
+        if (fTier === 'high' && (ctx.autoTopScore == null || fTop.score >= ctx.autoTopScore)) {
+          const mcp = (flaggedAgents.find((a) => a.name === fTop.name) || {}).requires_mcp_not_in_manifest[0] || 'unknown';
+          guards_fired.push(`mcp_demote:${fTop.name}:${mcp}`);
+          route = {
+            ...route,
+            invoke_kind: 'warn',
+            warning: `Agent ${fTop.name} needs MCP ${mcp} which is not in manifest — wire it first`,
+            mode: null,
+            recommended_skills: [],
+            recommended_agents: [],
+            args_hint: null,
+          };
+        }
+      }
+    }
+  }
+
+  // GRD-03 ralph two-gate. If the matched mode-map entry is ralph-loop, extract
+  // a verbatim verifiable promise; if none → fall back to inline mode (never
+  // fabricate a promise — D-15/ralph-loop no-lying rule).
+  if (route && route.mode === 'ralph-loop') {
+    const promise = extractVerifiablePromise(prompt);
+    if (!promise) {
+      guards_fired.push('no_verifiable_done_criteria');
+      route = {
+        ...route,
+        mode: null,
+        invoke_kind: null,
+        args_hint: null,
+        fallback: 'inline',
+      };
+    } else {
+      // Derive a task description from the prompt by stripping the verifiable
+      // promise phrase + trailing conjunctions/max-iterations noise. Falls back
+      // to the trimmed prompt. CR-01: without this, slashLine() emits the
+      // literal placeholder "the task" because route.task is never set by
+      // main() (which builds the route from scoring, with no task field).
+      const stripped = prompt.replace(new RegExp(escapeRegex(promise), 'i'), '')
+        .replace(/\b(max \d+ tries|max \d+ iterations)\b/gi, '')
+        .replace(/\b(until|keep running|iterate|,)\s*$/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const task = stripped || prompt.trim();
+      route = { ...route, completion_promise: promise, task };
+    }
+  }
+
+  return { route, guards_fired };
+}
+
+// --- formatInjection (INJ-01..06 / D-10 / D-11) ---------------------------
+// Turns a route decision into model-readable additionalContext text per
+// invoke_kind × tier. D-01 discipline: the instruction text is a MODEL
+// instruction (`Run /gsd-<mode>`, `Use the Skill tool to invoke`, `Dispatch
+// agent`) — the model reads it and acts; the harness never auto-runs slashes.
+//
+// Block layout (Pitfall 2 — load-bearing, prevents dead injection):
+//   \n\n
+//   <!-- router-inject mode=<mode> tier=<tier> sig=<short hash> -->
+//   Reasoning: <one sentence why this mode + these skills/agents>
+//   <slash on its own line at column 0, no backticks, no leading whitespace>
+//   <skill/agent imperatives>
+//   <!-- /router-inject -->
+//
+// Low tier → '' (true pass-through, no sentinel). warn kind → the MCP-missing
+// warning, no dispatch. Medium tier → text-only suggestion (NO slash
+// instruction line — Pitfall 2: a slash at Medium would fire when the model
+// reads it). ≤500-token cap enforced with priority drop order.
+
+// Cheap ~4-chars-per-token approximation (INJ-06).
+export function tokenCount(text) {
+  return Math.ceil(String(text || '').length / 4);
+}
+
+const TOKEN_CAP = 500;
+// Graphify block constants (Plan 02-01 / GRF-02 / D-13). GRAPH_TOKEN_CAP=200 is
+// a measured bump from the CONTEXT.md 150-token estimate: 8 symbols at 50-char
+// labels measured ~192 tokens (RESEARCH.md §8), so 200 preserves K=8 with
+// ~225-token slack in the 500-token total. GRAPH_FILE_SIZE_GUARD and
+// GRAPH_NODE_COUNT_GUARD are belt-and-braces refusals (THREAT T-02.1-01/02).
+const GRAPH_TOKEN_CAP = 200;
+const GRAPH_BOOST = 0.15;
+const GRAPH_FILE_SIZE_GUARD = 50 * 1024 * 1024;
+const GRAPH_NODE_COUNT_GUARD = 20000;
+
+// Build the reasoning line (D-10/D-11 — load-bearing, lets the user catch
+// wrong picks). One sentence summarizing why this mode + skills/agents.
+function buildReasoning(route) {
+  const mode = route.mode || (route.invoke_kind === 'warn' ? 'warn' : 'inline');
+  const skills = (route.recommended_skills || []).filter(Boolean);
+  const agents = (route.recommended_agents || []).filter(Boolean);
+  const parts = [];
+  if (route.invoke_kind === 'warn') {
+    return `MCP-missing agent flagged — wire the MCP before dispatching.`;
+  }
+  if (route.mode) parts.push(`${route.mode} matches this prompt's signals`);
+  if (skills.length) parts.push(`${skills.length} skill${skills.length > 1 ? 's' : ''} fit`);
+  if (agents.length) parts.push(`${agents.length} agent${agents.length > 1 ? 's' : ''} fit`);
+  if (parts.length === 0) parts.push('best available route for this prompt');
+  return parts.join('; ') + '.';
+}
+
+// The slash instruction line at column 0, no backticks, no leading whitespace.
+function slashLine(route, reasoning) {
+  const mode = route.mode || '';
+  const args = route.args_hint || '';
+  if (route.mode === 'ralph-loop' && route.completion_promise) {
+    const task = (route.task || '').replace(/"/g, "'") || 'the task';
+    const promise = route.completion_promise.replace(/"/g, "'");
+    return `Run /ralph-loop "${task}" --completion-promise "${promise}" because ${reasoning}`;
+  }
+  return `Run /${mode} ${args}`.replace(/\s+$/, '') + ` because ${reasoning}`;
+}
+
+// Skill imperative (Pitfall 17 — imperative, not suggestive).
+function skillLine(name) {
+  return `Use the Skill tool to invoke ${name} now, because it fits this task.`;
+}
+
+// Agent imperative (Pitfall 17).
+function agentLine(name) {
+  return `Dispatch agent ${name} for this subtask, because it fits.`;
+}
+
+// Assemble the block (without the leading \n\n) from open/reasoning/lines/close.
+function assembleBlock(route, sigHash, reasoning, bodyLines) {
+  const mode = route.mode || '';
+  const tier = route.tier || '';
+  const open = `<!-- router-inject mode=${mode} tier=${tier} sig=${sigHash} -->`;
+  const close = `<!-- /router-inject -->`;
+  return [open, `Reasoning: ${reasoning}`, ...bodyLines, close].join('\n');
+}
+
+export function formatInjection(route, prompt = '', sigHash = '') {
+  if (!route) return '';
+  // Re-entry dedupe (INJ-05) — scan the incoming prompt for the exact sentinel.
+  if (sentinelScan(prompt)) return '';
+  const tier = route.tier || 'low';
+  if (tier === 'low') return ''; // true pass-through, no sentinel emitted
+  const kind = route.invoke_kind;
+  if (!kind) return '';
+
+  // warn kind (any tier): MCP-missing warning, no dispatch.
+  if (kind === 'warn') {
+    const reasoning = buildReasoning(route);
+    const fullBody = [route.warning || 'Agent needs an unwired MCP — wire it first.'];
+    const candidates = [];
+    candidates.push(assembleBlock(route, sigHash, reasoning, fullBody));
+    candidates.push(assembleBlock(route, sigHash, 'MCP-missing agent flagged.', fullBody));
+    // If the warning itself is enormous, truncate it to fit under the cap.
+    for (const body of candidates) {
+      const full = '\n\n' + body;
+      if (tokenCount(full) <= TOKEN_CAP) return full;
+    }
+    // Truncate the warning text to whatever budget remains after the
+    // sentinel/reasoning/close scaffolding (~80 chars of overhead → keep
+    // the warning itself under ~1700 chars to clear the 500-token cap).
+    const overhead = `<!-- router-inject mode= tier= sig=${sigHash} -->\nReasoning: MCP-missing agent flagged.\n\n<!-- /router-inject -->`;
+    const overheadTokens = tokenCount('\n\n' + overhead);
+    const remaining = Math.max(0, TOKEN_CAP - overheadTokens - 2) * 4; // -2 token safety margin
+    const truncatedWarning = String(route.warning || '').slice(0, Math.max(50, remaining));
+    const final = assembleBlock(route, sigHash, 'MCP-missing agent flagged.', [truncatedWarning]);
+    return '\n\n' + final;
+  }
+
+  const reasoning = buildReasoning(route);
+  const skills = (route.recommended_skills || []).filter(Boolean);
+  const agents = (route.recommended_agents || []).filter(Boolean);
+  const primarySkill = skills[0] || null;
+  const secondarySkills = skills.slice(1);
+  const mode = route.mode || '';
+
+  // Build candidate blocks in priority order; pick the first under the cap.
+  // Drop order (INJ-06): agents → secondary skills → trim reasoning → keep
+  // sentinel + slash + primary skill only.
+  const candidates = [];
+
+  if (kind === 'slash') {
+    if (tier === 'high') {
+      // Full: slash + primary skill + secondary skills + agents
+      const fullBody = [slashLine(route, reasoning)];
+      if (primarySkill) fullBody.push(skillLine(primarySkill));
+      for (const s of secondarySkills) fullBody.push(skillLine(s));
+      for (const a of agents) fullBody.push(agentLine(a));
+      candidates.push(assembleBlock(route, sigHash, reasoning, fullBody));
+
+      // Drop agents
+      const noAgents = [slashLine(route, reasoning)];
+      if (primarySkill) noAgents.push(skillLine(primarySkill));
+      for (const s of secondarySkills) noAgents.push(skillLine(s));
+      candidates.push(assembleBlock(route, sigHash, reasoning, noAgents));
+
+      // Drop secondary skills
+      const minSkills = [slashLine(route, reasoning)];
+      if (primarySkill) minSkills.push(skillLine(primarySkill));
+      candidates.push(assembleBlock(route, sigHash, reasoning, minSkills));
+
+      // Trim reasoning (keep slash + primary skill)
+      const shortReason = `${mode} matches this prompt.`;
+      const trimmedBody = [`Run /${mode} ${route.args_hint || ''}`.replace(/\s+$/, '') + ` because ${shortReason}`];
+      if (primarySkill) trimmedBody.push(skillLine(primarySkill));
+      candidates.push(assembleBlock(route, sigHash, shortReason, trimmedBody));
+
+      // Minimal: sentinel + slash only
+      const minReason = `${mode} fits.`;
+      candidates.push(assembleBlock(route, sigHash, minReason, [`Run /${mode} because ${minReason}`]));
+    } else {
+      // Medium tier: text-only suggestion, NO slash instruction line (Pitfall 2).
+      const skillsList = skills.join(', ') || 'none';
+      const agentsList = agents.join(', ') || 'none';
+      const line = `Recommended: /${mode}. Skills: ${skillsList}. Agents: ${agentsList}. Run if fit.`;
+      candidates.push(assembleBlock(route, sigHash, reasoning, [line]));
+      // Drop agents then secondary skills if over cap
+      const noAgentsLine = `Recommended: /${mode}. Skills: ${primarySkill || 'none'}. Run if fit.`;
+      candidates.push(assembleBlock(route, sigHash, reasoning, [noAgentsLine]));
+      const shortReason = `${mode} matches this prompt.`;
+      candidates.push(assembleBlock(route, sigHash, shortReason, [noAgentsLine]));
+    }
+  } else if (kind === 'skill') {
+    if (tier === 'high') {
+      const fullBody = [];
+      if (primarySkill) fullBody.push(skillLine(primarySkill));
+      for (const s of secondarySkills) fullBody.push(skillLine(s));
+      for (const a of agents) fullBody.push(agentLine(a));
+      candidates.push(assembleBlock(route, sigHash, reasoning, fullBody));
+      const noAgents = [];
+      if (primarySkill) noAgents.push(skillLine(primarySkill));
+      for (const s of secondarySkills) noAgents.push(skillLine(s));
+      candidates.push(assembleBlock(route, sigHash, reasoning, noAgents));
+      const minSkills = [];
+      if (primarySkill) minSkills.push(skillLine(primarySkill));
+      candidates.push(assembleBlock(route, sigHash, reasoning, minSkills));
+      const shortReason = `${primarySkill || 'skill'} fits this prompt.`;
+      candidates.push(assembleBlock(route, sigHash, shortReason, minSkills.length ? [skillLine(primarySkill)] : []));
+    } else {
+      const line = `Recommended skill: ${primarySkill || 'none'}. Run if fit.`;
+      candidates.push(assembleBlock(route, sigHash, reasoning, [line]));
+      const shortReason = `${primarySkill || 'skill'} fits.`;
+      candidates.push(assembleBlock(route, sigHash, shortReason, [line]));
+    }
+  } else if (kind === 'agent') {
+    if (tier === 'high') {
+      const fullBody = [];
+      for (const a of agents) fullBody.push(agentLine(a));
+      for (const s of skills) fullBody.push(skillLine(s));
+      candidates.push(assembleBlock(route, sigHash, reasoning, fullBody));
+      const primaryOnly = agents[0] ? [agentLine(agents[0])] : [];
+      candidates.push(assembleBlock(route, sigHash, reasoning, primaryOnly));
+      const shortReason = `${agents[0] || 'agent'} fits this task.`;
+      candidates.push(assembleBlock(route, sigHash, shortReason, primaryOnly));
+    } else {
+      const a0 = agents[0] || 'none';
+      const line = `Recommended agent: ${a0} for this subtask. Dispatch if fit.`;
+      candidates.push(assembleBlock(route, sigHash, reasoning, [line]));
+      const shortReason = `${a0} fits.`;
+      candidates.push(assembleBlock(route, sigHash, shortReason, [line]));
+    }
+  } else {
+    return ''; // unknown kind — pass-through
+  }
+
+  for (const body of candidates) {
+    const full = '\n\n' + body;
+    if (tokenCount(full) <= TOKEN_CAP) return full;
+  }
+  // Last resort: return the smallest candidate anyway (still bounded).
+  const smallest = candidates[candidates.length - 1];
+  return '\n\n' + smallest;
+}
+
+// --- main pipeline --------------------------------------------------------
+
+function main(payload) {
+  // Capture start time for latency telemetry (consumed in Plan 04).
+  const startNs = process.hrtime.bigint();
+  if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
+
+  // Decision object — mutated at every exit path so the finally block can log
+  // a single telemetry line per prompt (Plan 01-04 Task 1). tier is one of:
+  //   high|medium|low|trivial|user_explicit|stale|manifest_missing|reentry_skipped|deny_filtered
+  // route is the final route object (null on pass-through / deny / no-match).
+  // guards_fired is the array from applyGuards (plus any router-level skips).
+  const decision = {
+    tier: null,
+    route: null,
+    guards_fired: [],
+    graphify_queried: false,
+    graph_status: 'not_triggered',
+    invoke_kind: null,
+    normalizedPrompt: '',
+    intentKeywords: [],
+  };
+
+  try {
+    if (!payload || typeof payload.prompt !== 'string') {
+      return; // nothing to do — pass-through (no telemetry: no prompt at all)
+    }
+    const prompt = payload.prompt;
+    decision.normalizedPrompt = String(prompt).toLowerCase().replace(/\s+/g, ' ').trim();
+
+    // Testability seam: force a throw to prove fail-open.
+    if (process.env.ROUTER_TEST_THROW === '1') {
+      throw new Error('ROUTER_TEST_THROW forced throw');
+    }
+
+    // Trivial prompt short-circuit (runs BEFORE any routing).
+    if (trivialPromptDetect(prompt)) {
+      decision.tier = 'trivial';
+      return; // pass-through, no additionalContext
+    }
+
+    // Explicit user override (GRD-04 /-prefix half). Runs BEFORE any routing so
+    // the router never overrides an explicit choice. The named-name half (known
+    // mode-map skill/mode name) runs after modeMap load below.
+    if (explicitOverrideDetect(prompt).override) {
+      decision.tier = 'user_explicit';
+      return; // pass-through, status user_explicit
+    }
+
+    // Re-entry dedupe (INJ-05): if the prompt already carries the exact router
+    // sentinel, this is a re-feed/quote — skip injection, pass through.
+    if (sentinelScan(prompt)) {
+      decision.tier = 'reentry_skipped';
+      return; // pass-through, status reentry_skipped
+    }
+
+    // Testability seam: force a freshness verdict without touching the real
+    // manifest. Honored only when ROUTER_TEST_FRESHNESS is set.
+    let fresh;
+    if (process.env.ROUTER_TEST_FRESHNESS) {
+      const forced = process.env.ROUTER_TEST_FRESHNESS;
+      if (forced === 'stale') fresh = { status: 'stale', reminder: STALE_REMINDER };
+      else if (forced === 'manifest_missing') fresh = { status: 'manifest_missing' };
+      else fresh = { status: 'fresh' };
+    } else {
+      fresh = checkFreshness();
+    }
+
+    if (fresh.status === 'stale' && fresh.reminder) {
+      // One-line HTML-comment reminder only. No slash -> model cannot auto-invoke.
+      decision.tier = 'stale';
+      emit(fresh.reminder);
+      return;
+    }
+
+    if (fresh.status !== 'fresh') {
+      // manifest_missing or error → pass-through (no additionalContext).
+      decision.tier = fresh.status; // manifest_missing | error
+      return;
+    }
+
+    // fresh → compute the route, apply guards, format the injection, and emit.
+    // Fail-open: any throw in the scoring half is caught by the outer try/catch
+    // and passes through unchanged.
+    const manifest = loadManifest();
+    const modeMap = loadModeMap();
+    if (!manifest || !modeMap) {
+      decision.tier = 'manifest_missing';
+      return; // parse error → pass-through
+    }
+
+    // Phase 3 / EVO-01: feed modeMap into the blend module-level cache
+    // (BLOCKER 3 fix: 3-arg applyWeightBlend needs the modeMap via
+    // setModeMapForBlend; the per-prompt call site is a pure 3-arg form).
+    setModeMapForBlend(modeMap);
+    const weights = loadWeights(WEIGHTS);
+    const blendFactor = (weights && typeof weights.blend === 'number') ? weights.blend : 0.15;
+    const evolvedAfter = (() => {
+      try { return new Date(statSync(MODE_MAP).mtimeMs).toISOString(); }
+      catch { return null; }
+    })();
+
+    // GRD-04 named-name half: build known-names from the mode-map and check
+    // for a whole-word match. Runs BEFORE scoring so the router never overrides
+    // an explicit named choice. /-prefix half already checked above.
+    const knownNames = buildKnownNames(modeMap);
+    if (explicitOverrideDetect(prompt, knownNames).override) {
+      decision.tier = 'user_explicit';
+      return; // pass-through, status user_explicit
+    }
+
+    const manifestMtime = statSync(MANIFEST).mtimeMs;
+    const modeMapMtime = statSync(MODE_MAP).mtimeMs;
+
+    // Graphify (GRF-01/02) — runs but has no Phase-1 effect on the route.
+    // Captured into the decision for telemetry (graphify_queried + graph_status)
+    // and the symbols/boostIds are threaded into applyGraphBoost + formatGraphBlock
+    // (Plan 02-02 wiring). graphifyHeuristic never throws — its inner try/catch
+    // (D-10) returns graph_status='error' for any graph.json parse failure etc.
+    const graph = graphifyHeuristic(prompt, process.cwd());
+    decision.graphify_queried = graph.queried;
+    decision.graph_status = graph.status;
+    decision.graph_symbols = graph.symbols || [];
+    decision.graph_boostIds = graph.boostIds || new Set();
+
+    const graphMtime = readGraphMtime(process.cwd());
+
+    const cache = loadCache();
+    const normalizedPrompt = decision.normalizedPrompt;
+    const sig = cacheKey(normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime);
+    const cached = cacheLookup(sig, cache);
+    if (cached) {
+      // Cache hit — route already computed + guarded at write time. Emit it.
+      // Telemetry records the reuse + refresh hit_count (RTE-06/§8).
+      decision.tier = cached.tier || 'high';
+      decision.route = cached;
+      decision.invoke_kind = cached.invoke_kind;
+      const routeBlock = formatInjection(cached, prompt, sig.slice(0, 8));
+      const graphBlock = (decision.graph_symbols && decision.graph_symbols.length)
+        ? formatGraphBlock(decision.graph_symbols) : '';
+      const injection = composeWithCap(routeBlock, graphBlock);
+      if (injection) emit(injection);
+      return;
+    }
+
+    const corpus = buildCorpus(manifest, modeMap);
+    const queryTokens = tokenize(prompt);
+    const scored = bm25Score(queryTokens, corpus);
+    // applyGraphBoost (D-07): insert +0.15 on manifest entries whose name is
+    // in BOTH the graph's top-K boostIds AND the global manifest name set.
+    // Operates on the post-bm25 array BEFORE tier normalization so the boost
+    // influences the top-1 / runner-up decision.
+    const manifestIdSet = new Set((corpus || []).map((c) => String(c.name || '').toLowerCase()));
+    const boosted = (graph.boostIds && graph.boostIds.size > 0)
+      ? applyGraphBoost(scored, graph.boostIds, manifestIdSet, GRAPH_BOOST)
+      : scored;
+    const normed = normalize(boosted);
+    // Phase 3 / EVO-01: weighted BM25 blend (D-09). Pure 3-arg form per
+    // RESEARCH §3 locked signature; modeMap is read from module-level cache
+    // set by setModeMapForBlend(modeMap) above.
+    const blended = applyWeightBlend(normed, weights, blendFactor);
+    if (blended.length === 0) {
+      decision.tier = 'low';
+      return; // no matches → pass-through (Low tier)
+    }
+
+    const top = blended[0];
+    const runnerUp = blended[1];
+    // Mode-map tiebreaker (CR-03): when the top candidate is a known canonical
+    // mode (id or mode of any mode-map entry), a near-tie is still a real
+    // signal — the user clearly means SOMETHING in the canonical set. Promote
+    // tier to 'medium' so the model receives the suggestion (it can ignore it).
+    // Without this, a near-tie between two valid canonical modes returns 'low'
+    // and the empty-additionalContext branch suppresses the entire injection.
+    const topName = (top.name || '').toLowerCase();
+    const hasCanonicalMatch = !!(modeMap && Array.isArray(modeMap.entries)
+      && modeMap.entries.some((e) => {
+        if (!e) return false;
+        const ids = [e.id, e.mode].filter(Boolean).map((s) => String(s).toLowerCase());
+        if (ids.includes(topName)) return true;
+        // Also match if the top entry is in the entry's recommended_skills/agents
+        // (e.g. top BM25 hit is a skill like 'high-end-visual-design' that
+        // gsd-ui-phase routes to — canonical via the recommendation graph).
+        const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])]
+          .filter(Boolean).map((s) => String(s).toLowerCase());
+        return recs.includes(topName);
+      }));
+    const tier = confidenceTier(
+      top.norm,
+      runnerUp ? runnerUp.norm : 0,
+      modeMap.thresholds,
+      hasCanonicalMatch
+    );
+    decision.tier = tier;
+
+    // Map top manifest entry → mode-map entry by name/id match (best effort).
+    // Find the mode-map entry whose id or recommended_skills/agents contains
+    // the top corpus entry's name.
+    const mmEntry = (modeMap.entries || []).find((e) => {
+      if (e.id && e.id.toLowerCase() === topName) return true;
+      const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])];
+      return recs.some((r) => r.toLowerCase() === topName);
+    }) || null;
+
+    const route = {
+      mode: mmEntry ? mmEntry.mode : null,
+      invoke_kind: mmEntry ? mmEntry.invoke_kind : null,
+      recommended_skills: mmEntry ? mmEntry.recommended_skills : [],
+      recommended_agents: mmEntry ? mmEntry.recommended_agents : [],
+      tier,
+      args_hint: mmEntry ? mmEntry.args_hint : null,
+      scores: blended.slice(0, 3).map((s) => ({ name: s.name, norm: s.norm })),
+    };
+    decision.route = route;
+    decision.invoke_kind = route.invoke_kind;
+
+    // Apply guards (GRD-01 MCP demote, GRD-03 ralph two-gate, GRD-05 deny).
+    // GRD-02 scope filter already applied in buildCorpus; GRD-04 above.
+    const guarded = applyGuards(route, prompt, manifest, modeMap, {
+      queryTokens,
+      thresholds: modeMap.thresholds,
+      autoTopScore: top.score,
+    });
+    const finalRoute = guarded.route;
+    decision.guards_fired = guarded.guards_fired;
+
+    // GRD-05 deny-rule → no signature logged (Pitfall 8 belt-and-braces).
+    if (guarded.guards_fired.includes('deny_filtered')) {
+      decision.tier = 'deny_filtered';
+      decision.route = null;
+      decision.invoke_kind = null;
+      return; // pass-through, no signature persisted
+    }
+
+    // Cache ONLY High-tier decisive routes that survived guards (RTE-06/§8).
+    if (tier === 'high' && finalRoute && finalRoute.invoke_kind !== 'warn') {
+      writeCache(cache, sig, finalRoute);
+      try { saveCache(cache); } catch { /* fail-open: cache write error */ }
+    }
+
+    // Emit the injection (Plan 01-03). Low/no-route → pass-through.
+    if (finalRoute) {
+      decision.route = finalRoute;
+      decision.invoke_kind = finalRoute.invoke_kind;
+      const routeBlock = formatInjection(finalRoute, prompt, sig.slice(0, 8));
+      const graphBlock = (decision.graph_symbols && decision.graph_symbols.length)
+        ? formatGraphBlock(decision.graph_symbols) : '';
+      const injection = composeWithCap(routeBlock, graphBlock);
+      if (injection) emit(injection);
+    } else {
+      // Guards dropped the route (e.g. ralph no-verifiable-done-criteria → inline
+      // fallback). Tier stays as computed; route is null. Telemetry logs the
+      // guards_fired entry so Phase 3 can see the fallback.
+      decision.route = null;
+      decision.invoke_kind = null;
+    }
+  } finally {
+    // Log one telemetry line per prompt on every exit path (Plan 01-04 Task 1).
+    // Fail-open: a telemetry write error MUST NOT block injection.
+    if (decision.tier !== null) {
+      const guards = decision.guards_fired || [];
+      const denyFiltered = guards.includes('deny_filtered');
+      // deny-rule prompt → no signature logged (Pitfall 8 belt-and-braces).
+      const sig = denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords);
+      const entry = {
+        ts: Date.now(),
+        prompt_signature: sig,
+        suggested_mode: decision.route ? decision.route.mode : null,
+        suggested_skills: decision.route ? (decision.route.recommended_skills || []) : [],
+        suggested_agents: decision.route ? (decision.route.recommended_agents || []) : [],
+        confidence_tier: decision.tier,
+        invoke_kind: decision.invoke_kind || null,
+        graphify_queried: decision.graphify_queried || false,
+        graph_status: decision.graph_status || 'not_triggered',
+        guards_fired: guards,
+        downstream_invocations: null, // TEL-03: null v1, Phase 3 populates
+        outcome: null,                // TEL-03: null v1, Phase 3 populates
+        latency_ms: Number(process.hrtime.bigint() - startNs) / 1e6,
+        // Phase 3 / D-23 + RESEARCH §11: 4 new fields. Null on first run; the
+        // worker populates weights.json + evolution-state.json over time.
+        weight_applied: top && typeof top.weight_applied === 'number' ? top.weight_applied : null,
+        outcomes: weights && weights.weights && top && top.entry && top.entry.id && weights.weights[top.entry.id]
+          ? { g: weights.weights[top.entry.id].g || 0, b: weights.weights[top.entry.id].b || 0, u: weights.weights[top.entry.id].u || 0 }
+          : null,
+        evolved_after: evolvedAfter,
+        cwd: process.cwd(),
+      };
+      logTelemetry(entry);
+    }
+  }
+}
+
+function emit(additionalContext) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'UserPromptSubmit',
+      additionalContext,
+    },
+  }));
+}
+
+// --- entry point: outer try/catch = fail-open belt-and-braces -------------
+// Only runs when this file is executed directly (as a hook), not when
+// imported as a module by tests (isMain() guard prevents stdin listeners
+// from hanging the test runner).
+
+if (isMain()) {
+  readStdin((input) => {
+    let payload;
+    try {
+      payload = JSON.parse(input);
+    } catch {
+      process.exit(0); // malformed stdin -> pass-through
+      return;
+    }
+    try {
+      main(payload);
+    } catch {
+      // fail-open: emit nothing, never exit code 2, never a block decision
+    }
+    // Phase 3 / EVO-02: bump the evolve trigger counter; spawn the worker on
+    // counter % 200 === 0 (non-blocking via spawn().unref()). Non-blocking
+    // and try/catch-wrapped so any error in the trigger path is a no-op.
+    try { bumpEvolveTrigger(); } catch {}
+    // Debug-only latency line (guarded by env so production is silent).
+    // Consumed by tests/router.perf.test.mjs to assert in-process < 100ms.
+    if (process.env.ROUTER_DEBUG_LATENCY === '1' && globalThis.__routerStartNs) {
+      const ms = Number(process.hrtime.bigint() - globalThis.__routerStartNs) / 1e6;
+      process.stderr.write(`__router_latency_ms=${ms}\n`);
+    }
+    process.exit(0);
+  });
+}
