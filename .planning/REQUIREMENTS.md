@@ -9,13 +9,13 @@
 
 - [x] **COV-01**: Operator can audit the full inventory manifest across skills, plugin skills, agents, commands, hooks, and MCP servers.
 - [x] **COV-02**: Operator can compare inventory entries against `mode-map.json` and identify high-value unmapped skills, agents, and commands.
-- [ ] **COV-03**: Router has route clusters for debugging and bugfix work.
-- [ ] **COV-04**: Router has route clusters for tests and test-generation work.
-- [ ] **COV-05**: Router has route clusters for code review and audit work.
-- [ ] **COV-06**: Router has route clusters for UI and design work.
-- [ ] **COV-07**: Router has route clusters for GitHub, PR, and CI workflows.
-- [ ] **COV-08**: Router has route clusters for Graphify and codebase-understanding work.
-- [ ] **COV-09**: Router has route clusters for docs, spec, and planning workflows.
+- [x] **COV-03**: Router has route clusters for debugging and bugfix work.
+- [x] **COV-04**: Router has route clusters for tests and test-generation work.
+- [x] **COV-05**: Router has route clusters for code review and audit work.
+- [x] **COV-06**: Router has route clusters for UI and design work.
+- [x] **COV-07**: Router has route clusters for GitHub, PR, and CI workflows.
+- [x] **COV-08**: Router has route clusters for Graphify and codebase-understanding work.
+- [x] **COV-09**: Router has route clusters for docs, spec, and planning workflows.
 - [x] **COV-10**: Router has route clusters for agent-dispatch workflows.
 - [x] **COV-11**: Router has missing-MCP warning flows that use `warn` route entries rather than auto-dispatching blocked agents.
 - [x] **COV-12**: Router supports direct `agent` and `warn` route entries where those targets are the correct execution channel.
@@ -87,13 +87,13 @@
 |-------------|-------|--------|
 | COV-01 | Phase 5 | Complete |
 | COV-02 | Phase 5 | Complete |
-| COV-03 | Phase 5 | Pending |
-| COV-04 | Phase 5 | Pending |
-| COV-05 | Phase 5 | Pending |
-| COV-06 | Phase 5 | Pending |
-| COV-07 | Phase 5 | Pending |
-| COV-08 | Phase 5 | Pending |
-| COV-09 | Phase 5 | Pending |
+| COV-03 | Phase 5 | Complete |
+| COV-04 | Phase 5 | Complete |
+| COV-05 | Phase 5 | Complete |
+| COV-06 | Phase 5 | Complete |
+| COV-07 | Phase 5 | Complete |
+| COV-08 | Phase 5 | Complete |
+| COV-09 | Phase 5 | Complete |
 | COV-10 | Phase 5 | Complete |
 | COV-11 | Phase 5 | Complete |
 | COV-12 | Phase 5 | Complete |

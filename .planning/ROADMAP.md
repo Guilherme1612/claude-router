@@ -42,7 +42,7 @@ Plans:
 - [x] 05-01-PLAN.md — Inventory coverage audit and target validation tests.
 - [x] 05-02-PLAN.md — Data-first mode-map route cluster expansion.
 - [x] 05-03-PLAN.md — Direct agent/warn scoring and warning propagation.
-- [ ] 05-04-PLAN.md — Calibration fixtures and regression gates.
+- [x] 05-04-PLAN.md — Calibration fixtures and regression gates.
 
 #### Phase 6: Inspect and Preview Commands
 
@@ -113,7 +113,7 @@ Plans:
 | 2. Graphify Integration | v1.0 | 3/3 | Complete | 2026-07-08 |
 | 3. Evolution | v1.0 | 3/3 | Complete | 2026-07-09 |
 | 4. Ancestor Reuse | v1.0 | 2/2 | Complete | 2026-07-09 |
-| 5. Route Coverage Expansion | v1.1 | 3/4 | Executing | — |
+| 5. Route Coverage Expansion | v1.1 | 4/4 | Complete | 2026-07-09 |
 | 6. Inspect and Preview Commands | v1.1 | 0/? | Planned | — |
 | 7. Health, Routes, Unmapped, and Coverage Utilities | v1.1 | 0/? | Planned | — |
 | 8. Codebase Routing Calibration | v1.1 | 0/? | Planned | — |

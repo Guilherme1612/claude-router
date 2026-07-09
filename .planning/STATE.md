@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Inspectable Routing Control Layer
-current_phase: 05
-current_phase_name: route-coverage-expansion
+current_phase: 06
+current_phase_name: inspect-and-preview-commands
 status: executing
-stopped_at: v1.1 milestone initialized
-last_updated: "2026-07-09T19:27:04Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-07-09T20:05:00Z"
 last_activity: 2026-07-09
 last_activity_desc: Phase 05 execution started
 progress:
   total_phases: 6
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
-  completed_plans: 3
-  percent: 75
+  completed_plans: 4
+  percent: 100
 ---
 
 # STATE: Claude Router
@@ -30,16 +30,16 @@ progress:
 
 ## Current Position
 
-Phase: 05 (route-coverage-expansion) — EXECUTING
-Plan: 4 of 4
-Status: Executing Phase 05
-Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and warning propagation
+Phase: 06 (inspect-and-preview-commands) — READY
+Plan: 1 of ?
+Status: Phase 05 complete; ready to plan/execute Phase 06
+Last activity: 2026-07-09 — Completed plan 05-04 calibration fixtures and regression gates
 
 ## Performance Metrics
 
 - **Phases complete:** 0 / 6
 - **Requirements satisfied:** 30 / 30 (v1) — HOOK-01..04, INJ-05, COX-01, MAN-01, MAN-02 (Plan 01-01) + RTE-01..07, GRF-01 (Plan 01-02) + INJ-01..04, INJ-06, GRD-01..05 (Plan 01-03) + TEL-01..03, VRF-01..02 (Plan 01-04)
-- **Plans executed:** 5 (01-01, 01-02, 01-03, 01-04, 03-02) — Plan 03-02 wires the 12 evolve primitives (Plan 03-01) into both the hot path and a new worker main(). 33 new tests added; full suite 284/286 (2 pre-existing failures unrelated).
+- **Plans executed:** 9 (01-01, 01-02, 01-03, 01-04, 03-02, 05-01, 05-02, 05-03, 05-04) — Plan 05-04 added Phase 05 calibration fixtures and coverage gates; full suite 324/324 passing.
 
 ## Accumulated Context
 
@@ -60,6 +60,7 @@ Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and
 - **Plan 01-03: Token-cap warn-truncation fallback** uses a 2-token safety margin so a 2000-char warning still lands ≤500 tokens via the ~4-chars-per-token approximation.
 - **Plan 01-03: formatInjection block layout** — `\n\n` prepend → open sentinel with mode/tier/sig metadata → `Reasoning: <one sentence>` → per-invoke_kind instruction line(s) → close sentinel. Low tier emits nothing (true pass-through, no sentinel). Medium tier has NO `Run /` instruction line (Pitfall 2 — a slash at Medium would auto-fire when the model reads it).
 - **Plan 05-03: direct warn entries score as mode-map-owned corpus entries** because they deliberately have no dispatch target to associate with a manifest skill or agent. The route object copies `mmEntry.warning` in both the live hook and calibration dry-run so custom warning text reaches injection.
+- **Plan 05-04: Phase 05 COV fixtures are required in calibration threshold** so every route coverage fixture must stay green while original 10/10, codebase, and evolution gates remain represented.
 - **4 phases, sequential** derived from requirements (traceability table + idea doc). Phase 1 is load-bearing and large but coherent — one closed loop; not safely splittable. Internal 7-step sub-sequencing captured as a phase note, NOT as separable shippable phases.
 - **Hook-contract correction (load-bearing):** `UserPromptSubmit` can ONLY append `additionalContext` (model-read). Harness does NOT auto-run appended slashes. The MODEL executes every channel. "High-confidence auto-invoke" = a strong model instruction, not harness execution. Reflected in all phase goals + success criteria.
 - **Phase 3 is usage-gated**, not Phase-2-gated: sequence after a ~2-week telemetry window, not strictly after Phase 2.
@@ -80,10 +81,10 @@ Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and
 
 ### TODOs
 
-- [ ] Plan Phase 5: Route Coverage Expansion.
+- [x] Plan Phase 5: Route Coverage Expansion.
 - [x] Audit full inventory manifest against `mode-map.json` before adding coverage.
 - [x] Add tests for direct `agent` and `warn` route entries.
-- [ ] Preserve v1.0 calibration and hot-path safety while expanding codebase-task coverage.
+- [x] Preserve v1.0 calibration and hot-path safety while expanding route coverage.
 
 ### Blockers
 
@@ -91,12 +92,12 @@ Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and
 
 ## Session Continuity
 
-**Last session:** 2026-07-09T19:27:04Z
-**Stopped at:** Completed 05-03-PLAN.md
+**Last session:** 2026-07-09T20:05:00Z
+**Stopped at:** Completed 05-04-PLAN.md
 **Resume file:** .planning/ROADMAP.md
 
-- **Last action:** Completed plan 05-03 with direct agent/warn route tests and custom warning propagation.
-- **Next action:** Continue Phase 05 with 05-04 calibration fixtures and regression gates.
+- **Last action:** Completed plan 05-04 with Phase 05 calibration fixtures, coverage regression tests, and full regression gates.
+- **Next action:** Start Phase 06 inspect and preview commands.
 - **Open questions carried forward:** exact route cluster boundaries after manifest audit; codebase calibration target threshold beyond "materially better than 2/5"; final command surface naming if scripts rather than a single `router` CLI are used.
 
 ---
@@ -111,7 +112,8 @@ Last activity: 2026-07-09 — Completed plan 05-03 direct agent/warn scoring and
 | Phase 03 P02 | ~45min | 3 tasks | 6 files (router.mjs + router.evolve.mjs + 4 test files) |
 | Phase 05 P01 | ~15min | 2 tasks | 2 files |
 | Phase 05 P03 | ~12min | 2 tasks | 3 files |
+| Phase 05 P04 | ~35min | 3 tasks | 5 files |
 
 ## Operator Next Steps
 
-- Continue Phase 05 with `05-04-PLAN.md`.
+- Start Phase 06: Inspect and Preview Commands.
