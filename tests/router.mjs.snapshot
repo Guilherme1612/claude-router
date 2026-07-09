@@ -32,6 +32,12 @@ import { createRequire } from 'node:module';
 // Resolves relative to this file (router.mjs), not process.cwd() — safe across
 // symlink layouts. The three CJS modules are required lazily on first use of
 // applySurfaceFilter (Pitfall 3 / D-04). Sentinel `false` = unimportable.
+// Use absolute paths under RUNTIME_CONFIG_DIR (resolved above) because Node's
+// module resolution from ~/.claude/hooks/router.mjs has no node_modules in
+// its lookup chain — a bare specifier like 'gsd-core/bin/lib/surface.cjs'
+// would silently fail at runtime (RESEARCH Pitfall 3). The SKILL.md shows
+// the bare specifier as a documentation example; the actual runtime pattern
+// is absolute-path require, which is what this code does.
 const _require = createRequire(import.meta.url);
 let _surfaceMod = null;
 let _clustersMod = null;
@@ -67,8 +73,15 @@ const EVOLVE_TRIGGER_N = 200;
 // the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
 // SURFACE_FILE is the cache-key path (mtime only — never read directly; the
 // router always goes through surface.cjs:resolveSurface per D-03).
+// GSD_CORE_DIR is the absolute path to the gsd-core engine lib dir, used as
+// the require target for surface.cjs / clusters.cjs / capability-registry.cjs.
+// Bare-specifier requires like 'gsd-core/bin/lib/surface.cjs' would silently
+// fail (RESEARCH Pitfall 3) because ~/.claude/hooks/router.mjs has no
+// node_modules in its resolution chain. Absolute-path require is the runtime
+// pattern used by gsd-surface itself in production.
 const RUNTIME_CONFIG_DIR = join(homedir(), '.claude');
 const SURFACE_FILE = join(RUNTIME_CONFIG_DIR, '.gsd-surface.json');
+const GSD_CORE_DIR = join(RUNTIME_CONFIG_DIR, 'gsd-core', 'bin', 'lib');
 
 // Lazy require getters. Each caches its result (or the sentinel `false`) so
 // the per-prompt cost is one Map lookup after the first call. surface.cjs and
@@ -76,24 +89,180 @@ const SURFACE_FILE = join(RUNTIME_CONFIG_DIR, '.gsd-surface.json');
 // capability-registry.cjs is optional (the helper still works without it).
 function getSurfaceMod() {
   if (_surfaceMod === null) {
-    try { _surfaceMod = _require('gsd-core/bin/lib/surface.cjs'); }
+    try { _surfaceMod = _require(join(GSD_CORE_DIR, 'surface.cjs')); }
     catch (_) { _surfaceMod = false; }
   }
   return _surfaceMod || null;
 }
 function getClustersMod() {
   if (_clustersMod === null) {
-    try { _clustersMod = _require('gsd-core/bin/lib/clusters.cjs'); }
+    try { _clustersMod = _require(join(GSD_CORE_DIR, 'clusters.cjs')); }
     catch (_) { _clustersMod = false; }
   }
   return _clustersMod || null;
 }
 function getRegistryMod() {
   if (_registryMod === null) {
-    try { _registryMod = _require('gsd-core/bin/lib/capability-registry.cjs'); }
+    try { _registryMod = _require(join(GSD_CORE_DIR, 'capability-registry.cjs')); }
     catch (_) { _registryMod = false; }
   }
   return _registryMod || null;
+}
+
+// Phase 4 / ANC-01: post-filter on buildCorpus output via gsd-surface's
+// resolveSurface (D-01..D-08). The router NEVER reads or parses
+// .gsd-surface.json directly (D-03) — every read goes through
+// surfaceMod.resolveSurface. Fail-open: any throw or missing module
+// returns the input corpus unchanged with surface_status='absent'.
+// Mtime-keyed in-process cache, per-runtimeConfigDir (D-07): sub-ms warm, <5ms cold.
+
+// Transform the router's inventory manifest ({ skills:[], agents:[], ... })
+// into a stem-dep map ({ [stem]: requires[] }) that surface.cjs's
+// normalizeSkillManifest understands. The inventory manifest is the
+// canonical record of WHAT EXISTS on the user's machine (D-02 / RTE-01);
+// surface.cjs needs to know WHAT each stem requires to compute
+// transitive closure on explicitAdds. The router doesn't track requires
+// in its inventory, so the value is `[]` for every stem — sufficient for
+// the disable-ability use case (cluster → set of stems → drop from
+// enabled set) and for the base-profile resolution. Pure + local.
+function _inventoryToStemMap(manifest) {
+  if (!manifest || typeof manifest !== 'object') return {};
+  const out = {};
+  const lists = ['skills', 'plugin_skills', 'agents_store_skills', 'project_scoped_skills', 'agents', 'commands'];
+  for (const key of lists) {
+    const arr = Array.isArray(manifest[key]) ? manifest[key] : [];
+    for (const e of arr) {
+      if (!e || !e.name) continue;
+      const stem = String(e.name);
+      if (!(stem in out)) out[stem] = [];
+    }
+  }
+  return out;
+}
+
+const _surfaceCaches = new Map(); // runtimeConfigDir -> { mtimeMs, enabledSet, surfaceStatus, disabledCount }
+export function _resetSurfaceCache() {
+  _surfaceCaches.clear();
+}
+function _getCache(runtimeConfigDir) {
+  let c = _surfaceCaches.get(runtimeConfigDir);
+  if (!c) {
+    c = { mtimeMs: 0, enabledSet: null, surfaceStatus: 'unconfigured', disabledCount: 0 };
+    _surfaceCaches.set(runtimeConfigDir, c);
+  }
+  return c;
+}
+
+// applySurfaceFilter(corpus, manifest, modeMap, runtimeConfigDir = RUNTIME_CONFIG_DIR)
+//   -> { corpus, surface_status, surface_disabled_count }
+//
+// CRITICAL (RESEARCH Pitfall 1): the `manifest` passed to resolveSurface is the
+// RAW manifest object (the stem-dep map shape), NOT the corpus (which is the
+// BM25-doc shape). Passing the corpus to resolveSurface would make
+// normalizeSkillManifest return an empty Map, silently filtering out ALL
+// corpus entries. modeMap is accepted but unused (symmetry with buildCorpus
+// + future-proofing for Phase 5+ surface-aware rules per RESEARCH §2).
+export function applySurfaceFilter(corpus, manifest, modeMap, runtimeConfigDir = RUNTIME_CONFIG_DIR) {
+  // Default branch: empty corpus, no work to do.
+  if (!Array.isArray(corpus) || corpus.length === 0) {
+    return { corpus, surface_status: 'unconfigured', surface_disabled_count: 0 };
+  }
+  // Outer try/catch = fail-open belt-and-braces (D-06 / Phase-1 D-02).
+  try {
+    const surfaceMod = getSurfaceMod();
+    const clustersMod = getClustersMod();
+    const registryMod = getRegistryMod();
+    // Module-sentinel fail-open: both surfaceMod and clustersMod are mandatory
+    // for resolveSurface. If either is unimportable, return the input corpus
+    // unchanged with surface_status='absent' (D-08: 'absent' = the gsd-core
+    // modules are missing). Note: this does NOT cache the absent verdict —
+    // module availability is rechecked on every call so a later gsd-core
+    // install would still be picked up (cheap: one try/catch + sentinel read).
+    if (!surfaceMod || !clustersMod) {
+      return { corpus, surface_status: 'absent', surface_disabled_count: 0 };
+    }
+
+    const cache = _getCache(runtimeConfigDir);
+    const surfaceFile = join(runtimeConfigDir, '.gsd-surface.json');
+    // Mtime check (sub-ms). file missing → mtime 0 → cache miss → cold path
+    // → resolveSurface reads .gsd-profile and falls through to 'full' default.
+    let mtime = 0;
+    try { mtime = statSync(surfaceFile).mtimeMs; } catch (_) { /* missing */ }
+    const cacheHit = mtime === cache.mtimeMs && cache.enabledSet !== null;
+    if (!cacheHit) {
+      cache.mtimeMs = mtime;
+      // Cold path: call resolveSurface. On any throw → set sentinel, return.
+      // The router's inventory manifest is the { skills:[], agents:[], ... }
+      // shape; surface.cjs's normalizeSkillManifest expects a stem-dep map
+      // (Map<stem, requires[]> or { [stem]: string[] }). We transform the
+      // inventory into the stem-dep shape inline so resolveSurface can match
+      // names against the cluster map. The requires[] for each stem is empty
+      // (we don't track deps in the router's manifest) — sufficient for
+      // enable/disable by cluster name + transitive closure on explicitAdds.
+      const stemMap = _inventoryToStemMap(manifest);
+      let resolved;
+      try {
+        resolved = surfaceMod.resolveSurface(
+          runtimeConfigDir, stemMap, clustersMod.CLUSTERS, registryMod || undefined
+        );
+      } catch (_) {
+        // resolveSurface threw (malformed manifest, etc.) — fail-open.
+        cache.enabledSet = new Set();
+        cache.surfaceStatus = 'absent';
+        cache.disabledCount = 0;
+        return { corpus, surface_status: 'absent', surface_disabled_count: 0 };
+      }
+      // Defensive type-check: resolved.skills is documented as Set<string> but
+      // tolerate a future shape change (Array, etc.) by normalizing to a Set.
+      cache.enabledSet = resolved && resolved.skills instanceof Set
+        ? resolved.skills
+        : new Set(resolved && resolved.skills ? resolved.skills : []);
+      // Decide status. existsSync catches the corrupt-but-present file case:
+      // resolveSurface falls through to readActiveProfile on parse error
+      // (line 79 of surface.cjs returns null), so the result is the 'full'
+      // default surface — but the file DOES exist. Per D-08 the cleanest
+      // mapping is: file present AND a non-empty enabled set → 'applied';
+      // file missing or enabled set is the full set → 'unconfigured'.
+      let fileExists = false;
+      try { fileExists = existsSync(surfaceFile); } catch (_) { fileExists = false; }
+      cache.surfaceStatus = fileExists ? 'applied' : 'unconfigured';
+      // Disabled count is computed AFTER the filter pass below — the
+      // authoritative count is `corpus.length - filtered.length` (matches
+      // what the user actually sees in the routing output), not a manifest
+      // math derivation. We seed it to 0 here and overwrite in the filter
+      // pass.
+      cache.disabledCount = 0;
+    }
+
+    // Filter pass — runs on every call (both warm and cold). The Set lookup
+    // is the only per-corpus-entry cost; well under 1ms for ~244 entries.
+    const enabledSet = cache.enabledSet;
+    if (enabledSet.size === 0) {
+      // Empty Set = first-call failure (or surface.cjs returned an empty set).
+      // Pass through unchanged — this is fail-open semantics for the
+      // degenerate case where surface.cjs is importable but resolveSurface
+      // returned nothing usable. Status reflects what the cache decided.
+      return {
+        corpus,
+        surface_status: cache.surfaceStatus,
+        surface_disabled_count: 0,
+      };
+    }
+    const filtered = corpus.filter((c) => enabledSet.has(String(c.name || '')));
+    // Recompute disabledCount on the cold path: this is the authoritative
+    // count of "stems the user can't route to" (corpus before vs after
+    // the surface filter). Cached value persists for the warm path.
+    if (!cacheHit) cache.disabledCount = Math.max(0, corpus.length - filtered.length);
+    return {
+      corpus: filtered,
+      surface_status: cache.surfaceStatus,
+      surface_disabled_count: cache.disabledCount,
+    };
+  } catch (_) {
+    // Outer try/catch belt-and-braces: any throw in this helper returns
+    // the input corpus unchanged with 'absent' (D-06 fail-open contract).
+    return { corpus, surface_status: 'absent', surface_disabled_count: 0 };
+  }
 }
 
 export const SENTINEL = '<!-- router-inject -->';
