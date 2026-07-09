@@ -1394,6 +1394,11 @@ function main(payload) {
     invoke_kind: null,
     normalizedPrompt: '',
     intentKeywords: [],
+    // Phase 4 / ANC-01 / D-08 — additive surface filter status. Default
+    // values match the early-exit paths (trivial, user_explicit, reentry,
+    // stale, manifest_missing) so the telemetry write never sees undefined.
+    surface_status: 'unconfigured',
+    surface_disabled_count: 0,
   };
 
   try {
@@ -1519,13 +1524,26 @@ function main(payload) {
     }
 
     const corpus = buildCorpus(manifest, modeMap);
+    // Phase 4 / ANC-01: post-filter on buildCorpus output via gsd-surface
+    // (D-01..D-08). The user's surface profile (e.g. `gsd-surface disable
+    // core_loop`) is now authoritative for what can be routed to. The
+    // helper is fail-open: on any throw the input corpus is returned
+    // unchanged with surface_status='absent'. Downstream (bm25Score,
+    // applyGraphBoost, applyWeightBlend, etc.) operates on filteredCorpus
+    // so the boost / blend / tier pipeline respects the surface.
+    const _sf = applySurfaceFilter(corpus, manifest, modeMap);
+    decision.surface_status = _sf.surface_status;
+    decision.surface_disabled_count = _sf.surface_disabled_count;
+    const filteredCorpus = _sf.corpus;
     const queryTokens = tokenize(prompt);
-    const scored = bm25Score(queryTokens, corpus);
+    const scored = bm25Score(queryTokens, filteredCorpus);
     // applyGraphBoost (D-07): insert +0.15 on manifest entries whose name is
     // in BOTH the graph's top-K boostIds AND the global manifest name set.
     // Operates on the post-bm25 array BEFORE tier normalization so the boost
-    // influences the top-1 / runner-up decision.
-    const manifestIdSet = new Set((corpus || []).map((c) => String(c.name || '').toLowerCase()));
+    // influences the top-1 / runner-up decision. The manifestIdSet is
+    // derived from filteredCorpus (not the unfiltered corpus) so graph
+    // boosts can only target enabled-stem entries (D-14 / T-04.1-06).
+    const manifestIdSet = new Set((filteredCorpus || []).map((c) => String(c.name || '').toLowerCase()));
     const boosted = (graph.boostIds && graph.boostIds.size > 0)
       ? applyGraphBoost(scored, graph.boostIds, manifestIdSet, GRAPH_BOOST)
       : scored;
@@ -1658,6 +1676,17 @@ function main(payload) {
           ? { g: weights.weights[top.entry.id].g || 0, b: weights.weights[top.entry.id].b || 0, u: weights.weights[top.entry.id].u || 0 }
           : null,
         evolved_after: evolvedAfter,
+        // Phase 4 / ANC-01 / D-08: additive surface filter status. Always
+        // present (decision init sets 'unconfigured'/0 as defaults), so
+        // existing telemetry consumers never see a new null/undefined value.
+        //   'applied'      — .gsd-surface.json read, resolveSurface succeeded, filter applied
+        //   'unconfigured' — no .gsd-surface.json OR no .gsd-profile; router used full manifest
+        //   'absent'       — surface.cjs/clusters.cjs/capability-registry.cjs unimportable
+        surface_status: decision.surface_status || 'unconfigured',
+        // Authoritative count of corpus entries dropped by the surface filter
+        // (0 when surface_status !== 'applied'). Defaulted to 0 on early-exit
+        // paths where the filter never ran.
+        surface_disabled_count: typeof decision.surface_disabled_count === 'number' ? decision.surface_disabled_count : 0,
         cwd: process.cwd(),
       };
       logTelemetry(entry);
