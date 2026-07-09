@@ -31,14 +31,16 @@
 **Requirements:** COV-01, COV-02, COV-03, COV-04, COV-05, COV-06, COV-07, COV-08, COV-09, COV-10, COV-11, COV-12
 
 **Success criteria:**
+
 1. Inventory audit covers skills, plugin skills, agents, commands, hooks, and MCP servers.
 2. Coverage report identifies high-value unmapped inventory before and after mode-map changes.
 3. New route clusters cover debugging, tests, review/audit, UI/design, GitHub/PR/CI, Graphify/codebase, docs/spec/planning, agent dispatch, and missing-MCP warnings.
 4. `agent` and `warn` route entries are tested directly, not only inferred through slash or skill routes.
 
-**Plans:** 4 plans
+**Plans:** 4/4 plans complete
 
 Plans:
+
 - [x] 05-01-PLAN.md — Inventory coverage audit and target validation tests.
 - [x] 05-02-PLAN.md — Data-first mode-map route cluster expansion.
 - [x] 05-03-PLAN.md — Direct agent/warn scoring and warning propagation.
@@ -51,6 +53,7 @@ Plans:
 **Requirements:** INS-01, INS-02, INS-03, INS-04
 
 **Success criteria:**
+
 1. `router inspect "<prompt>"` reports normalized prompt, candidates, scores, margin, selected tier, selected route, guards, cache status, graphify status, final injected context, and pass-through reason.
 2. `router preview "<prompt>"` performs a dry run without cache or telemetry mutation.
 3. `router explain-last` reconstructs the latest telemetry decision without exposing raw prompt text.
@@ -63,6 +66,7 @@ Plans:
 **Requirements:** HLT-01, HLT-02, HLT-03, HLT-04, HLT-05
 
 **Success criteria:**
+
 1. `router doctor` reports manifest freshness, route coverage, high-value unmapped inventory, missing MCP servers, blocked agents, stale route targets, hook status, cache/telemetry/weights status, and last evolution status.
 2. `router routes` lists routeable entries with examples.
 3. `router unmapped` lists useful inventory that lacks mode-map coverage.
@@ -75,6 +79,7 @@ Plans:
 **Requirements:** CAL-01, CAL-02, CAL-03, CAL-04, CAL-05, CAL-06, CAL-07, CAL-08, CAL-09
 
 **Success criteria:**
+
 1. Calibration fixtures cover refactor, bugfix, tests, changed-code review, data-flow tracing, architecture explanation, and implementation lookup prompts.
 2. Codebase calibration improves materially from the current 2/5 baseline.
 3. Original core calibration fixtures remain 10/10.
@@ -87,6 +92,7 @@ Plans:
 **Requirements:** EVO-01, EVO-02, EVO-03, EVO-04
 
 **Success criteria:**
+
 1. The reason `weight_applied` is effectively 0 is visible in doctor or evolution status output.
 2. Inspect/doctor surfaces relevant evolution output and last-run status.
 3. Proposal mode summarizes recent telemetry misses and suggests mode-map changes without mutating the mode map.
@@ -99,6 +105,7 @@ Plans:
 **Requirements:** SAF-01, SAF-02, SAF-03, SAF-04, SAF-05, SAF-06, SAF-07, SAF-08
 
 **Success criteria:**
+
 1. Hot-path tests prove fail-open behavior and <100ms warm routing remain intact.
 2. No per-prompt external classifier is introduced.
 3. Missing-MCP agents are warned or diagnosed but not auto-dispatched.
@@ -113,7 +120,7 @@ Plans:
 | 2. Graphify Integration | v1.0 | 3/3 | Complete | 2026-07-08 |
 | 3. Evolution | v1.0 | 3/3 | Complete | 2026-07-09 |
 | 4. Ancestor Reuse | v1.0 | 2/2 | Complete | 2026-07-09 |
-| 5. Route Coverage Expansion | v1.1 | 4/4 | Complete | 2026-07-09 |
+| 5. Route Coverage Expansion | v1.1 | 4/4 | Complete    | 2026-07-09 |
 | 6. Inspect and Preview Commands | v1.1 | 0/? | Planned | — |
 | 7. Health, Routes, Unmapped, and Coverage Utilities | v1.1 | 0/? | Planned | — |
 | 8. Codebase Routing Calibration | v1.1 | 0/? | Planned | — |
