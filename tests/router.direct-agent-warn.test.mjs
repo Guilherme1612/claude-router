@@ -81,15 +81,6 @@ function fixtureModeMap() {
 
 function scorePromptToRoute(prompt, manifest = fixtureManifest(), modeMap = fixtureModeMap()) {
   const corpus = buildCorpus(manifest, modeMap);
-  for (const e of (modeMap.entries || [])) {
-    if (!e || e.invoke_kind !== 'warn') continue;
-    const name = String(e.id || '');
-    const docText = `${name} ${name} ${name} ${(e.signal_patterns || []).join(' ')}`;
-    const toks = tokenize(docText);
-    const tf = new Map();
-    for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
-    corpus.push({ entry: e, name, tokens: tf, dl: toks.length });
-  }
   const queryTokens = tokenize(prompt);
   const scored = bm25Score(queryTokens, corpus);
   const normed = normalize(scored);

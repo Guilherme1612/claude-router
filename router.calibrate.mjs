@@ -131,6 +131,7 @@ function dryRun(prompt, manifest, modeMap, cwd = process.cwd(), weights = null) 
     recommended_agents: mmEntry ? mmEntry.recommended_agents : [],
     tier,
     args_hint: mmEntry ? mmEntry.args_hint : null,
+    warning: mmEntry ? mmEntry.warning || null : null,
     scores: top3,
     weight_applied: topWeightApplied,
   };
