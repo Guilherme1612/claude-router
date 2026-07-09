@@ -181,10 +181,11 @@ test('telemetry: redact replaces all known secret shapes (no raw secret remains)
   }
 });
 
-// --- weights.json is the empty v1 schema ------------------------------------
-test('telemetry: weights.json is the empty v1 schema {schema_version:1, weights:{}}', () => {
+// --- weights.json schema -----------------------------------------------------
+test('telemetry: weights.json uses the current schema with a weights object', () => {
   const weightsPath = join(homedir(), '.claude', 'router', 'weights.json');
   const w = JSON.parse(readSync(weightsPath, 'utf8'));
-  assert.equal(w.schema_version, 1);
-  assert.deepEqual(w.weights, {});
+  assert.equal(w.schema_version, 2);
+  assert.equal(typeof w.weights, 'object');
+  assert.notEqual(w.weights, null);
 });

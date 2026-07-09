@@ -59,13 +59,22 @@ test('calibration-tasks.json: every codebase fixture right.mode exists in mode-m
     const rightMode = (t.right.mode || '').replace(/^\//, '');
     if (rightMode === '') {
       // Skill-only edge (mode=null is allowed for skill-only routes — fixture #7,
-      // #14). The harness still expects the recommended_skills to map to a
-      // mode-map entry, so check at least one skill resolves to an entry.
+      // #14). A skill may be surfaced by mode-map recommendations or directly
+      // from the manifest skill inventory.
       const skills = t.right.skills || [];
+      const manifest = JSON.parse(readFileSync(MANIFEST, 'utf8'));
+      const manifestSkillNames = new Set([
+        ...(manifest.skills || []).map((s) => s.name),
+        ...(manifest.plugin_skills || []).map((s) => s.name),
+      ]);
       const skillInMap = skills.some((s) =>
         (modeMap.entries || []).some((e) => (e.recommended_skills || []).includes(s))
       );
-      assert.ok(skillInMap, `fixture #${t.id} skill-only edge: no skill [${skills.join(',')}] in mode-map`);
+      const skillInManifest = skills.some((s) => manifestSkillNames.has(s));
+      assert.ok(
+        skillInMap || skillInManifest,
+        `fixture #${t.id} skill-only edge: no skill [${skills.join(',')}] in mode-map or manifest`
+      );
     } else {
       assert.ok(modeMapModes.has(rightMode), `fixture #${t.id} right.mode=${rightMode} not in mode-map`);
     }

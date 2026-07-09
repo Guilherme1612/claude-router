@@ -144,12 +144,12 @@
     "codebase": true,
     "graph_status_expected": "ok",
     "right": {
-      "mode": "/gsd-quick",
+      "mode": "/gsd-explore",
       "skills": [],
       "agents": [],
       "tier": "medium",
       "status": "route",
-      "edge": "in-project refactor + concept node (typed_confirm_modal) — gsd-quick is the closest existing mode-map entry; gsd-refactor does not exist in mode-map.json"
+      "edge": "in-project refactor + concept node (typed_confirm_modal) - gsd-explore is the closest existing mode-map entry for ambiguous design/refactor exploration; gsd-refactor and gsd-quick do not exist in mode-map.json"
     }
   },
   {
