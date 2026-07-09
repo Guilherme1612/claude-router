@@ -21,19 +21,20 @@ const REAL_GRAPH_DIR = '/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading';
 
 // --- Fixture schema + count ----------------------------------------------
 
-test('calibration-tasks.json: total entries in 16-20 range (10 originals + 5 codebase + 3-5 evolution)', () => {
+test('calibration-tasks.json: total entries include originals, codebase, evolution, and Phase 05 coverage', () => {
   // Phase 3 (Plan 03-03): extended the Phase-2 13-15 set with 3-5 evolution
-  // fixtures. The count guard lives in router.calibrate.mjs and is updated
-  // atomically with the fixture append.
+  // fixtures. Phase 05 adds standing COV route-coverage fixtures.
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
   assert.ok(Array.isArray(tasks), 'tasks must be an array');
-  assert.ok(tasks.length >= 16 && tasks.length <= 20, `expected 16-20 entries, got ${tasks.length}`);
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution).length;
+  assert.ok(tasks.length >= 25 && tasks.length <= 32, `expected 25-32 entries, got ${tasks.length}`);
+  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   assert.equal(originalCount, 10, '10 Phase-1 originals must be preserved');
   assert.ok(codebaseCount >= 3 && codebaseCount <= 5, `expected 3-5 codebase fixtures, got ${codebaseCount}`);
   assert.ok(evolutionCount >= 3 && evolutionCount <= 5, `expected 3-5 evolution fixtures, got ${evolutionCount}`);
+  assert.ok(phase05Count >= 9, `expected at least 9 Phase 05 COV fixtures, got ${phase05Count}`);
 });
 
 test('calibration-tasks.json: each codebase fixture has cwd + graph_status_expected fields', () => {
@@ -132,17 +133,17 @@ test('dryRun (Phase 2): trivial prompt (cwd with graph) → graph_status=not_tri
 
 // --- Pass threshold computation ------------------------------------------
 
-test('pass threshold: originalCount + 1 (D-16) + 1 (D-25 evolution) — N + 2', () => {
+test('pass threshold: originalCount + 1 (D-16) + 1 (D-25 evolution) + Phase 05 coverage', () => {
   // Phase 3 (Plan 03-03): pass threshold bumped to N + 2 to require at least
   // 1 codebase + 1 evolution fixture to be right (in addition to the 10
-  // Phase-1 originals). The harness derives the threshold from the fixture
-  // list, not from a magic constant.
+  // Phase-1 originals). Phase 05 also requires every COV fixture to pass.
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution).length;
+  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
-  // Mirror the harness's threshold computation: originalCount + 1 + 1.
-  const expectedThreshold = originalCount + 1 + 1;
+  // Mirror the harness's threshold computation: originalCount + 1 + 1 + phase05Count.
+  const expectedThreshold = originalCount + 1 + 1 + phase05Count;
   // Sanity: must be > originalCount (so at least 1 codebase + 1 evolution right is required)
   assert.ok(expectedThreshold > originalCount);
   // Sanity: must be <= total fixture count
@@ -150,4 +151,5 @@ test('pass threshold: originalCount + 1 (D-16) + 1 (D-25 evolution) — N + 2', 
   // Sanity: codebase + evolution subsets each >= 1
   assert.ok(codebaseCount >= 1);
   assert.ok(evolutionCount >= 1);
+  assert.ok(phase05Count >= 9);
 });
