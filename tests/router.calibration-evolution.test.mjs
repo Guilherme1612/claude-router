@@ -21,16 +21,18 @@ const MANIFEST = join(homedir(), '.claude', 'router', 'claude-inventory-manifest
 
 // --- Fixture schema + count ----------------------------------------------
 
-test('calibration-tasks.json: total entries in 16-20 range (10 originals + 5 codebase + 3-5 evolution)', () => {
+test('calibration-tasks.json: total entries include originals, codebase, evolution, and Phase 05 coverage', () => {
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
   assert.ok(Array.isArray(tasks), 'tasks must be an array');
-  assert.ok(tasks.length >= 16 && tasks.length <= 20, `expected 16-20 entries, got ${tasks.length}`);
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution).length;
+  assert.ok(tasks.length >= 25 && tasks.length <= 32, `expected 25-32 entries, got ${tasks.length}`);
+  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   assert.equal(originalCount, 10, '10 Phase-1 originals must be preserved');
   assert.ok(codebaseCount >= 3 && codebaseCount <= 5, `expected 3-5 codebase fixtures, got ${codebaseCount}`);
   assert.ok(evolutionCount >= 3 && evolutionCount <= 5, `expected 3-5 evolution fixtures, got ${evolutionCount}`);
+  assert.ok(phase05Count >= 9, `expected at least 9 Phase 05 COV fixtures, got ${phase05Count}`);
 });
 
 test('calibration-tasks.json: every evolution fixture has the documented schema', () => {
@@ -71,12 +73,13 @@ test('calibration-tasks.json: every evolution fixture right.mode (if set) exists
 
 // --- Pass threshold computation ------------------------------------------
 
-test('pass threshold (Phase 3): originalCount + 1 (codebase) + 1 (evolution) = N + 2', () => {
+test('pass threshold: originalCount + 1 codebase + 1 evolution + Phase 05 coverage', () => {
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution).length;
+  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
-  const expectedThreshold = originalCount + 1 + 1; // N + 2
+  const expectedThreshold = originalCount + 1 + 1 + phase05Count;
   // Sanity: threshold > originalCount (forces at least 1 codebase + 1 evolution right)
   assert.ok(expectedThreshold > originalCount,
     `threshold must exceed originalCount; got threshold=${expectedThreshold} original=${originalCount}`);
@@ -86,6 +89,7 @@ test('pass threshold (Phase 3): originalCount + 1 (codebase) + 1 (evolution) = N
   // Sanity: codebase + evolution subsets each >= 1
   assert.ok(codebaseCount >= 1, `need >= 1 codebase fixture, got ${codebaseCount}`);
   assert.ok(evolutionCount >= 1, `need >= 1 evolution fixture, got ${evolutionCount}`);
+  assert.ok(phase05Count >= 9, `need >= 9 Phase 05 fixtures, got ${phase05Count}`);
 });
 
 // --- evolutionRight shape + behavior -------------------------------------
