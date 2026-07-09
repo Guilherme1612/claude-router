@@ -121,5 +121,141 @@
       "status": "user_explicit",
       "edge": "explicit override (GRD-04) — prompt starts with /, pass-through + log user_explicit, NO injection"
     }
+  },
+  {
+    "id": 11,
+    "prompt": "how does the memo writer persona work? what calls it?",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "ok",
+    "right": {
+      "mode": "/gsd-explore",
+      "skills": [],
+      "agents": [],
+      "tier": "medium",
+      "status": "route",
+      "edge": "architecture-question with real graph (memo writer AST node)"
+    }
+  },
+  {
+    "id": 12,
+    "prompt": "refactor the typed-confirm modal to be reusable across the operator gates",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "ok",
+    "right": {
+      "mode": "/gsd-quick",
+      "skills": [],
+      "agents": [],
+      "tier": "medium",
+      "status": "route",
+      "edge": "in-project refactor + concept node (typed_confirm_modal) — gsd-quick is the closest existing mode-map entry; gsd-refactor does not exist in mode-map.json"
+    }
+  },
+  {
+    "id": 13,
+    "prompt": "find and fix the bug in audit_chain_verify.py where the parse_log_metadata is throwing on empty log files",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "not_triggered",
+    "right": {
+      "mode": "/gsd-debug",
+      "skills": ["systematic-debugging"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "bug + real file path + AST node (parse_log_metadata) — graph heuristic does NOT fire (no leading-/path, no camelCase, no keyword match); manifest-BM25 alone must route"
+    }
+  },
+  {
+    "id": 14,
+    "prompt": "add a unit test for the rule of 40 metric calculation in the persona scorer",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "not_triggered",
+    "right": {
+      "mode": null,
+      "skills": ["test-driven-development"],
+      "agents": ["test-engineer"],
+      "tier": "high",
+      "status": "route",
+      "edge": "test-writer + concept node (rule_of_40) — test-driven-development is the only mode-map entry matching (skill-only edge, mode=null) since gsd-add-tests does not exist in mode-map.json; graph heuristic does NOT fire"
+    }
+  },
+  {
+    "id": 15,
+    "prompt": "thanks, that is great",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "not_triggered",
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "trivial",
+      "status": "pass_through",
+      "edge": "trivial pass-through with cwd having a graph — ensures Phase 2 doesn't regress trivial detection"
+    }
+  },
+  {
+    "id": 16,
+    "prompt": "fix the failing test that is broken",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build",
+    "evolution": true,
+    "evolution_outcome_expected": "bad",
+    "evolution_score_direction": "negative",
+    "evolution_telemetry_mock": [
+      { "ts": 1783554000000, "prompt_signature": "sig-X", "suggested_mode": "/gsd-debug", "suggested_skills": ["systematic-debugging"], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "/gsd-debug start" },
+      { "ts": 1783554300000, "prompt_signature": "sig-Y", "suggested_mode": "/gsd-debug", "suggested_skills": ["systematic-debugging"], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "wrong, that is not what I asked" },
+      { "ts": 1783554600000, "prompt_signature": "sig-Z", "suggested_mode": "/gsd-debug", "suggested_skills": ["systematic-debugging"], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "/gsd-undo back it out" }
+    ],
+    "right": {
+      "mode": "/gsd-debug",
+      "skills": ["systematic-debugging"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "bug cluster + bad-outcome mock (downstream /gsd-debug + 'wrong' phrase) — correlator labels bad; gsd-debug IS in BAD_COMMANDS so the first qualifying event triggers bad outcome; prompt intentionally includes 'failing test' + 'broken' to force BM25 to pick systematic-debugging (skill) → gsd-debug (mode-map entry via recommended_skills)"
+    }
+  },
+  {
+    "id": 17,
+    "prompt": "what about extending the planner with custom hooks",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build",
+    "evolution": true,
+    "evolution_outcome_expected": "unknown",
+    "evolution_score_direction": "neutral",
+    "evolution_telemetry_mock": [
+      { "ts": 1783554000000, "prompt_signature": "sig-1", "suggested_mode": "/gsd-explore", "suggested_skills": [], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "explore the planner hooks" },
+      { "ts": 1783554900000, "prompt_signature": "sig-2", "suggested_mode": null, "suggested_skills": [], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "", "downstream_event": "pass-through" }
+    ],
+    "right": {
+      "mode": "/gsd-explore",
+      "skills": [],
+      "agents": [],
+      "tier": "low",
+      "status": "route",
+      "edge": "explore prompt + unknown-outcome mock (next event is pass-through with null suggested_mode + empty prompt + non-keyword downstream_event; correlator finds no qualifying downstream command/phrase in window) — outcome=unknown; blend should NOT change the score (no observed weight)"
+    }
+  },
+  {
+    "id": 18,
+    "prompt": "continue the work on the prior project",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "evolution": true,
+    "evolution_outcome_expected": "unknown",
+    "evolution_score_direction": "neutral",
+    "evolution_telemetry_mock": [
+      { "ts": 1783554000000, "prompt_signature": "sig-A", "suggested_mode": "/gsd-debug", "suggested_skills": [], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "/gsd-debug start" },
+      { "ts": 1783554300000, "prompt_signature": "sig-B", "suggested_mode": "/gsd-debug", "suggested_skills": [], "suggested_agents": [], "cwd": "/Users/guilherme/Desktop/ClaudeCode/Router-build", "prompt": "ok" }
+    ],
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "low",
+      "status": "pass_through",
+      "edge": "no lexical match in prompt ('continue the work' too generic) + tier=low (no_match) — pass-through expected; mock's good/bad labels are orthogonal to the fixture's rightness (this fixture validates tier=low + mode=null, not outcome correlation)"
+    }
   }
 ]

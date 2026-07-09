@@ -57,10 +57,22 @@ test('evaluate is pure: returns {ok, detail} for route matches', () => {
   assert.strictEqual(out.detail, 'exact match');
 });
 
-test('CLI behavior unchanged: `node router.calibrate.mjs` exits 0 and prints 12/15 baseline', () => {
+test('CLI behavior unchanged: `node router.calibrate.mjs` exits 0 and prints N/N+2 right (Phase 3)', () => {
+  // Phase 3 (Plan 03-03): the calibration-tasks.json fixture set is now 18
+  // (10 originals + 5 codebase + 3 evolution). The harness prints the
+  // combined right count, the evolution subset, and exits 0 when the
+  // threshold is met. We assert the key marker strings instead of a magic
+  // count so the test survives future fixture additions.
   const proc = spawnSync('node', [CALIBRATE], { encoding: 'utf8', timeout: 30000 });
   assert.strictEqual(proc.status, 0, `CLI must exit 0; got ${proc.status}\nstderr:\n${proc.stderr}`);
-  assert.match(proc.stdout, /=== 12\/15 right/, `expected 12/15 baseline; got stdout:\n${proc.stdout}`);
+  assert.match(proc.stdout, /=== \d+\/\d+ right \(threshold \d+\) ===/,
+    `expected combined right count line; got stdout:\n${proc.stdout}`);
+  assert.match(proc.stdout, /=== Codebase subset: \d+\/\d+ right/,
+    `expected codebase subset line; got stdout:\n${proc.stdout}`);
+  assert.match(proc.stdout, /=== Evolution subset: \d+\/\d+ right/,
+    `expected evolution subset line; got stdout:\n${proc.stdout}`);
+  assert.match(proc.stdout, /Combined: \d+ \/ \d+ \(threshold: \d+\)/,
+    `expected combined delta line; got stdout:\n${proc.stdout}`);
 });
 
 test('process.exit(2) on missing manifest now throws (when imported as a module)', () => {
