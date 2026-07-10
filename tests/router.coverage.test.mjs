@@ -7,7 +7,14 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
-const { loadManifest, loadModeMap, buildCorpus } = await import(HOOK);
+const {
+  loadManifest,
+  loadModeMap,
+  buildCorpus,
+  mappedTargets,
+  classifyInventoryEntry,
+  auditInventoryCoverage,
+} = await import(HOOK);
 
 const MANIFEST_KEYS = [
   'skills',
@@ -24,85 +31,6 @@ function namesFrom(value) {
   if (Array.isArray(value)) return value.map((entry) => String(entry.name || entry.id || '')).filter(Boolean);
   if (value && typeof value === 'object') return Object.keys(value);
   return [];
-}
-
-function stripLeadingSlash(value) {
-  return String(value || '').replace(/^\/+/, '');
-}
-
-export function mappedTargets(modeMap) {
-  const targets = new Set();
-  for (const entry of modeMap?.entries || []) {
-    for (const value of [entry.id, entry.mode]) {
-      const target = stripLeadingSlash(value);
-      if (target) targets.add(target);
-    }
-    for (const value of entry.recommended_skills || []) {
-      const target = stripLeadingSlash(value);
-      if (target) targets.add(target);
-    }
-    for (const value of entry.recommended_agents || []) {
-      const target = stripLeadingSlash(value);
-      if (target) targets.add(target);
-    }
-  }
-  return targets;
-}
-
-function isMapped(entry, mapped) {
-  return mapped.has(stripLeadingSlash(entry?.name)) || mapped.has(stripLeadingSlash(entry?.id));
-}
-
-function hasMissingMcp(entry) {
-  return Array.isArray(entry?.requires_mcp_not_in_manifest) && entry.requires_mcp_not_in_manifest.length > 0;
-}
-
-function isProjectScoped(entry) {
-  const scope = String(entry?.scope || '');
-  return scope === 'project';
-}
-
-function isExcludedAgentsStore(entry) {
-  const scope = String(entry?.scope || '');
-  return scope && scope !== 'global';
-}
-
-export function classifyInventoryEntry(category, entry, mapped = new Set()) {
-  if (category === 'hooks') return 'diagnostic_only';
-  if (category === 'mcp_servers' || category === 'unwired_mcp_refs') return 'dependency_only';
-  if (category === 'project_scoped_skills') return 'project_scoped';
-  if (category === 'agents' && hasMissingMcp(entry)) return 'blocked_missing_mcp';
-  if (category === 'agents_store_skills' && isExcludedAgentsStore(entry)) return 'excluded';
-  if (isProjectScoped(entry)) return 'project_scoped';
-  if (['skills', 'plugin_skills', 'agents_store_skills', 'agents', 'commands'].includes(category)) {
-    return isMapped(entry, mapped) ? 'routeable' : 'unmapped';
-  }
-  return 'excluded';
-}
-
-export function auditInventoryCoverage(manifest, modeMap) {
-  const mapped = mappedTargets(modeMap);
-  const audit = {
-    mapped,
-    counts: new Map(),
-    entries: [],
-    highValueUnmapped: [],
-  };
-
-  for (const category of MANIFEST_KEYS) {
-    for (const name of namesFrom(manifest?.[category])) {
-      const source = Array.isArray(manifest?.[category])
-        ? manifest[category].find((entry) => String(entry.name || entry.id || '') === name)
-        : { id: name, name };
-      const classification = classifyInventoryEntry(category, source, mapped);
-      audit.counts.set(category, (audit.counts.get(category) || 0) + 1);
-      const item = { category, name, classification };
-      audit.entries.push(item);
-      if (classification === 'unmapped') audit.highValueUnmapped.push(item);
-    }
-  }
-
-  return audit;
 }
 
 export function highValueUnmapped(manifest, modeMap) {
@@ -123,12 +51,8 @@ test('COV-01: real audit accounts for all manifest inventory categories', () => 
   const audit = auditInventoryCoverage(manifest, modeMap);
 
   for (const key of MANIFEST_KEYS) {
-    assert.ok(
-      audit.counts.has(key),
-      `coverage audit missing manifest category ${key}`
-    );
     assert.equal(
-      audit.counts.get(key),
+      audit.counts[key].discovered,
       namesFrom(manifest[key]).length,
       `coverage audit count mismatch for category ${key}`
     );
