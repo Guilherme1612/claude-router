@@ -306,14 +306,62 @@ test('explainLastDecision export reads latest valid telemetry line without raw p
         downstream_invocations: null,
         outcome: null,
         latency_ms: 3,
+        weight_applied: 0.25,
+        outcomes: { g: 2, b: 1, u: 0 },
+        evolved_after: '2026-07-10T00:00:00.000Z',
+        surface_status: 'configured',
+        surface_disabled_count: 4,
+        cwd: dir,
       }),
       '',
     ].join('\n'), 'utf8');
     const out = explainLastDecision({ telemetryPath });
+    assert.equal(out.status, 'ok');
     assert.equal(out.prompt_signature, signature);
     assert.equal(out.selected_route.mode, 'gsd-debug');
     assert.equal(out.confidence_tier, 'high');
+    assert.equal(out.suggested_mode, 'gsd-debug');
+    assert.deepEqual(out.suggested_skills, ['systematic-debugging']);
+    assert.deepEqual(out.suggested_agents, []);
+    assert.equal(out.invoke_kind, 'slash');
+    assert.equal(out.graphify_queried, false);
+    assert.equal(out.graph_status, 'not_triggered');
+    assert.deepEqual(out.guards_fired, []);
+    assert.equal(out.latency_ms, 3);
+    assert.equal(out.weight_applied, 0.25);
+    assert.deepEqual(out.outcomes, { g: 2, b: 1, u: 0 });
+    assert.equal(out.evolved_after, '2026-07-10T00:00:00.000Z');
+    assert.equal(out.surface_status, 'configured');
+    assert.equal(out.surface_disabled_count, 4);
+    assert.equal(out.cwd, dir);
+    assert.equal(out.decision.prompt_signature, signature);
+    assert.equal(out.decision.selected_route.mode, 'gsd-debug');
+    assert.equal(out.privacy.raw_prompt_stored, false);
+    assert.equal(out.privacy.raw_prompt_available, false);
+    assert.match(out.privacy.note, /unavailable by design|signatures/i);
     assert.ok(!JSON.stringify(out).includes(rawPrompt), 'explain-last must not expose raw prompt text');
+  });
+});
+
+test('explainLastDecision export handles missing empty and malformed telemetry clearly', () => {
+  withTempDir((dir) => {
+    const missing = explainLastDecision({ telemetryPath: join(dir, 'missing.jsonl') });
+    assert.equal(missing.status, 'missing');
+    assert.equal(missing.decision, null);
+    assert.equal(missing.privacy.raw_prompt_stored, false);
+
+    const emptyPath = join(dir, 'empty.jsonl');
+    writeFileSync(emptyPath, '', 'utf8');
+    const empty = explainLastDecision({ telemetryPath: emptyPath });
+    assert.equal(empty.status, 'empty');
+    assert.equal(empty.decision, null);
+
+    const malformedPath = join(dir, 'malformed.jsonl');
+    writeFileSync(malformedPath, '{not json}\n[still not json]\n', 'utf8');
+    const malformed = explainLastDecision({ telemetryPath: malformedPath });
+    assert.equal(malformed.status, 'empty');
+    assert.equal(malformed.decision, null);
+    assert.match(malformed.privacy_note, /raw prompt text is unavailable by design/i);
   });
 });
 
