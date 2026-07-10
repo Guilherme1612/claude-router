@@ -50,109 +50,41 @@ const setEq = (a, b) => {
   return true;
 };
 
-// Replicate main()'s route computation UP TO the route decision, dry-run.
-// Phase 2 (Plan 02-03 / D-15, D-16): accepts a `cwd` parameter and threads
-// graphifyHeuristic + applyGraphBoost into the scoring path. Returns
-// { tier, route, guards_fired, top3, margin, skipReason, graph_status, graph_symbols, elapsed_ms }.
-// Phase 3 (Plan 03-03 / D-09, D-23): accepts an optional `weights` argument.
-// When present, applies the per-entry blend between normalize and tier check
-// (mirrors the router.mjs hot path at line 1239). When null/absent, the
-// existing Phase-1 + Phase-2 behavior is preserved (no blend, no regression).
+// Adapter over router.mjs inspectDecision. Calibration keeps its existing
+// printed output/evaluation shape, but the route decision comes from the same
+// shared dry-run helper used by inspect/preview and production routing.
 function dryRun(prompt, manifest, modeMap, cwd = process.cwd(), weights = null) {
-  // Trivial short-circuit
-  if (R.trivialPromptDetect(prompt)) {
-    return { tier: 'trivial', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'trivial', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
-  }
-  // Explicit /-prefix override (GRD-04 first half)
-  if (R.explicitOverrideDetect(prompt).override) {
-    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
-  }
-  // Re-entry dedupe
-  if (R.sentinelScan(prompt)) {
-    return { tier: 'reentry_skipped', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'reentry', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
-  }
-  // Named-name override (GRD-04 second half) — runs before scoring
-  const knownNames = R.buildKnownNames(modeMap);
-  if (R.explicitOverrideDetect(prompt, knownNames).override) {
-    return { tier: 'user_explicit', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'user_explicit_named', graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
-  }
-  // Scoring
-  const corpus = R.buildCorpus(manifest, modeMap);
-  const queryTokens = R.tokenize(prompt);
-  const scored = R.bm25Score(queryTokens, corpus);
-  // Phase 2 / D-07: fold graph boost into the scored list. Only applies if
-  // graphifyHeuristic actually fired (queried=true) and produced a non-empty
-  // boostIds set. Otherwise `scored` is unchanged.
-  const t0 = process.hrtime.bigint();
-  const graph = R.graphifyHeuristic(prompt, cwd);
-  const manifestIdSet = new Set((corpus || []).map((c) => String(c.name || '').toLowerCase()));
-  const hasBoost = graph.boostIds && graph.boostIds.size > 0;
-  const scoredBoosted = hasBoost
-    ? R.applyGraphBoost(scored, graph.boostIds, manifestIdSet, 0.15)
-    : scored;
-  const normed = R.normalize(scoredBoosted);
-  // Phase 3 (D-09): blend learned per-entry weights with the BM25 normalized
-  // scores. Mirrors the router.mjs hot path insertion between normalize and
-  // confidenceTier. Fail-open: a missing/partial weights object is a no-op.
-  // D-23: each normed entry's `weight_applied` is preserved on the route.
-  let blended = normed;
-  let topWeightApplied = null;
-  if (weights && weights.weights && typeof R.applyWeightBlend === 'function') {
-    try {
-      R.setModeMapForBlend(modeMap);
-      blended = R.applyWeightBlend(normed, weights, weights.blend || 0.15);
-    } catch (_) {
-      blended = normed; // fail-open: keep raw normalized scores
-    }
-  }
-  const graphElapsedMs = Number(process.hrtime.bigint() - t0) / 1e6;
-  if (blended.length === 0) {
-    return { tier: 'low', route: null, guards_fired: [], top3: [], margin: 0, skipReason: 'no_match', graph_status: graph.status, graph_symbols: graph.symbols || [], elapsed_ms: graphElapsedMs };
-  }
-  const top = blended[0];
-  const runnerUp = blended[1];
-  topWeightApplied = top.weight_applied != null ? top.weight_applied : null;
-  const tier = R.confidenceTier(top.norm, runnerUp ? runnerUp.norm : 0, modeMap.thresholds);
-  const top3 = blended.slice(0, 3).map((s) => ({ name: s.name, norm: Number(s.norm.toFixed(3)) }));
-  const margin = Number((top.norm - (runnerUp ? runnerUp.norm : 0)).toFixed(3));
-
-  // Map top manifest entry → mode-map entry (same logic as main())
-  const topName = (top.name || '').toLowerCase();
-  const mmEntry = (modeMap.entries || []).find((e) => {
-    if (e.id && e.id.toLowerCase() === topName) return true;
-    const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])];
-    return recs.some((r) => r.toLowerCase() === topName);
-  }) || null;
-
-  const route = {
-    mode: mmEntry ? mmEntry.mode : null,
-    invoke_kind: mmEntry ? mmEntry.invoke_kind : null,
-    recommended_skills: mmEntry ? mmEntry.recommended_skills : [],
-    recommended_agents: mmEntry ? mmEntry.recommended_agents : [],
-    tier,
-    args_hint: mmEntry ? mmEntry.args_hint : null,
-    warning: mmEntry ? mmEntry.warning || null : null,
-    scores: top3,
-    weight_applied: topWeightApplied,
-  };
-
-  // Apply guards (GRD-01 MCP demote, GRD-03 ralph two-gate, GRD-05 deny)
-  const guarded = R.applyGuards(route, prompt, manifest, modeMap, {
-    queryTokens,
-    thresholds: modeMap.thresholds,
-    autoTopScore: top.score,
+  const out = R.inspectDecision(prompt, {
+    cwd,
+    mutateCache: false,
+    logTelemetry: false,
+    emitInjection: false,
+    bumpEvolution: false,
+    includePrompt: false,
+    manifestPath: MANIFEST,
+    modeMapPath: MODE_MAP,
+    weightsPath: join(ROUTER_DIR, '__calibration-no-file-weights.json'),
+    cachePath: join(ROUTER_DIR, '__calibration-no-cache-writes.json'),
+    weights,
   });
-
+  const top3 = (out.candidates || []).slice(0, 3).map((s) => ({
+    name: s.name,
+    norm: Number(Number(s.final_score || 0).toFixed(3)),
+  }));
+  const route = out.selected_route ? { ...out.selected_route } : null;
+  if (route && route.weight_applied == null && out.score_debug && typeof out.score_debug.weight_applied === 'number') {
+    route.weight_applied = out.score_debug.weight_applied;
+  }
   return {
-    tier,
-    route: guarded.route,
-    guards_fired: guarded.guards_fired,
+    tier: out.selected_tier,
+    route,
+    guards_fired: out.guards_fired || [],
     top3,
-    margin,
-    skipReason: null,
-    graph_status: graph.status,
-    graph_symbols: graph.symbols || [],
-    elapsed_ms: graphElapsedMs,
+    margin: Number(Number(out.margin || 0).toFixed(3)),
+    skipReason: out.pass_through_reason || null,
+    graph_status: out.graphify ? out.graphify.status : 'not_triggered',
+    graph_symbols: out.graphify ? out.graphify.symbols || [] : [],
+    elapsed_ms: out.graphify ? out.graphify.elapsed_ms || 0 : 0,
   };
 }
 
