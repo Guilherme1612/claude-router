@@ -268,10 +268,23 @@ test('HLT-03/HLT-04/HLT-05: listUnmapped and summarizeCoverage expose useful gap
   const modeMap = fixtureModeMap();
   const unmapped = listUnmapped(manifest, modeMap);
   assert.equal(unmapped.status, 'ok');
+  assert.equal(unmapped.rank_basis, 'commands, global skills, plugin skills, safe agents, keyword priority, name');
+  assert.equal(unmapped.items[0].name, 'route-gap');
   assert.ok(unmapped.items.some((item) => item.name === 'unmapped-skill'));
   assert.ok(!unmapped.items.some((item) => item.category === 'hooks'), 'hooks are diagnostic-only, not route gaps');
   assert.ok(!unmapped.items.some((item) => item.category === 'mcp_servers'), 'MCP records are dependency-only, not route gaps');
   assert.ok(!unmapped.items.some((item) => item.name === 'blocked-agent'), 'blocked agents must not be recommended as dispatch targets');
+  for (const item of unmapped.items) {
+    assert.equal(typeof item.rank, 'number', `unmapped item ${item.name} missing rank`);
+    assert.equal(typeof item.source, 'string', `unmapped item ${item.name} missing source`);
+    assert.equal(typeof item.reason, 'string', `unmapped item ${item.name} missing reason`);
+    assert.equal(item.routeability, 'candidate', `unmapped item ${item.name} should be a candidate`);
+    assert.equal(typeof item.recommendation, 'string', `unmapped item ${item.name} missing recommendation`);
+  }
+  for (const blocked of unmapped.blocked_missing_mcp) {
+    assert.equal(blocked.routeability, 'blocked');
+    assert.match(blocked.recommendation, /Wire missing MCP|keep warn-only/);
+  }
   assertNextFixes(unmapped, 'unmapped');
 
   const coverage = summarizeCoverage(manifest, modeMap);
@@ -323,12 +336,15 @@ test('HLT-02: router routes --json returns route entries and target health witho
 test('HLT-03: router unmapped --json returns useful unmapped inventory without hooks or MCP false gaps', () => {
   const out = runJsonCommand(['unmapped', '--json']);
   assert.equal(out.status, 'ok');
+  assert.equal(out.rank_basis, 'commands, global skills, plugin skills, safe agents, keyword priority, name');
   assert.ok(Array.isArray(out.items), 'unmapped output must include items array');
   assertNextFixes(out, 'unmapped CLI');
   for (const item of out.items) {
     assert.notEqual(item.category, 'hooks', 'hooks must not be listed as unmapped route gaps');
     assert.notEqual(item.category, 'mcp_servers', 'MCP servers must not be listed as unmapped route gaps');
     assert.notEqual(item.classification, 'blocked_missing_mcp', 'blocked missing-MCP agents must not be unmapped dispatch recommendations');
+    assert.equal(item.routeability, 'candidate', 'unmapped entries must be dispatch candidates');
+    assert.equal(typeof item.recommendation, 'string', 'unmapped entries need next-fix recommendation text');
   }
 });
 
