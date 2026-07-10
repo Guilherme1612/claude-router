@@ -5,9 +5,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const ROUTER_DIR = join(homedir(), '.claude', 'router');
@@ -197,6 +198,15 @@ function assertNextFixes(out, label) {
   }
 }
 
+function withTempDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'router-health-'));
+  try {
+    return fn(dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 test('HLT-01/HLT-03/HLT-04/HLT-05: Phase 07 helper exports are importable', () => {
   assertExport('mappedTargets', mappedTargets);
   assertExport('buildTargetIndexes', buildTargetIndexes);
@@ -299,25 +309,64 @@ test('HLT-03/HLT-04/HLT-05: listUnmapped and summarizeCoverage expose useful gap
 });
 
 test('HLT-01/HLT-05: diagnoseRouterState reports file health, coverage, safety, and actionable next fixes', () => {
-  const out = diagnoseRouterState({
-    manifest: fixtureManifest(),
-    modeMap: fixtureModeMap(),
-    paths: {
-      hook: HOOK,
-      cache: CACHE,
-      telemetry: TELEMETRY,
-      weights: WEIGHTS,
-      evolveTrigger: EVOLVE_TRIGGER,
-    },
+  withTempDir((dir) => {
+    const manifestPath = join(dir, 'manifest.json');
+    const modeMapPath = join(dir, 'mode-map.json');
+    const cachePath = join(dir, 'cache.json');
+    const telemetryPath = join(dir, 'telemetry.jsonl');
+    const weightsPath = join(dir, 'weights.json');
+    const evolutionStatePath = join(dir, 'evolution-state.json');
+    const evolveTriggerPath = join(dir, '.evolve-trigger');
+    writeFileSync(manifestPath, JSON.stringify(fixtureManifest()), 'utf8');
+    writeFileSync(modeMapPath, JSON.stringify(fixtureModeMap()), 'utf8');
+    writeFileSync(cachePath, JSON.stringify({ schema_version: 1, entries: {}, order: [] }), 'utf8');
+    writeFileSync(telemetryPath, [
+      'not json',
+      JSON.stringify({
+        ts: '2026-07-10T00:00:00.000Z',
+        prompt: RAW_PROMPT_FIXTURE,
+        prompt_signature: 'sig-fixture',
+        selected_route: { id: 'gsd-debug', signal_patterns: [RAW_PROMPT_FIXTURE] },
+        confidence_tier: 'high',
+      }),
+    ].join('\n'), 'utf8');
+    writeFileSync(weightsPath, JSON.stringify({ schema_version: 2, weights: {} }), 'utf8');
+    writeFileSync(evolutionStatePath, JSON.stringify({ schema_version: 1, last_run: '2026-07-10T00:00:00.000Z' }), 'utf8');
+    writeFileSync(evolveTriggerPath, '1', 'utf8');
+
+    const out = diagnoseRouterState({
+      manifest: fixtureManifest(),
+      modeMap: fixtureModeMap(),
+      manifestPath,
+      modeMapPath,
+      paths: {
+        hook: HOOK,
+        cache: cachePath,
+        telemetry: telemetryPath,
+        weights: weightsPath,
+        evolutionState: evolutionStatePath,
+        evolveTrigger: evolveTriggerPath,
+      },
+    });
+    assert.equal(out.status, 'warn');
+    for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution']) {
+      assert.ok(field in out, `doctor output missing ${field}`);
+    }
+    assert.ok(['fresh', 'stale'].includes(out.manifest.freshness.status), 'manifest freshness status required');
+    assert.equal(typeof out.manifest.age_hours, 'number', 'manifest age_hours required');
+    assert.equal(out.telemetry.parse_status, 'ok');
+    assert.equal(out.telemetry.latest.status, 'ok');
+    assert.equal(out.telemetry.latest.prompt_signature, 'sig-fixture');
+    assert.equal(out.telemetry.privacy.raw_prompt_text, false);
+    assert.equal(out.cache.parse_status, 'ok');
+    assert.equal(out.weights.parse_status, 'ok');
+    assert.equal(out.evolution.state.parse_status, 'ok');
+    assert.equal(out.evolution.trigger.exists, true);
+    assert.ok(Array.isArray(out.blocked_agents));
+    assert.ok(out.blocked_agents.some((entry) => entry.name === 'blocked-agent'));
+    assertNextFixes(out, 'doctor');
+    assert.ok(!JSON.stringify(out).includes(RAW_PROMPT_FIXTURE), 'doctor must not expose raw signal/prompt text');
   });
-  assert.equal(out.status, 'ok');
-  for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution']) {
-    assert.ok(field in out, `doctor output missing ${field}`);
-  }
-  assert.ok(Array.isArray(out.blocked_agents));
-  assert.ok(out.blocked_agents.some((entry) => entry.name === 'blocked-agent'));
-  assertNextFixes(out, 'doctor');
-  assert.ok(!JSON.stringify(out).includes(RAW_PROMPT_FIXTURE), 'doctor must not expose raw signal/prompt text');
 });
 
 test('HLT-02: router routes --json returns route entries and target health without mutating runtime files', () => {
@@ -361,10 +410,16 @@ test('HLT-04/HLT-05: router coverage --json returns counts by category and next-
 
 test('HLT-01: router doctor --json reports runtime health and privacy-preserving diagnostics', () => {
   const out = runJsonCommand(['doctor', '--json']);
-  assert.equal(out.status, 'ok');
+  assert.ok(['ok', 'warn', 'error'].includes(out.status));
   for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution']) {
     assert.ok(field in out, `doctor output missing ${field}`);
   }
+  assert.ok(['fresh', 'stale', 'manifest_missing', 'error'].includes(out.manifest.freshness.status));
+  assert.equal(typeof out.manifest.age_hours, 'number');
+  assert.ok(['ok', 'missing', 'empty', 'error'].includes(out.telemetry.parse_status));
+  assert.ok(['ok', 'missing', 'empty', 'error'].includes(out.telemetry.latest.status));
+  assert.ok('state' in out.evolution, 'doctor must report evolution-state status');
+  assert.ok('trigger' in out.evolution, 'doctor must report .evolve-trigger status');
   assert.ok(out.privacy && out.privacy.raw_prompt_text === false, 'doctor must explicitly report raw prompt privacy');
   assertNextFixes(out, 'doctor CLI');
 });
