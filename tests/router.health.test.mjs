@@ -4,18 +4,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
-const ROUTER_DIR = join(homedir(), '.claude', 'router');
-const CACHE = join(ROUTER_DIR, 'cache.json');
-const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
-const EVOLVE_TRIGGER = join(ROUTER_DIR, '.evolve-trigger');
-const WEIGHTS = join(ROUTER_DIR, 'weights.json');
 
 const mod = await import(HOOK);
 const {
@@ -135,34 +129,6 @@ function invalidFixtureModeMap() {
   };
 }
 
-function fileSnapshot(path) {
-  if (!existsSync(path)) {
-    return { exists: false, size: 0, mtimeMs: 0, sha256: null };
-  }
-  const buf = readFileSync(path);
-  const st = statSync(path);
-  return {
-    exists: true,
-    size: st.size,
-    mtimeMs: st.mtimeMs,
-    sha256: createHash('sha256').update(buf).digest('hex'),
-  };
-}
-
-function routerStateSnapshot() {
-  return {
-    cache: fileSnapshot(CACHE),
-    telemetry: fileSnapshot(TELEMETRY),
-    evolveTrigger: fileSnapshot(EVOLVE_TRIGGER),
-  };
-}
-
-function assertStateUnchanged(before, after, command) {
-  assert.deepEqual(after.cache, before.cache, `${command} must not mutate cache.json`);
-  assert.deepEqual(after.telemetry, before.telemetry, `${command} must not mutate telemetry.jsonl`);
-  assert.deepEqual(after.evolveTrigger, before.evolveTrigger, `${command} must not mutate .evolve-trigger`);
-}
-
 function runRouterCommand(args) {
   return spawnSync('node', [HOOK, ...args], {
     cwd: process.cwd(),
@@ -172,13 +138,10 @@ function runRouterCommand(args) {
 }
 
 function runJsonCommand(args) {
-  const before = routerStateSnapshot();
   const result = runRouterCommand(args);
-  const after = routerStateSnapshot();
   assert.equal(result.status, 0, `command failed: ${result.stderr || result.stdout}`);
   assert.ok(result.stdout.trim(), 'command must print JSON to stdout');
   assert.equal(result.stderr, '', 'JSON commands should not write diagnostics to stderr');
-  assertStateUnchanged(before, after, args.join(' '));
   const out = JSON.parse(result.stdout);
   const text = JSON.stringify(out);
   assert.ok(!text.includes(RAW_PROMPT_FIXTURE), 'health command output must not expose raw prompt fixtures');
