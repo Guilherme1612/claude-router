@@ -17,11 +17,6 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
-const ROUTER_DIR = join(homedir(), '.claude', 'router');
-const CACHE_PATH = join(ROUTER_DIR, 'cache.json');
-const TELEMETRY_PATH = join(ROUTER_DIR, 'telemetry.jsonl');
-const EVOLVE_TRIGGER_PATH = join(ROUTER_DIR, '.evolve-trigger');
-
 const mod = await import(HOOK);
 const {
   inspectDecision,
@@ -56,11 +51,11 @@ function fileSnapshot(path) {
   };
 }
 
-function routerStateSnapshot() {
+function routerStateSnapshot(paths) {
   return {
-    cache: fileSnapshot(CACHE_PATH),
-    telemetry: fileSnapshot(TELEMETRY_PATH),
-    evolveTrigger: fileSnapshot(EVOLVE_TRIGGER_PATH),
+    cache: fileSnapshot(paths.cachePath),
+    telemetry: fileSnapshot(paths.telemetryPath),
+    evolveTrigger: fileSnapshot(paths.evolveTriggerPath),
   };
 }
 
@@ -231,12 +226,62 @@ test('router inspect JSON: graph-triggered prompt reports graph status and symbo
 });
 
 test('router preview snapshots prove cache, telemetry, and evolution trigger are not mutated', () => {
-  const before = routerStateSnapshot();
-  const out = runJsonCommand(['preview', '--json', 'fix the flaky router preview test']);
-  const after = routerStateSnapshot();
-  assertInspectShape(out);
-  assert.equal(out.preview, true);
-  assertStateUnchanged(before, after);
+  withTempDir((dir) => {
+    const paths = {
+      cachePath: join(dir, 'cache.json'),
+      telemetryPath: join(dir, 'telemetry.jsonl'),
+      evolveTriggerPath: join(dir, '.evolve-trigger'),
+    };
+    writeFileSync(paths.cachePath, JSON.stringify({ schema_version: 1, entries: {}, order: [], size: 0 }), 'utf8');
+    writeFileSync(paths.telemetryPath, '', 'utf8');
+    writeFileSync(paths.evolveTriggerPath, '41', 'utf8');
+    const env = {
+      ROUTER_TEST_CACHE_PATH: paths.cachePath,
+      ROUTER_TEST_TELEMETRY_PATH: paths.telemetryPath,
+    };
+    const before = routerStateSnapshot(paths);
+    const out = runJsonCommand(['preview', '--json', 'fix the flaky router preview test'], { env });
+    const after = routerStateSnapshot(paths);
+    assertInspectShape(out);
+    assert.equal(out.preview, true);
+    assert.equal(out.dry_run, true);
+    assert.deepEqual(out.mutations, {
+      cache: false,
+      telemetry: false,
+      evolution_trigger: false,
+      emitted_to_hook: false,
+    });
+    assertStateUnchanged(before, after);
+  });
+});
+
+test('router inspect and preview reject missing CLI prompt without entering hook mode', () => {
+  withTempDir((dir) => {
+    const paths = {
+      cachePath: join(dir, 'cache.json'),
+      telemetryPath: join(dir, 'telemetry.jsonl'),
+      evolveTriggerPath: join(dir, '.evolve-trigger'),
+    };
+    writeFileSync(paths.cachePath, JSON.stringify({ schema_version: 1, entries: {}, order: [], size: 0 }), 'utf8');
+    writeFileSync(paths.telemetryPath, '', 'utf8');
+    writeFileSync(paths.evolveTriggerPath, '41', 'utf8');
+    const env = {
+      ROUTER_TEST_CACHE_PATH: paths.cachePath,
+      ROUTER_TEST_TELEMETRY_PATH: paths.telemetryPath,
+    };
+    for (const cmd of ['inspect', 'preview']) {
+      const before = routerStateSnapshot(paths);
+      const result = runRouterCommand([cmd, '--json'], { env });
+      const after = routerStateSnapshot(paths);
+      assert.equal(result.status, 1, `${cmd} without prompt must be a CLI usage error`);
+      assert.ok(result.stdout.trim(), `${cmd} usage error must print JSON`);
+      const out = JSON.parse(result.stdout);
+      assert.equal(out.status, 'error');
+      assert.equal(out.error, 'missing_prompt');
+      assert.equal(out.command, cmd);
+      assertStateUnchanged(before, after);
+    }
+  });
 });
 
 test('explainLastDecision export reads latest valid telemetry line without raw prompt text', () => {
