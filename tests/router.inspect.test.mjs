@@ -118,6 +118,10 @@ function assertInspectShape(out) {
   assert.ok(out.cache.key_prefix.length > 0);
   assert.equal(typeof out.cache.scoring_skipped, 'boolean');
   assert.ok(['not_triggered', 'graph_missing', 'ok', 'empty', 'error'].includes(out.graphify.status));
+  assert.ok(Array.isArray(out.decision_trace), 'decision_trace must be an array');
+  assert.ok('top_score' in out.score_debug, 'score_debug must expose top_score');
+  assert.ok('runner_up_score' in out.score_debug, 'score_debug must expose runner_up_score');
+  assert.ok('margin_rule_affected_tier' in out.score_debug, 'score_debug must expose margin rule effect');
 }
 
 test('inspectDecision export: hit explanation includes full prompt-level contract', () => {
@@ -140,7 +144,14 @@ test('router inspect JSON: threshold miss/no-match explains pass-through reason'
   const out = runJsonCommand(['inspect', '--json', 'zzzxxy untranslated one-off words']);
   assertInspectShape(out);
   assert.ok(out.pass_through_reason, 'pass-through reason required on no-match');
-  assert.match(out.pass_through_reason, /threshold|no_match|low|margin|pass/i);
+  assert.ok(
+    ['low_no_match', 'low_threshold', 'margin_tie'].includes(out.pass_through_reason),
+    `unexpected pass-through reason: ${out.pass_through_reason}`,
+  );
+  assert.equal(typeof out.score_debug.top_score, 'number');
+  assert.equal(typeof out.score_debug.T_low, 'number');
+  assert.equal(typeof out.score_debug.T_high, 'number');
+  assert.equal(typeof out.score_debug.M, 'number');
   assert.ok(['low', 'pass_through', null].includes(out.selected_tier));
 });
 
@@ -152,6 +163,10 @@ test('router inspect JSON: guard demotion exposes mcp_demote and final warning r
     'guards_fired must include mcp_demote details',
   );
   assert.equal(out.selected_route.invoke_kind, 'warn');
+  assert.ok(out.guard_debug.original_route, 'guard debug must include original route before demotion');
+  assert.equal(out.guard_debug.final_route.invoke_kind, 'warn');
+  assert.ok(out.guard_debug.warning_text.includes('needs MCP'));
+  assert.equal(out.pass_through_reason, null);
   assert.match(out.final_injected_context, /needs MCP|wire it first|warning/i);
 });
 
@@ -183,6 +198,14 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
     assert.equal(hit.cache.status, 'hit');
     assert.equal(hit.cache.key_prefix, sig.slice(0, 8));
     assert.equal(hit.cache.scoring_skipped, true);
+    assert.equal(hit.cache.cached_route.mode, 'gsd-debug');
+    assert.deepEqual(hit.cache.invalidation_mtimes, {
+      mode_map: 1,
+      manifest: 2,
+      graph: 0,
+      surface: 0,
+    });
+    assert.equal(hit.pass_through_reason, 'cache_hit_scoring_skipped');
     assert.equal(hit.selected_route.mode, 'gsd-debug');
 
     const miss = inspectDecision('fix the uncached route', {
@@ -196,6 +219,12 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
     });
     assert.equal(miss.cache.status, 'miss');
     assert.equal(miss.cache.scoring_skipped, false);
+    assert.deepEqual(miss.cache.invalidation_mtimes, {
+      mode_map: 1,
+      manifest: 2,
+      graph: 0,
+      surface: 0,
+    });
   });
 });
 
@@ -222,6 +251,9 @@ test('router inspect JSON: graph-triggered prompt reports graph status and symbo
     assert.equal(out.graphify.queried, true);
     assert.ok(['ok', 'empty', 'graph_missing', 'error'].includes(out.graphify.status));
     assert.ok(Array.isArray(out.graphify.symbols), 'graphify.symbols must always be an array');
+    assert.equal(typeof out.graphify.boost_count, 'number');
+    assert.ok(Array.isArray(out.graphify.boost_ids), 'graphify.boost_ids must always be an array');
+    assert.equal(typeof out.graphify.graph_mtime, 'number');
   });
 });
 
