@@ -156,15 +156,31 @@ function assertProposalShape(out) {
   assert.equal(out.advisory, true, 'proposal mode must be advisory');
   assert.ok(out.privacy, 'proposal output must include privacy metadata');
   assert.equal(out.privacy.raw_prompt_text, false);
+  assert.equal(out.privacy.raw_lines, false);
   assert.equal(out.privacy.raw_telemetry_lines, false);
+  assert.match(out.privacy.note, /telemetry-metadata-derived/);
+  assert.equal(out.applied, false);
+  assert.equal(typeof out.generated_at, 'string');
+  assert.equal(typeof out.window_minutes, 'number');
+  assert.ok(out.proposal_counts && typeof out.proposal_counts === 'object', 'proposal output must include proposal_counts');
+  assert.ok(Array.isArray(out.proposals), 'proposal output must include proposals array');
+  assert.ok(out.source_counts && typeof out.source_counts === 'object', 'proposal output must include source_counts');
+  assert.equal(out.proposal_counts.total, out.proposals.length);
   assert.ok(out.counts && typeof out.counts === 'object', 'proposal output must include counts');
   assert.ok(Array.isArray(out.suggestions), 'proposal output must include suggestions array');
+  assert.deepEqual(out.counts, out.proposal_counts, 'legacy counts alias must match proposal_counts');
+  assert.deepEqual(out.suggestions, out.proposals, 'legacy suggestions alias must match proposals');
   assert.ok(out.suggestions.length > 0, 'fixture should produce proposal suggestions');
   for (const suggestion of out.suggestions) {
+    assert.equal(typeof suggestion.type, 'string');
     assert.equal(typeof suggestion.kind, 'string');
+    assert.equal(suggestion.kind, suggestion.type);
     assert.ok('entry_id' in suggestion || 'mode_id' in suggestion, 'suggestion must identify an entry or mode');
     assert.ok(Array.isArray(suggestion.reason_codes), 'suggestion must include reason codes');
     assert.equal(typeof suggestion.confidence, 'number');
+    assert.ok(suggestion.counts && typeof suggestion.counts === 'object', 'suggestion must include counts');
+    assert.ok(Array.isArray(suggestion.suggested_patterns), 'suggestion must include suggested_patterns');
+    assert.equal(typeof suggestion.privacy_note, 'string');
     if ('signal_patterns' in suggestion) {
       assert.ok(Array.isArray(suggestion.signal_patterns), 'signal_patterns must be an array');
       for (const pattern of suggestion.signal_patterns) {
@@ -234,6 +250,41 @@ test('EVO-03/EVO-04: router proposals --json is read-only and privacy-preserving
     assert.equal(result.stderr, '', 'proposals --json must not print stderr diagnostics');
     assert.deepEqual(after, before, 'proposals --json must not mutate mode-map, weights, evolution state, trigger, or telemetry');
     assertProposalShape(JSON.parse(result.stdout));
+  });
+});
+
+test('EVO-03: proposal CLI aliases return the same advisory shape', () => {
+  withTempDir((dir) => {
+    const paths = writeRuntimeFixture(dir);
+    const env = {
+      ...process.env,
+      ROUTER_TEST_MODE_MAP_PATH: paths.modeMapPath,
+      ROUTER_TEST_WEIGHTS_PATH: paths.weightsPath,
+      ROUTER_TEST_EVOLUTION_STATE_PATH: paths.evolutionStatePath,
+      ROUTER_TEST_EVOLVE_TRIGGER_PATH: paths.evolveTriggerPath,
+      ROUTER_TEST_TELEMETRY_PATH: paths.telemetryPath,
+    };
+    const primary = spawnSync('node', [HOOK, 'proposals', '--json'], {
+      cwd: dir,
+      encoding: 'utf8',
+      env,
+      timeout: 5000,
+    });
+    assert.equal(primary.status, 0, `proposals --json failed: ${primary.stderr || primary.stdout}`);
+    const primaryOut = JSON.parse(primary.stdout);
+    for (const alias of ['proposal', 'evolve-proposals']) {
+      const result = spawnSync('node', [HOOK, alias, '--json'], {
+        cwd: dir,
+        encoding: 'utf8',
+        env,
+        timeout: 5000,
+      });
+      assert.equal(result.status, 0, `${alias} --json failed: ${result.stderr || result.stdout}`);
+      const out = JSON.parse(result.stdout);
+      assertProposalShape(out);
+      assert.deepEqual(out.proposal_counts, primaryOut.proposal_counts, `${alias} counts must match primary command`);
+      assert.deepEqual(out.proposals, primaryOut.proposals, `${alias} proposals must match primary command`);
+    }
   });
 });
 
