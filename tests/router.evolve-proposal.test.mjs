@@ -70,7 +70,10 @@ function fixtureModeMap() {
         id: 'gsd-review',
         mode: 'gsd-review',
         invoke_kind: 'slash',
-        signal_patterns: ['review changed code'],
+        signal_patterns: [
+          'review changed code',
+          'debug sk-live-1234567890abcdefghijklmnop AKIAIOSFODNN7EXAMPLE ghp_phase09secret1234567890',
+        ],
         recommended_skills: [],
         recommended_agents: [],
       },
@@ -135,6 +138,9 @@ function assertNoRawProposalText(value) {
     RAW_DOWNSTREAM_FIXTURE,
     'sk-live-proposal-secret',
     'ghp_phase09_secret',
+    'sk-live-1234567890abcdefghijklmnop',
+    'AKIAIOSFODNN7EXAMPLE',
+    'ghp_phase09secret1234567890',
   ]) {
     assert.ok(!text.includes(forbidden), `proposal output leaked forbidden text: ${forbidden}`);
   }
