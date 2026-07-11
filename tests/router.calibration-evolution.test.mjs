@@ -30,7 +30,7 @@ test('calibration-tasks.json: total entries include originals, codebase, evoluti
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   assert.equal(originalCount, 10, '10 Phase-1 originals must be preserved');
-  assert.ok(codebaseCount >= 3 && codebaseCount <= 5, `expected 3-5 codebase fixtures, got ${codebaseCount}`);
+  assert.ok(codebaseCount >= 7, `expected at least 7 codebase fixtures, got ${codebaseCount}`);
   assert.ok(evolutionCount >= 3 && evolutionCount <= 5, `expected 3-5 evolution fixtures, got ${evolutionCount}`);
   assert.ok(phase05Count >= 9, `expected at least 9 Phase 05 COV fixtures, got ${phase05Count}`);
 });
