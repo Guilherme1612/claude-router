@@ -312,7 +312,7 @@ test('HLT-01/HLT-05: diagnoseRouterState reports file health, coverage, safety, 
       },
     });
     assert.equal(out.status, 'warn');
-    for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution']) {
+    for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution', 'evolution_visibility']) {
       assert.ok(field in out, `doctor output missing ${field}`);
     }
     assert.ok(['fresh', 'stale'].includes(out.manifest.freshness.status), 'manifest freshness status required');
@@ -325,6 +325,12 @@ test('HLT-01/HLT-05: diagnoseRouterState reports file health, coverage, safety, 
     assert.equal(out.weights.parse_status, 'ok');
     assert.equal(out.evolution.state.parse_status, 'ok');
     assert.equal(out.evolution.trigger.exists, true);
+    assert.equal(out.evolution_visibility.weights.parse_status, 'ok', 'EVO-02 doctor visibility must include weights parse status');
+    assert.equal(out.evolution_visibility.last_run.status, 'ok', 'EVO-02 doctor visibility must include last-run status');
+    assert.equal(out.evolution_visibility.trigger.exists, true, 'EVO-02 doctor visibility must include trigger status');
+    assert.equal(out.evolution_visibility.privacy.raw_prompt_text, false, 'EVO-02 doctor visibility must preserve prompt privacy');
+    assert.equal(out.evolution_visibility.privacy.raw_telemetry_lines, false, 'EVO-02 doctor visibility must not expose raw telemetry lines');
+    assert.ok(out.evolution_visibility.weight_reasons && typeof out.evolution_visibility.weight_reasons === 'object', 'EVO-01 doctor visibility must include weight reasons');
     assert.ok(Array.isArray(out.blocked_agents));
     assert.ok(out.blocked_agents.some((entry) => entry.name === 'blocked-agent'));
     assertNextFixes(out, 'doctor');
@@ -374,7 +380,7 @@ test('HLT-04/HLT-05: router coverage --json returns counts by category and next-
 test('HLT-01: router doctor --json reports runtime health and privacy-preserving diagnostics', () => {
   const out = runJsonCommand(['doctor', '--json']);
   assert.ok(['ok', 'warn', 'error'].includes(out.status));
-  for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution']) {
+  for (const field of ['manifest', 'mode_map', 'coverage', 'unmapped', 'missing_mcp', 'blocked_agents', 'stale_targets', 'hook', 'cache', 'telemetry', 'weights', 'evolution', 'evolution_visibility']) {
     assert.ok(field in out, `doctor output missing ${field}`);
   }
   assert.ok(['fresh', 'stale', 'manifest_missing', 'error'].includes(out.manifest.freshness.status));
@@ -383,6 +389,11 @@ test('HLT-01: router doctor --json reports runtime health and privacy-preserving
   assert.ok(['ok', 'missing', 'empty', 'error'].includes(out.telemetry.latest.status));
   assert.ok('state' in out.evolution, 'doctor must report evolution-state status');
   assert.ok('trigger' in out.evolution, 'doctor must report .evolve-trigger status');
+  assert.ok(out.evolution_visibility && typeof out.evolution_visibility === 'object', 'doctor must expose EVO-02 evolution_visibility');
+  assert.ok(out.evolution_visibility.weight_reasons && typeof out.evolution_visibility.weight_reasons === 'object', 'doctor must expose EVO-01 weight reasons');
+  assert.ok(out.evolution_visibility.last_run && typeof out.evolution_visibility.last_run === 'object', 'doctor must expose evolution last-run state');
+  assert.equal(out.evolution_visibility.privacy.raw_prompt_text, false, 'doctor evolution visibility must not expose raw prompt text');
+  assert.equal(out.evolution_visibility.privacy.raw_telemetry_lines, false, 'doctor evolution visibility must not expose raw telemetry lines');
   assert.ok(out.privacy && out.privacy.raw_prompt_text === false, 'doctor must explicitly report raw prompt privacy');
   assertNextFixes(out, 'doctor CLI');
 });

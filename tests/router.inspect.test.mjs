@@ -102,6 +102,7 @@ function assertInspectShape(out) {
     'graphify',
     'final_injected_context',
     'pass_through_reason',
+    'evolution_visibility',
   ]) {
     assert.ok(field in out, `inspect output missing ${field}`);
   }
@@ -122,6 +123,10 @@ function assertInspectShape(out) {
   assert.ok('top_score' in out.score_debug, 'score_debug must expose top_score');
   assert.ok('runner_up_score' in out.score_debug, 'score_debug must expose runner_up_score');
   assert.ok('margin_rule_affected_tier' in out.score_debug, 'score_debug must expose margin rule effect');
+  assert.ok(out.evolution_visibility && typeof out.evolution_visibility === 'object', 'EVO-02 inspect output must expose evolution_visibility');
+  assert.ok(out.evolution_visibility.weight_reasons && typeof out.evolution_visibility.weight_reasons === 'object', 'EVO-01 inspect output must expose weight reasons');
+  assert.ok('selected_entry_id' in out.evolution_visibility, 'EVO-02 inspect output must expose selected_entry_id');
+  assert.equal(out.evolution_visibility.privacy.raw_prompt_text, false, 'inspect evolution visibility must not expose raw prompt text');
 }
 
 test('inspectDecision export: hit explanation includes full prompt-level contract', () => {
