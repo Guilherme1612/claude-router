@@ -144,12 +144,12 @@
     "codebase": true,
     "graph_status_expected": "ok",
     "right": {
-      "mode": "/gsd-explore",
-      "skills": [],
+      "mode": "/gsd-graphify",
+      "skills": ["graphify"],
       "agents": [],
       "tier": "medium",
       "status": "route",
-      "edge": "CAL-01 refactor component/module + concept node (typed_confirm_modal) - gsd-explore is the closest existing mode-map entry for ambiguous design/refactor exploration; gsd-refactor and gsd-quick do not exist in mode-map.json"
+      "edge": "CAL-01 refactor component/module + concept node (typed_confirm_modal) - graph-backed codebase exploration route through gsd-graphify; gsd-refactor and gsd-quick do not exist in mode-map.json"
     }
   },
   {
