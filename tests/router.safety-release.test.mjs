@@ -3,7 +3,7 @@
 // operator-command boundary checks for the live router hook.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
 import { homedir } from 'node:os';
@@ -15,6 +15,7 @@ const EVOLVE = join(homedir(), '.claude', 'hooks', 'router.evolve.mjs');
 const CALIBRATE = fileURLToPath(new URL('../router.calibrate.mjs', import.meta.url));
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
+const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
 
 const HOT_PATH_FILES = [
   HOOK,
@@ -131,5 +132,29 @@ test('SAF-02/SAF-07: warm hook pass-through stays below 100ms wall-clock and sel
     const m = r.stderr.match(/__router_latency_ms=([0-9.]+)/);
     assert.ok(m, `run ${i + 1} missing __router_latency_ms line`);
     assert.ok(parseFloat(m[1]) < BUDGET_MS, `run ${i + 1} self-latency ${m[1]}ms >= ${BUDGET_MS}ms`);
+  }
+});
+
+test('SAF-02/SAF-06/SAF-07: evolved worker-trigger hot path stays below 100ms without operator diagnostics', () => {
+  const originalTrigger = existsSync(LIVE_TRIGGER) ? readFileSync(LIVE_TRIGGER, 'utf8') : '0';
+  try {
+    const before = parseInt(originalTrigger.trim(), 10) || 0;
+    const startValue = before - ((before % 200) - 199 + 200) % 200;
+    writeFileSync(LIVE_TRIGGER, String(startValue));
+
+    const r = runHook(JSON.stringify({ prompt: 'the flaky payment test keeps failing intermittently' }), {
+      ROUTER_DEBUG_LATENCY: '1',
+    });
+
+    assert.equal(r.status, 0, 'worker-trigger hook run must exit 0');
+    assert.ok(r.wall < BUDGET_MS, `worker-trigger wall ${r.wall.toFixed(2)}ms >= ${BUDGET_MS}ms`);
+    assert.doesNotMatch(r.stdout, /doctor|routes|unmapped|coverage|proposals/i, 'hook output must not include operator diagnostics');
+    const m = r.stderr.match(/__router_latency_ms=([0-9.]+)/);
+    assert.ok(m, `worker-trigger run missing __router_latency_ms line: ${JSON.stringify(r.stderr)}`);
+    assert.ok(parseFloat(m[1]) < BUDGET_MS, `worker-trigger self-latency ${m[1]}ms >= ${BUDGET_MS}ms`);
+    const after = parseInt(readFileSync(LIVE_TRIGGER, 'utf8').trim(), 10) || 0;
+    assert.ok(after > startValue, `evolve trigger should advance; start=${startValue} after=${after}`);
+  } finally {
+    writeFileSync(LIVE_TRIGGER, originalTrigger);
   }
 });
