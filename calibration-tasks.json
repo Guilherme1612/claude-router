@@ -134,7 +134,7 @@
       "agents": [],
       "tier": "medium",
       "status": "route",
-      "edge": "architecture-question with real graph (memo writer AST node)"
+      "edge": "CAL-06 architecture explanation with real graph (memo writer AST node)"
     }
   },
   {
@@ -149,7 +149,7 @@
       "agents": [],
       "tier": "medium",
       "status": "route",
-      "edge": "in-project refactor + concept node (typed_confirm_modal) - gsd-explore is the closest existing mode-map entry for ambiguous design/refactor exploration; gsd-refactor and gsd-quick do not exist in mode-map.json"
+      "edge": "CAL-01 refactor component/module + concept node (typed_confirm_modal) - gsd-explore is the closest existing mode-map entry for ambiguous design/refactor exploration; gsd-refactor and gsd-quick do not exist in mode-map.json"
     }
   },
   {
@@ -164,7 +164,7 @@
       "agents": [],
       "tier": "high",
       "status": "route",
-      "edge": "bug + real file path + AST node (parse_log_metadata) — graph heuristic does NOT fire (no leading-/path, no camelCase, no keyword match); manifest-BM25 alone must route"
+      "edge": "CAL-02 bugfix in file/function + real file path + AST node (parse_log_metadata) — graph heuristic does NOT fire (no leading-/path, no camelCase, no keyword match); manifest-BM25 alone must route"
     }
   },
   {
@@ -174,12 +174,12 @@
     "codebase": true,
     "graph_status_expected": "not_triggered",
     "right": {
-      "mode": null,
+      "mode": "/gsd-add-tests",
       "skills": ["test-driven-development"],
-      "agents": ["test-engineer"],
+      "agents": [],
       "tier": "high",
       "status": "route",
-      "edge": "test-writer + concept node (rule_of_40) — test-driven-development is the only mode-map entry matching (skill-only edge, mode=null) since gsd-add-tests does not exist in mode-map.json; graph heuristic does NOT fire"
+      "edge": "CAL-03 add-tests target shape — Phase 05 made gsd-add-tests the routeable test-generation command; use test-driven-development and no required test-engineer agent; graph heuristic does NOT fire"
     }
   },
   {
@@ -364,6 +364,51 @@
       "tier": "high",
       "status": "route",
       "edge": "COV-11 COV-12 missing-MCP warn cluster - Phase 05 non-dispatching warn fixture; tests/router.direct-agent-warn.test.mjs owns warning-string assertion"
+    }
+  },
+  {
+    "id": 28,
+    "prompt": "review changed code code review this diff find bugs in this patch review for regressions in memo.py",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "not_triggered",
+    "right": {
+      "mode": "/gsd-code-review",
+      "skills": ["requesting-code-review"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "CAL-04 changed-code review fixture with practical codebase wording"
+    }
+  },
+  {
+    "id": 29,
+    "prompt": "map this codebase trace file dependencies data flow through the memo pipeline explain the architecture graph",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "ok",
+    "right": {
+      "mode": "/gsd-graphify",
+      "skills": ["graphify"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "CAL-05 data-flow tracing with graph-backed codebase prompt"
+    }
+  },
+  {
+    "id": 30,
+    "prompt": "map this codebase find where the typed-confirm modal is implemented inspect code relationships graphify this repo",
+    "cwd": "/Users/guilherme/Desktop/ClaudeCode/AutomaticTrading",
+    "codebase": true,
+    "graph_status_expected": "not_triggered",
+    "right": {
+      "mode": "/gsd-graphify",
+      "skills": ["graphify"],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "CAL-07 implementation lookup plus CAL-08 expanded codebase target and CAL-09 miss taxonomy contract"
     }
   }
 ]

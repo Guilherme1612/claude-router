@@ -50,6 +50,42 @@ const setEq = (a, b) => {
   return true;
 };
 
+function codebaseRightTarget(codebaseCount) {
+  const count = Math.max(0, Number(codebaseCount) || 0);
+  if (count === 0) return 0;
+  if (count < 7) return count;
+  return Math.max(5, Math.ceil(count * 0.7));
+}
+
+function classifyCalibrationMiss(task, result, evaluation) {
+  const detail = String(evaluation?.detail || '');
+  const topNames = (result?.top3 || []).map((candidate) => String(candidate?.name || ''));
+  const graphExpected = task?.graph_status_expected;
+  const graphActual = result?.graph_status;
+
+  if (graphExpected && graphActual && graphExpected !== graphActual) {
+    return { class: 'graph_signal', follow_up: 'graph' };
+  }
+  if (/skills:|agents:|completion_promise:|task:/.test(detail)) {
+    return { class: 'target_shape', follow_up: 'target-shape' };
+  }
+  if (result?.skipReason === 'margin_tie' || /margin_tie|margin/.test(detail)) {
+    return { class: 'threshold_margin', follow_up: 'threshold' };
+  }
+  if (!result?.route || result?.route?.mode == null) {
+    return { class: 'mode_map_gap', follow_up: 'mode-map' };
+  }
+  if (/mode:/.test(detail)) {
+    const rightMode = normMode(task?.right?.mode);
+    const gotMode = normMode(result?.route?.mode);
+    if (rightMode && gotMode && topNames.includes(rightMode)) {
+      return { class: 'threshold_margin', follow_up: 'threshold' };
+    }
+    return { class: 'scoring_conflict', follow_up: 'scoring' };
+  }
+  return { class: 'fixture_gap', follow_up: 'fixture' };
+}
+
 // Adapter over router.mjs inspectDecision. Calibration keeps its existing
 // printed output/evaluation shape, but the route decision comes from the same
 // shared dry-run helper used by inspect/preview and production routing.
@@ -235,8 +271,8 @@ if (isMain()) {
   const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
-  if (tasks.length < 16 || tasks.length > 32 || originalCount !== 10 || codebaseCount < 3 || codebaseCount > 5 || evolutionCount < 3 || evolutionCount > 5 || phase05Count < 9) {
-    console.error(`FATAL: calibration-tasks.json expected 10 originals, 3-5 codebase, 3-5 evolution, and >=9 Phase-05 COV fixtures; got total=${tasks.length} originals=${originalCount} codebase=${codebaseCount} evolution=${evolutionCount} phase05=${phase05Count}`);
+  if (tasks.length < 16 || originalCount !== 10 || codebaseCount < 7 || evolutionCount < 3 || evolutionCount > 5 || phase05Count < 9) {
+    console.error(`FATAL: calibration-tasks.json expected 10 originals, >=7 codebase, 3-5 evolution, and >=9 Phase-05 COV fixtures; got total=${tasks.length} originals=${originalCount} codebase=${codebaseCount} evolution=${evolutionCount} phase05=${phase05Count}`);
     throw new Error(`calibration-tasks.json fixture counts invalid: total=${tasks.length} originals=${originalCount} codebase=${codebaseCount} evolution=${evolutionCount} phase05=${phase05Count}`);
   }
   // Phase 3 (D-13, D-25): pass threshold = originalCount + 1 (codebase) + 1 (evolution) = N + 2
@@ -250,6 +286,7 @@ if (isMain()) {
   console.log('');
 
   let rightCount = 0;
+  let originalRightCount = 0;
   let codebaseRightCount = 0;
   let evolutionRightCount = 0;
   let evolutionWeightSum = 0;
@@ -293,9 +330,11 @@ if (isMain()) {
       ok = ev.ok;
       detail = ev.detail;
       if (ok) rightCount++;
+      if (ok && !task.codebase && !task.evolution && !String(task?.right?.edge || '').includes('COV-')) originalRightCount++;
       if (ok && task.codebase === true) codebaseRightCount++;
     }
-    if (!ok && result.tier === 'high') wrongHigh.push({ id: task.id, prompt: task.prompt, detail });
+    const taxonomy = ok ? null : classifyCalibrationMiss(task, result, { ok, detail });
+    if (!ok && result.tier === 'high') wrongHigh.push({ id: task.id, prompt: task.prompt, detail, taxonomy });
 
     // Track graph_status_expected vs actual for codebase fixtures
     if (task.codebase === true && task.graph_status_expected) {
@@ -329,9 +368,13 @@ if (isMain()) {
     console.log(`${mark}#${task.id}${codebaseTag}${evolutionTag} tier=${result.tier} mode=${modeStr} skills=[${skillsStr}] agents=[${agentsStr}] margin=${result.margin} top3=[${top3Str}] graph=${result.graph_status} syms=${symbolCount} elapsed_ms=${elapsed}${evoOutcome}${evoScore}`);
     console.log(`     right: mode=${task.right.mode || 'null'} skills=[${(task.right.skills || []).join(',')}] agents=[${(task.right.agents || []).join(',')}] status=${task.right.status} graph_status_expected=${task.graph_status_expected || 'n/a'}`);
     console.log(`     ${detail}`);
+    if (taxonomy) {
+      console.log(`     Miss taxonomy: ${taxonomy.class} follow_up=${taxonomy.follow_up}`);
+    }
     console.log('');
   }
 
+  const codebaseTarget = codebaseRightTarget(codebaseCount);
   console.log(`=== ${rightCount}/${tasks.length} right (threshold ${passThreshold}) ===`);
   console.log(`=== Codebase subset: ${codebaseRightCount}/${codebaseCount} right (was 0/${codebaseCount} pre-Phase-2) ===`);
   if (evolutionCount > 0) {
@@ -341,7 +384,8 @@ if (isMain()) {
     console.log(`=== Average weight_applied: ${avgWeight} ===`);
     console.log(`=== Per-fixture outcomes: [${labels}] ===`);
   }
-  console.log(`Original 10: ${originalCount}/${originalCount} (preserved)`);
+  console.log(`Original 10: ${originalRightCount}/${originalCount} (preserved)`);
+  console.log(`Codebase target: ${codebaseRightCount}/${codebaseCount} (target: 5/7 minimum)`);
   console.log(`Codebase 5: ${codebaseRightCount}/${codebaseCount} (preserved / improved)`);
   console.log(`Evolution ${evolutionCount}: ${evolutionRightCount}/${evolutionCount} (Phase 3 new)`);
   console.log(`Combined: ${rightCount} / ${tasks.length} (threshold: ${passThreshold})`);
@@ -354,12 +398,13 @@ if (isMain()) {
   if (wrongHigh.length) {
     console.log('!! Wrong HIGH-confidence auto-routes (raise T_high per D-09):');
     for (const w of wrongHigh) {
-      console.log(`   #${w.id} "${w.prompt}" — ${w.detail}`);
+      const taxonomyText = w.taxonomy ? ` — Miss taxonomy: ${w.taxonomy.class} follow_up=${w.taxonomy.follow_up}` : '';
+      console.log(`   #${w.id} "${w.prompt}" — ${w.detail}${taxonomyText}`);
     }
   }
   console.log(`Thresholds: T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
 
-  process.exit(rightCount >= passThreshold ? 0 : 1);
+  process.exit(rightCount >= passThreshold && originalRightCount === originalCount && codebaseRightCount >= codebaseTarget ? 0 : 1);
 }
 
 // --- Named exports (D-16 DRY: Phase-3 worker imports these) ----------------
@@ -369,4 +414,4 @@ if (isMain()) {
 export const loadManifest = R.loadManifest;
 export const loadModeMap = R.loadModeMap;
 // Pure pipeline fns (already in scope; make importable).
-export { dryRun, evaluate, resolveEvolveUrl, evolutionRight };
+export { dryRun, evaluate, resolveEvolveUrl, evolutionRight, classifyCalibrationMiss, codebaseRightTarget };
