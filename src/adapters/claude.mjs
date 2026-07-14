@@ -119,7 +119,16 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     if (recognized.type === 'plugin_metadata') return { ignored: true };
     if (recognized.type === 'settings') {
       const records = [];
-      for (const event of Object.keys(data.hooks || {}).sort()) records.push({ ...base, type: 'binding', name: `settings:${event}`, data: { schema_version: 1, command: event, args: [], native_invocation: { event, bindings: data.hooks[event] } } });
+      for (const event of Object.keys(data.hooks || {}).sort()) {
+        const bindings = data.hooks[event];
+        // The installer-owned router hook consumes the candidate registry; it is
+        // lifecycle plumbing, not an inventory capability, and including it would
+        // make the install's own first mutation invalidate its preflight bytes.
+        const portableBindings = Array.isArray(bindings)
+          ? bindings.filter((entry) => !JSON.stringify(entry).includes('router.mjs')) : bindings;
+        if (Array.isArray(portableBindings) && portableBindings.length === 0) continue;
+        records.push({ ...base, type: 'binding', name: `settings:${event}`, data: { schema_version: 1, command: event, args: [], native_invocation: { event, bindings: portableBindings } } });
+      }
       return { records };
     }
     if (recognized.type === 'config' && configExpander) return { records: configExpander(base) };
