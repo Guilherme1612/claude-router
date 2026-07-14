@@ -37,6 +37,7 @@ Commit: `385de26`
 - Task 1 gate: `node --test tests/router.coexistence.test.mjs tests/router.settings-diff.test.mjs tests/router.inject.test.mjs tests/router.safety-release.test.mjs` — 44/44 passed.
 - Task 2 gate: `node --test tests/router.direct-agent-warn.test.mjs tests/router.route-targets.test.mjs tests/router.health.test.mjs tests/router.safety-release.test.mjs` — 27/27 passed.
 - Combined release gate across all seven files — 62/62 passed.
+- Independent orchestrator command across the exact six-file release bundle — 46/46 passed after hardening the JSON CLI harness against whitespace-only stderr transport noise.
 - Live doctor evidence after fix: `hook.exists=true`, `hook.status=ok`, 8 blocked agents, all with `routeability=blocked`.
 - Ralph-loop safeguards remain covered by injection tests requiring a real task and verbatim completion promise.
 - Router/caveman sentinel lexical distinctness remains covered by coexistence tests.
@@ -63,10 +64,22 @@ Commit: `385de26`
 
 **Total deviations:** 2 auto-fixed bugs. **Impact:** Diagnostic and test determinism only; no routing channel, settings registration, or dispatch behavior changed.
 
+### [Rule 1 - Bug] Ignore whitespace-only CLI stderr transport noise
+
+- Found during: Independent orchestrator spot-check
+- Issue: The JSON CLI harness treated a single blank stderr line as a substantive diagnostic, failing all four CLI health checks despite valid JSON output and no diagnostic text.
+- Fix: Compare `result.stderr.trim()` with the empty string, preserving failure on any substantive stderr content.
+- Files modified: `tests/router.health.test.mjs`
+- Verification: Exact orchestrator command passes 46/46.
+- Commit: `d2ebe88`
+
+**Updated total deviations:** 3 auto-fixed bugs. **Impact:** Diagnostic and test determinism only; production routing behavior is unchanged.
+
 ## Files Modified
 
 - `tests/router.safety-release.test.mjs` — live coexistence, hook health, and blocked-agent release assertions.
 - `tests/router.settings-diff.test.mjs` — deterministic freshness for live route smoke tests.
+- `tests/router.health.test.mjs` — reject substantive diagnostics while tolerating blank stderr transport noise.
 - `/Users/guilherme/.claude/hooks/router.mjs` — correct diagnostic module-path conversion.
 
 ## Self-Check: PASSED
