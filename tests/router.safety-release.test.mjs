@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const EVOLVE = join(homedir(), '.claude', 'hooks', 'router.evolve.mjs');
 const CALIBRATE = fileURLToPath(new URL('../router.calibrate.mjs', import.meta.url));
+const CALIBRATION_TASKS = fileURLToPath(new URL('../calibration-tasks.json', import.meta.url));
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
 const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
@@ -23,6 +24,17 @@ const HOT_PATH_FILES = [
   EVOLVE,
   CALIBRATE,
 ];
+
+const RELEASE_MATRIX = {
+  'SAF-01': ['tests/router.failopen.test.mjs', 'tests/router.safety-release.test.mjs'],
+  'SAF-02': ['tests/router.perf.test.mjs', 'tests/router.perf-evolved.test.mjs'],
+  'SAF-03': ['tests/router.safety-release.test.mjs'],
+  'SAF-04': ['tests/router.direct-agent-warn.test.mjs', 'tests/router.route-targets.test.mjs'],
+  'SAF-05': ['tests/router.coexistence.test.mjs', 'tests/router.settings-diff.test.mjs', 'tests/router.health.test.mjs'],
+  'SAF-06': ['tests/router.inspect.test.mjs', 'tests/router.evolve-proposal.test.mjs', 'tests/router.evolution-visibility.test.mjs'],
+  'SAF-07': ['tests/router.safety-release.test.mjs'],
+  'SAF-08': ['tests/router.calibration-codebase.test.mjs', 'tests/router.calibration-coverage.test.mjs', 'tests/router.calibration-evolution.test.mjs', 'tests/router.calibration-graph.test.mjs', 'tests/router.calibrate-importable.test.mjs'],
+};
 
 function runHook(stdinStr, env = {}) {
   const start = performance.now();
@@ -53,6 +65,37 @@ function functionBody(source, name) {
   }
   throw new Error(`${name} body was not closed`);
 }
+
+test('SAF-01 through SAF-08: release matrix maps every requirement to executable focused tests', () => {
+  assert.deepEqual(Object.keys(RELEASE_MATRIX), Array.from({ length: 8 }, (_, i) => `SAF-0${i + 1}`));
+  for (const [requirement, files] of Object.entries(RELEASE_MATRIX)) {
+    assert.ok(files.length > 0, `${requirement} must map to focused evidence`);
+    for (const file of files) {
+      assert.ok(existsSync(file), `${requirement} evidence missing: ${file}`);
+      assert.match(file, /^tests\/router\..+\.test\.mjs$/, `${requirement} evidence must be executable by node --test`);
+    }
+  }
+});
+
+test('SAF-08: calibration fixtures and stdout preserve every subset-specific release threshold', () => {
+  const fixtures = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
+  const counts = {
+    original: fixtures.filter((fixture) => fixture.id >= 1 && fixture.id <= 10).length,
+    codebase: fixtures.filter((fixture) => fixture.codebase).length,
+    evolution: fixtures.filter((fixture) => fixture.evolution).length,
+    coverage: fixtures.filter((fixture) => fixture.id >= 19 && fixture.id <= 27).length,
+  };
+  assert.deepEqual(counts, { original: 10, codebase: 8, evolution: 3, coverage: 9 });
+
+  const run = spawnSync(NODE, [CALIBRATE], { encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  assert.match(run.stdout, /Original 10:\s+10\/10 \(preserved\)/);
+  const codebase = run.stdout.match(/Codebase target:\s+(\d+)\/(\d+) \(target: 5\/7 minimum\)/);
+  assert.ok(codebase, 'calibration output must expose the codebase target line');
+  assert.ok(Number(codebase[1]) >= 5 && Number(codebase[2]) >= 7, `codebase target regressed: ${codebase?.[0]}`);
+  assert.match(run.stdout, /Evolution 3:\s+\d+\/3 \(Phase 3 new\)/);
+  assert.match(run.stdout, /Combined:\s+\d+ \/ 30 \(threshold: 21\)/);
+});
 
 test('SAF-01/SAF-07: malformed and invalid hook inputs fail open with empty stdout', () => {
   const cases = [
