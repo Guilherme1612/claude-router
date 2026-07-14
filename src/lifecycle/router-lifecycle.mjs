@@ -4,6 +4,9 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { buildFullRegistry } from '../registry/build.mjs';
+import { stableStringify } from '../registry/schema.mjs';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
 
@@ -44,6 +47,7 @@ function isRouterEntry(group, routerPath) {
 function paths(options) {
   const claudeRoot = resolve(options.claudeRoot);
   const codexRoot = resolve(options.codexRoot);
+  const ownedRoot = resolve(options.ownedRoot || join(claudeRoot, 'router'));
   return {
     claudeRoot,
     codexRoot,
@@ -52,6 +56,9 @@ function paths(options) {
     routerPath: resolve(options.routerPath || join(claudeRoot, 'hooks', 'router.mjs')),
     codexMarkerPath: resolve(options.codexMarkerPath || join(codexRoot, 'router', 'installed.json')),
     manifestPath: resolve(options.manifestPath || join(claudeRoot, 'router', 'install-manifest.json')),
+    ownedRoot,
+    candidatePath: resolve(options.candidatePath || join(ownedRoot, 'candidate', 'registry.json')),
+    reportPath: resolve(options.reportPath || join(ownedRoot, 'candidate', 'report.json')),
   };
 }
 
@@ -97,19 +104,38 @@ export function installRouter(options) {
   const markerValue = JSON.stringify({ schema_version: 1, managed_by: 'claude-router' }, null, 2) + '\n';
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
+  const built = (options.buildRegistry || buildFullRegistry)({ claudeRoot: p.claudeRoot, codexRoot: p.codexRoot,
+    ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}) });
+  const candidateValue = stableStringify(built.registry) + '\n';
+  const reportValue = stableStringify({ diagnostics: built.diagnostics, summary: built.summary }) + '\n';
+  const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const moduleNames = ['registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs', 'adapters/claude.mjs', 'adapters/codex.mjs'];
+  const moduleValues = moduleNames.map(name => [join(p.ownedRoot, 'modules', name), readFileSync(join(sourceRoot, name))]);
+  const ownedValues = [...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue]];
+  for (const [file] of ownedValues) {
+    const owned = existingManifest?.files?.some(entry => entry.path === file);
+    if (existsSync(file) && !owned) throw new Error(`existing candidate artifact is not owned by this installer: ${file}`);
+  }
+  if (options.dryRun) return { status: 'dry-run', ready: false, manifestPath: p.manifestPath,
+    changes: ownedValues.filter(([file, value]) => !fileMatches(file, fingerprint(value))).map(([file]) => file) };
   const created = [];
+  const rollbackCreated = [];
 
   try {
     if (!routerHealthy) {
+      const wasPresent = existsSync(p.routerPath);
       mkdirSync(dirname(p.routerPath), { recursive: true });
       const temporary = `${p.routerPath}.tmp.${process.pid}`;
       copyFileSync(p.sourceRouter, temporary);
       renameSync(temporary, p.routerPath);
       created.push(p.routerPath);
+      if (!wasPresent) rollbackCreated.push(p.routerPath);
     }
     if (!markerHealthy) {
+      const wasPresent = existsSync(p.codexMarkerPath);
       atomicWrite(p.codexMarkerPath, markerValue);
       created.push(p.codexMarkerPath);
+      if (!wasPresent) rollbackCreated.push(p.codexMarkerPath);
     }
     if (!bindingExists) {
       settings.hooks.UserPromptSubmit = [
@@ -117,6 +143,9 @@ export function installRouter(options) {
         routerEntry(options.nodeBinary || process.execPath, p.routerPath),
       ];
       atomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+    }
+    for (const [file, value] of ownedValues) {
+      if (!fileMatches(file, fingerprint(value))) { const wasPresent = existsSync(file); atomicWrite(file, value); created.push(file); if (!wasPresent) rollbackCreated.push(file); }
     }
 
     const manifest = {
@@ -126,25 +155,30 @@ export function installRouter(options) {
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
         { path: p.codexMarkerPath, fingerprint: markerFingerprint },
+        ...ownedValues.map(([file, value]) => ({ path: file, fingerprint: fingerprint(value) })),
       ],
-      directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.manifestPath)],
+      directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath), dirname(p.manifestPath)],
       bindings: [{ settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath }],
     };
     atomicWrite(p.manifestPath, JSON.stringify(manifest, null, 2) + '\n');
     const ready = fileMatches(p.routerPath, sourceFingerprint)
       && fileMatches(p.codexMarkerPath, markerFingerprint)
+      && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
     return {
-      status: existingManifest && routerHealthy && markerHealthy && bindingExists
+      status: existingManifest && routerHealthy && markerHealthy && bindingExists && created.length === 0
         ? 'already-installed'
         : existingManifest ? 'repaired' : 'installed',
       ready,
       manifestPath: p.manifestPath,
       routerPath: p.routerPath,
+      candidatePath: p.candidatePath,
+      reportPath: p.reportPath,
+      changes: created,
     };
   } catch (error) {
-    for (const file of created.reverse()) rmSync(file, { force: true });
+    for (const file of rollbackCreated.reverse()) rmSync(file, { force: true });
     throw error;
   }
 }

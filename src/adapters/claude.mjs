@@ -132,7 +132,8 @@ export function createAdapter({ runtime, adapterVersion, types }) {
         if (error?.code === 'ENOENT') continue;
         throw error;
       }
-      for (const path of walk(canonicalRoot)) {
+      const supportedPaths = [...types.keys()].flatMap(category => walk(join(canonicalRoot, category))).filter(path => extname(path) === '.json');
+      for (const path of supportedPaths.sort()) {
         const parsed = parseArtifact(path, { root: canonicalRoot, logicalRoot: spec.logicalRoot, scope: spec.scope });
         if (parsed.diagnostic) diagnostics.push(parsed.diagnostic);
         if (parsed.partial) observations.push(normalizePartial(parsed.partial));

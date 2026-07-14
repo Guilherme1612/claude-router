@@ -50,7 +50,24 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 2);
+    assert.equal(manifest.files.length, 9);
+    assert.equal(existsSync(result.candidatePath), true);
+    assert.equal(JSON.parse(readFileSync(result.reportPath, 'utf8')).summary.activated, false);
+  } finally { cleanup(f); }
+});
+
+test('candidate dry-run is mutation-free and build failure occurs before install mutation', () => {
+  const f = fixture();
+  try {
+    const settingsBefore = readFileSync(f.settingsPath);
+    const dry = installRouter({ ...f.options, dryRun: true });
+    assert.equal(dry.status, 'dry-run');
+    assert.deepEqual(readFileSync(f.settingsPath), settingsBefore);
+    assert.equal(existsSync(f.routerPath), false);
+    assert.throws(() => installRouter({ ...f.options, buildRegistry() { throw new Error('injected build failure'); } }), /injected build failure/);
+    assert.equal(existsSync(f.routerPath), false);
+    assert.equal(existsSync(f.manifestPath), false);
+    assert.deepEqual(readFileSync(f.settingsPath), settingsBefore);
   } finally { cleanup(f); }
 });
 

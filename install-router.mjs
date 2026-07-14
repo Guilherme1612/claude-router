@@ -41,6 +41,8 @@ Advanced path overrides:
   --router <path>        installed router hook
   --manifest <path>      ownership manifest
   --node-binary <path>   Node executable used by the hook
+  --project-root <path>  Optional project capability root
+  --dry-run              Validate and report candidate changes without writes
 `);
 }
 
@@ -60,6 +62,8 @@ try {
     routerPath: path.resolve(arg('router', path.join(claudeRoot, 'hooks', 'router.mjs'))),
     manifestPath: path.resolve(arg('manifest', path.join(claudeRoot, 'router', 'install-manifest.json'))),
     nodeBinary: path.resolve(arg('node-binary', process.execPath)),
+    dryRun: has('dry-run'),
+    ...(args.includes('--project-root') ? { projectRoot: path.resolve(arg('project-root')) } : {}),
   };
 
   if (has('uninstall')) {
@@ -76,6 +80,10 @@ try {
     }
   } else {
     const result = installRouter(options);
+    if (result.status === 'dry-run') {
+      console.log(`DRY RUN OK — ${result.changes.length} candidate change(s), no files written.`);
+      process.exit(0);
+    }
     if (result.status === 'already-installed') {
       console.log('ALREADY INSTALLED — verified and ready.');
     } else if (result.status === 'repaired') {
@@ -84,6 +92,7 @@ try {
       console.log('INSTALL OK — installed and verified.');
     }
     console.log(`Ownership manifest: ${result.manifestPath}`);
+    console.log(`Inactive candidate: ${result.candidatePath}`);
   }
 } catch (error) {
   console.error(`ROUTER LIFECYCLE FAILED: ${error.message}`);
