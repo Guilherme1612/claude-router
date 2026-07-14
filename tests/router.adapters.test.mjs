@@ -11,112 +11,108 @@ function put(path, value) {
   writeFileSync(path, typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function artifact(type, name, extra = {}) {
-  return { schema_version: 1, type, name, invocation: { command: name, args: ['--native'] }, ...extra };
+function markdown(name, command = name, extra = '') {
+  return `---\nschema_version: 1\nname: ${name}\ncommand: ${command}\nargs: ["--native"]\n${extra}---\n# ${name}\nNative instructions remain inert.\n`;
 }
 
 function fixture() {
-  const root = mkdtempSync(join(tmpdir(), 'router-adapters-'));
+  const root = mkdtempSync(join(tmpdir(), 'router-adapters-native-'));
   const claudeRoot = join(root, 'claude');
   const codexRoot = join(root, 'codex');
   const projectRoot = join(root, 'project');
   const outside = join(root, 'outside-canary.json');
-  put(outside, artifact('skill', 'MUST-NOT-BE-READ'));
-  for (const [path, value] of [
-    ['skills/global.json', artifact('skill', 'global-skill')],
-    ['plugins/p/skills/plugin.json', artifact('plugin_skill', 'plugin-skill')],
-    ['agents-store/store.json', artifact('agents_store_skill', 'store-skill')],
-    ['agents/reviewer.json', artifact('agent', 'reviewer', { dependencies: [{ id: 'mcp:missing', available: false }] })],
-    ['commands/ship.json', artifact('command', 'ship')],
-    ['hooks/prompt.json', artifact('hook', 'prompt-hook', { invocation: { event: 'UserPromptSubmit', command: 'node', args: ['hook.mjs'] } })],
-    ['bindings/router.json', artifact('binding', 'router-binding')],
-    ['dependencies/tool.json', artifact('dependency', 'declared-tool')],
-  ]) put(join(claudeRoot, path), value);
-  put(join(claudeRoot, 'skills', 'broken.json'), '{broken');
-  put(join(claudeRoot, 'skills', 'future.json'), { schema_version: 99, type: 'skill', name: 'future' });
-  for (const [path, value] of [
-    ['skills/plan.json', artifact('skill', 'plan')],
-    ['plugins/p/plugin.json', artifact('plugin', 'plugin')],
-    ['agents/executor.json', artifact('agent', 'executor')],
-    ['hooks/notify.json', artifact('hook', 'notify')],
-    ['config/metadata.json', artifact('config', 'metadata')],
-    ['mcp/server.json', artifact('mcp', 'server')],
-    ['tools/search.json', artifact('tool', 'search')],
-    ['models/fast.json', artifact('model', 'fast')],
-    ['permissions/default.json', artifact('permission', 'default')],
-    ['dependencies/runtime.json', artifact('dependency', 'runtime')],
-  ]) put(join(codexRoot, path), value);
-  put(join(projectRoot, '.claude', 'skills', 'same.json'), artifact('skill', 'global-skill'));
-  put(join(projectRoot, '.codex', 'skills', 'same.json'), artifact('skill', 'plan'));
-  symlinkSync(outside, join(claudeRoot, 'skills', 'escape.json'));
+  put(outside, { schema_version: 1, name: 'MUST-NOT-BE-READ' });
+
+  put(join(claudeRoot, 'skills/global/SKILL.md'), markdown('global-skill', '/global-skill'));
+  put(join(claudeRoot, 'plugins/demo/plugin.json'), { schema_version: 1, name: 'demo', origin: 'vendor/demo' });
+  put(join(claudeRoot, 'plugins/demo/skills/plugin-skill/SKILL.md'), markdown('plugin-skill', '/plugin-skill'));
+  put(join(claudeRoot, 'agents-store/vendor/skills/store-skill/SKILL.md'), markdown('store-skill', '/store-skill'));
+  put(join(claudeRoot, 'agents/reviewer.md'), markdown('reviewer', 'reviewer', 'dependencies: [{"id":"mcp:missing","available":false}]\n'));
+  put(join(claudeRoot, 'commands/ship.md'), markdown('ship', '/ship'));
+  put(join(claudeRoot, 'hooks/prompt.json'), { schema_version: 1, name: 'prompt-hook', event: 'UserPromptSubmit', command: 'node', args: ['hook.mjs'] });
+  put(join(claudeRoot, 'settings.json'), { schema_version: 1, hooks: { UserPromptSubmit: [{ hooks: [{ type: 'command', command: 'node hook.mjs' }] }] } });
+  put(join(claudeRoot, 'dependencies/tool.json'), { schema_version: 1, name: 'declared-tool', available: true });
+  put(join(claudeRoot, 'skills/broken/SKILL.md'), '---\nname: broken\ncommand: /broken\n');
+  put(join(claudeRoot, 'plugins/future/plugin.json'), { schema_version: 99, name: 'future' });
+  put(join(projectRoot, '.claude/skills/project/SKILL.md'), markdown('project-skill', '/project-skill'));
+
+  put(join(codexRoot, 'skills/plan/SKILL.md'), markdown('plan', '$plan'));
+  put(join(codexRoot, 'plugins/demo/plugin.json'), { schema_version: 1, name: 'demo', command: 'demo' });
+  put(join(codexRoot, 'agents/executor.toml'), 'schema_version = 1\nname = "executor"\ncommand = "executor"\n');
+  put(join(codexRoot, 'hooks/notify.json'), { schema_version: 1, name: 'notify', event: 'after_turn', command: 'notify' });
+  put(join(codexRoot, 'config.toml'), `schema_version = 1\nmodel = "gpt-5"\npermission = "workspace-write"\ntools = ["shell"]\ndependencies = [{ id = "binary:rg", available = true }]\n[mcp_servers.context7]\ncommand = "ctx7"\n`);
+  put(join(codexRoot, 'plugins/broken/plugin.json'), '{broken');
+  put(join(codexRoot, 'config.unsupported.toml'), 'schema_version = 99\n');
+  put(join(projectRoot, '.codex/skills/project/SKILL.md'), markdown('project-plan', '$project-plan'));
+  put(join(projectRoot, '.codex/config.toml'), 'schema_version = 1\nmodel = "project-model"\n');
+  symlinkSync(outside, join(claudeRoot, 'skills/escape.json'));
   return { root, claudeRoot, codexRoot, projectRoot, outside };
 }
 
-function assertContract(adapter) {
-  for (const name of ['discoverRoots', 'parseArtifact', 'normalizeArtifact', 'compileInvocation']) {
-    assert.equal(typeof adapter[name], 'function', `${name} export`);
-  }
+function assertPortable(result, absoluteRoot) {
+  assert.ok(result.observations.every((entry) => !JSON.stringify(entry).includes(absoluteRoot)));
+  assert.ok(result.observations.every((entry) => entry.provenance.every((p) => !p.logical_root.startsWith('/'))));
 }
 
-test('Claude discovers the complete explicit-root matrix with portable provenance', () => {
+test('Claude native discovery covers global, plugin, agents-store, project, hooks, bindings, and dependencies', () => {
   const f = fixture();
   try {
-    assertContract(claude);
     const result = claude.discoverRoots({ claudeRoot: f.claudeRoot, projectRoot: f.projectRoot });
     assert.deepEqual(new Set(result.observations.map((entry) => entry.type)), new Set([
       'agent', 'agents_store_skill', 'binding', 'command', 'dependency', 'hook', 'plugin_skill', 'skill',
     ]));
     assert.ok(result.observations.some((entry) => entry.scope.kind === 'project'));
-    assert.ok(result.observations.every((entry) => entry.provenance.every((p) => !p.logical_root.startsWith('/'))));
-    assert.ok(result.observations.every((entry) => !JSON.stringify(entry).includes(f.root)));
-    const blocked = result.observations.find((entry) => entry.name === 'reviewer');
-    assert.equal(blocked.dispatchable, false);
-    assert.equal(blocked.dependencies.state, 'declared');
+    assert.equal(result.observations.find((entry) => entry.name === 'reviewer').dispatchable, false);
+    assert.equal(result.observations.find((entry) => entry.name === 'ship').invocation.command, '/ship');
     assert.ok(result.diagnostics.some((entry) => entry.code === 'malformed_artifact'));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'unsupported_schema'));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'path_escape'));
+    assertPortable(result, f.root);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('Codex discovers skills, plugins, agents, hooks, config, MCP, tools, models, permissions, and dependencies', () => {
+test('Codex native discovery covers skills, plugins, agents, hooks, configuration, project scope, and dependencies', () => {
   const f = fixture();
   try {
-    assertContract(codex);
     const result = codex.discoverRoots({ codexRoot: f.codexRoot, projectRoot: f.projectRoot });
     assert.deepEqual(new Set(result.observations.map((entry) => entry.type)), new Set([
       'agent', 'config', 'dependency', 'hook', 'mcp', 'model', 'permission', 'plugin', 'skill', 'tool',
     ]));
     assert.ok(result.observations.some((entry) => entry.scope.kind === 'project'));
-    const skill = result.observations.find((entry) => entry.name === 'plan' && entry.scope.kind === 'global');
-    assert.deepEqual(codex.compileInvocation(skill), { runtime: 'codex', command: 'plan', args: ['--native'] });
+    assert.equal(result.observations.find((entry) => entry.name === 'plan').invocation.command, '$plan');
+    assert.ok(result.diagnostics.some((entry) => entry.code === 'malformed_artifact'));
+    assert.ok(result.diagnostics.some((entry) => entry.code === 'unsupported_schema'));
+    assertPortable(result, f.root);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('parse and normalize preserve runtime-native invocation while optional metadata stays unknown', () => {
+test('native SKILL.md and config.toml never disappear silently and optional metadata stays unknown', () => {
   const f = fixture();
   try {
-    const native = claude.parseArtifact(join(f.claudeRoot, 'commands', 'ship.json'), {
-      root: f.claudeRoot, logicalRoot: 'claude_global', scope: { kind: 'global' },
-    });
-    const normalized = claude.normalizeArtifact(native);
-    assert.equal(normalized.description, null);
-    assert.deepEqual(normalized.runtime_variants[0].native_invocation, { command: 'ship', args: ['--native'] });
-    assert.deepEqual(claude.compileInvocation(normalized), { runtime: 'claude', command: 'ship', args: ['--native'] });
+    const cr = claude.discoverRoots({ claudeRoot: f.claudeRoot });
+    const xr = codex.discoverRoots({ codexRoot: f.codexRoot });
+    assert.ok(cr.observations.some((entry) => entry.provenance[0].relative_path.endsWith('SKILL.md')));
+    assert.ok(xr.observations.some((entry) => entry.provenance[0].relative_path === 'config.toml'));
+    assert.equal(cr.observations.find((entry) => entry.name === 'global-skill').description, null);
+    assert.notEqual(cr.observations.length + cr.diagnostics.length, 0);
+    assert.notEqual(xr.observations.length + xr.diagnostics.length, 0);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('discovery is deterministic across root and traversal permutations and never consumes the outside canary', () => {
+test('native discovery is deterministic, inert, contained, and ignores arbitrary unsupported files', () => {
   const f = fixture();
   try {
+    put(join(f.claudeRoot, 'notes/random.txt'), 'ignore me');
     const first = claude.discoverRoots({ claudeRoot: f.claudeRoot, projectRoot: f.projectRoot });
     const second = claude.discoverRoots({ projectRoot: f.projectRoot, claudeRoot: f.claudeRoot });
     assert.equal(JSON.stringify(first), JSON.stringify(second));
-    assert.equal(readFileSync(f.outside, 'utf8').includes('MUST-NOT-BE-READ'), true);
     assert.equal(first.observations.some((entry) => entry.name === 'MUST-NOT-BE-READ'), false);
+    assert.equal(readFileSync(f.outside, 'utf8').includes('MUST-NOT-BE-READ'), true);
+    assert.equal(first.diagnostics.some((entry) => entry.relative_path.includes('random.txt')), false);
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
-test('core discovery requires explicit runtime roots', () => {
+test('parse and discovery require explicit runtime roots', () => {
   assert.throws(() => claude.discoverRoots({}), /claudeRoot is required/);
   assert.throws(() => codex.discoverRoots({}), /codexRoot is required/);
 });
