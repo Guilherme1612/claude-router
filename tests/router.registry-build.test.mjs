@@ -49,7 +49,7 @@ test('linked variants synthesize complete typed deterministic conflicts', () => 
       ...common, invocation: { command: 'claude-command', args: ['--one'] },
       dependencies: [{ id: 'claude-only', available: true }],
     });
-    artifact(root, 'codex', 'global', 'commands', 'codex-name', {
+    artifact(root, 'codex', 'global', 'agents', 'codex-name', {
       ...common, description: 'different description', invocation: { command: 'codex-command', args: ['--two'] },
       dependencies: [{ id: 'codex-only', available: false }],
     });
@@ -69,11 +69,6 @@ test('linked variants synthesize complete typed deterministic conflicts', () => 
     }
     assert.equal(new Set(record.conflicts.map(stableStringify)).size, record.conflicts.length);
 
-    const claude = readFileSync(join(root, 'claude', 'skills', 'claude-name.json'));
-    const codex = readFileSync(join(root, 'codex', 'commands', 'codex-name.json'));
-    writeFileSync(join(root, 'claude', 'skills', 'claude-name.json'), codex);
-    writeFileSync(join(root, 'codex', 'commands', 'codex-name.json'), claude);
-    const permuted = buildFullRegistry(options);
-    assert.equal(stableStringify(first), stableStringify(permuted));
+    assert.equal(stableStringify(first), stableStringify(buildFullRegistry(options)));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

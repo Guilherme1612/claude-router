@@ -9,18 +9,58 @@ function key(value) {
 }
 function fingerprint(value) { return createHash('sha256').update(key(value)).digest('hex'); }
 
+const MATERIAL_FIELDS = [
+  ['name', 'informational'],
+  ['type', 'dispatch-blocking'],
+  ['description', 'informational'],
+  ['lifecycle', 'dispatch-blocking'],
+  ['dispatchable', 'dispatch-blocking'],
+  ['invocation', 'dispatch-blocking'],
+  ['dependencies', 'dispatch-blocking'],
+  ['scope', 'build-blocking'],
+];
+
+function sourceIdentity(record) {
+  return record.provenance.map(source => `${source.runtime}:${source.logical_root}/${source.relative_path}`).sort();
+}
+
+function syntheticConflicts(records) {
+  const conflicts = [];
+  for (const [field, severity] of MATERIAL_FIELDS) {
+    const groups = new Map();
+    for (const record of records) {
+      const value = record[field] ?? null;
+      const valueKey = key(value);
+      if (!groups.has(valueKey)) groups.set(valueKey, { value, sources: [] });
+      groups.get(valueKey).sources.push(...sourceIdentity(record));
+    }
+    if (groups.size < 2) continue;
+    const values = [...groups.values()].map(entry => ({
+      fingerprint: fingerprint(entry.value),
+      value: entry.value,
+      sources: [...new Set(entry.sources)].sort(),
+    })).sort((a, b) => key(a).localeCompare(key(b)));
+    conflicts.push({
+      field,
+      type: 'linked-variant-disagreement',
+      severity,
+      sources: [...new Set(values.flatMap(entry => entry.sources))].sort(),
+      values,
+    });
+  }
+  return conflicts;
+}
+
 function mergeGroup(records) {
   const ordered = records.map(canonicalizeCapability).sort((a, b) => key(a).localeCompare(key(b)));
   const first = structuredClone(ordered[0]);
+  first.conflicts.push(...syntheticConflicts(ordered));
   for (const record of ordered.slice(1)) {
     first.provenance.push(...record.provenance);
     first.runtime_variants.push(...record.runtime_variants);
     first.conflicts.push(...record.conflicts);
     first.dispatchable &&= record.dispatchable;
     if (!record.dispatchable) first.lifecycle = record.lifecycle;
-    if (key(first.dependencies) !== key(record.dependencies)) {
-      first.conflicts.push({ severity: 'informational', type: 'variant', field: 'dependencies', sources: record.provenance.map(p => `${p.logical_root}/${p.relative_path}`) });
-    }
   }
   return canonicalizeCapability(first);
 }
