@@ -16,6 +16,7 @@ const CALIBRATE = fileURLToPath(new URL('../router.calibrate.mjs', import.meta.u
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
 const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
+const LIVE_SETTINGS = join(homedir(), '.claude', 'settings.json');
 
 const HOT_PATH_FILES = [
   HOOK,
@@ -74,6 +75,31 @@ test('SAF-01/SAF-07: live hook source has no blocking exit or block decision', (
   const src = readFileSync(HOOK, 'utf8');
   assert.equal(/process\.exit\(\s*2\s*\)/.test(src), false, 'hot path must never use process.exit(2)');
   assert.equal(/decision["']?\s*:\s*["']block["']/.test(src), false, 'hot path must never emit decision:block');
+});
+
+test('SAF-05/SAF-07: live JSON settings preserve router, GSD, context-mode, caveman, and ralph-loop surfaces', () => {
+  const settings = JSON.parse(readFileSync(LIVE_SETTINGS, 'utf8'));
+  const groups = settings?.hooks?.UserPromptSubmit;
+  assert.ok(Array.isArray(groups), 'live UserPromptSubmit groups must remain registered');
+  const commands = groups.flatMap((group) => group?.hooks || []).map((hook) => hook?.command || '');
+  assert.ok(commands.some((command) => command.includes(HOOK)), 'router command must point at the live router hook');
+
+  const allHookCommands = Object.values(settings?.hooks || {})
+    .flatMap((eventGroups) => Array.isArray(eventGroups) ? eventGroups : [])
+    .flatMap((group) => group?.hooks || [])
+    .map((hook) => hook?.command || '');
+  assert.ok(allHookCommands.some((command) => /gsd-/.test(command)), 'GSD hook entries must remain present');
+  assert.equal(settings?.enabledPlugins?.['context-mode@context-mode'], true, 'context-mode must remain enabled');
+  assert.equal(settings?.enabledPlugins?.['caveman@caveman'], true, 'caveman must remain enabled');
+  assert.equal(settings?.enabledPlugins?.['ralph-loop@claude-plugins-official'], true, 'ralph-loop must remain enabled');
+});
+
+test('SAF-05/SAF-07: doctor recognizes the live registered router hook', () => {
+  const r = spawnSync(NODE, [HOOK, 'doctor', '--json'], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stderr || r.stdout);
+  const report = JSON.parse(r.stdout);
+  assert.equal(report.hook.exists, true, 'doctor must detect the live hook file');
+  assert.equal(report.hook.status, 'ok');
 });
 
 test('SAF-03/SAF-07: hot-path files have no per-prompt external classifier or hosted-model call path', () => {

@@ -206,6 +206,7 @@ function runHook(payload) {
   const r = spawnSync(NODE, [LIVE_ROUTER], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
+    env: { ...process.env, ROUTER_TEST_FRESHNESS: 'fresh' },
   });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }
