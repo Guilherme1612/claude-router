@@ -12,6 +12,12 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **v1.1 shipped and verified on 2026-07-14.** The router now provides expanded route coverage, inspect/preview/explain commands, health and coverage diagnostics, practical codebase calibration, privacy-preserving evolution proposals, and executable safety/coexistence release gates.
 
+## Current Milestone: v1.2 Autonomous Dual-Runtime Control Plane
+
+**Goal:** Automatically reconcile additions, edits, moves, disables, dependency changes, and deletions across `.claude` and `.codex`; then select the best workflow and least-sufficient context from prompt intent plus authoritative workflow state.
+
+**Success means:** safe inventory changes propagate without intervention, unsafe candidates are quarantined without changing active state, minimal prompts resume the correct workflow when uniquely identifiable, and warm routing stays below the existing hard latency gate with materially lower context usage.
+
 ## Next Milestone Goals
 
 - Build one canonical registry across `.claude` and `.codex`, with runtime-specific adapters.
