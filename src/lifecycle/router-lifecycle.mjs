@@ -88,6 +88,9 @@ export function installRouter(options) {
   if (existingManifest && existingManifest.schema_version !== MANIFEST_SCHEMA_VERSION) {
     throw new Error('ownership manifest has an unsupported schema version');
   }
+  if (!existingManifest && (existsSync(p.routerPath) || existsSync(p.codexMarkerPath))) {
+    throw new Error('existing router artifact is not owned by this installer; refusing to overwrite it');
+  }
   const groups = settings.hooks.UserPromptSubmit || [];
   const bindingExists = groups.some((group) => isRouterEntry(group, p.routerPath));
   const routerHealthy = fileMatches(p.routerPath, sourceFingerprint);

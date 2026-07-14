@@ -24,9 +24,16 @@ import { readFileSync, writeFileSync, existsSync, statSync, renameSync, appendFi
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import {
+  correlateOutcomes,
+  aggregatePerEntry,
+  proposeAdditions,
+  proposeEdits,
+  proposePrunes,
+} from './router.evolve.mjs';
 
 // ESM->CJS bridge for the gsd-surface primitive lazy-required from applySurfaceFilter.
 // Resolves relative to this file (router.mjs), not process.cwd() — safe across
@@ -152,6 +159,31 @@ function _getCache(runtimeConfigDir) {
   }
   return c;
 }
+// Phase 4 / ANC-01: test-only accessor for the mtime cache. Exported with
+// the `_` prefix per the "internal" convention so production callers do
+// not depend on the cache shape. Used by tests/router.ancestor-reuse.test.mjs
+// (Test 6/7) to assert that the warm path reuses the same Set reference
+// and the cold path produces a different one after mtime change.
+export function _getSurfaceCacheForTest(runtimeConfigDir) {
+  return _surfaceCaches.get(runtimeConfigDir) || null;
+}
+// Phase 4 / ANC-01: test-only hook to force the module sentinels into the
+// "unimportable" state. Used by tests/router.ancestor-reuse.test.mjs
+// (Test 2) to exercise the load-bearing fail-open path
+// (surface_status='absent') without needing to actually delete the
+// user's gsd-core install. Pass `true` to force absence, `false` to
+// restore normal behavior.
+export function _setModulesUnimportableForTest(absent) {
+  if (absent) {
+    _surfaceMod = false;
+    _clustersMod = false;
+    _registryMod = false;
+  } else {
+    _surfaceMod = null;
+    _clustersMod = null;
+    _registryMod = null;
+  }
+}
 
 // applySurfaceFilter(corpus, manifest, modeMap, runtimeConfigDir = RUNTIME_CONFIG_DIR)
 //   -> { corpus, surface_status, surface_disabled_count }
@@ -217,15 +249,19 @@ export function applySurfaceFilter(corpus, manifest, modeMap, runtimeConfigDir =
       cache.enabledSet = resolved && resolved.skills instanceof Set
         ? resolved.skills
         : new Set(resolved && resolved.skills ? resolved.skills : []);
-      // Decide status. existsSync catches the corrupt-but-present file case:
-      // resolveSurface falls through to readActiveProfile on parse error
-      // (line 79 of surface.cjs returns null), so the result is the 'full'
-      // default surface — but the file DOES exist. Per D-08 the cleanest
-      // mapping is: file present AND a non-empty enabled set → 'applied';
-      // file missing or enabled set is the full set → 'unconfigured'.
-      let fileExists = false;
-      try { fileExists = existsSync(surfaceFile); } catch (_) { fileExists = false; }
-      cache.surfaceStatus = fileExists ? 'applied' : 'unconfigured';
+      // Decide status. readSurface returns null on parse error or missing
+      // file — that is the canonical "no valid surface state" signal
+      // (D-08: 'unconfigured' = no .gsd-surface.json OR no .gsd-profile; the
+      // router used the full manifest). existsSync alone is not sufficient:
+      // a corrupt-but-present file would falsely report 'applied' even
+      // though resolveSurface fell through to the .gsd-profile/'full'
+      // default (line 79 of surface.cjs returns null on JSON.parse error).
+      let surfaceStateValid = false;
+      try {
+        surfaceStateValid = !!(surfaceMod && surfaceMod.readSurface
+          && surfaceMod.readSurface(runtimeConfigDir));
+      } catch (_) { surfaceStateValid = false; }
+      cache.surfaceStatus = surfaceStateValid ? 'applied' : 'unconfigured';
       // Disabled count is computed AFTER the filter pass below — the
       // authoritative count is `corpus.length - filtered.length` (matches
       // what the user actually sees in the routing output), not a manifest
@@ -424,6 +460,818 @@ export function loadModeMap(path = MODE_MAP) {
   }
 }
 
+const INVENTORY_COVERAGE_KEYS = [
+  'skills',
+  'plugin_skills',
+  'agents_store_skills',
+  'agents',
+  'commands',
+  'hooks',
+  'mcp_servers',
+  'unwired_mcp_refs',
+];
+const ROUTE_INVOKE_KINDS = new Set(['slash', 'skill', 'agent', 'warn']);
+
+function stripLeadingSlash(value) {
+  return String(value || '').replace(/^\/+/, '');
+}
+
+function inventoryNames(value) {
+  if (Array.isArray(value)) return value.map((entry) => String(entry?.name || entry?.id || '')).filter(Boolean);
+  if (value && typeof value === 'object') return Object.keys(value);
+  return [];
+}
+
+function inventoryEntry(manifest, category, name) {
+  const source = manifest?.[category];
+  if (Array.isArray(source)) {
+    return source.find((entry) => String(entry?.name || entry?.id || '') === name) || { id: name, name };
+  }
+  return { id: name, name };
+}
+
+function hasMissingMcp(entry) {
+  return Array.isArray(entry?.requires_mcp_not_in_manifest) && entry.requires_mcp_not_in_manifest.length > 0;
+}
+
+function isProjectScoped(entry) {
+  return String(entry?.scope || '') === 'project';
+}
+
+function categoryCounts() {
+  return {
+    discovered: 0,
+    routeable: 0,
+    unmapped: 0,
+    blocked_missing_mcp: 0,
+    diagnostic_only: 0,
+    dependency_only: 0,
+    project_scoped: 0,
+    excluded: 0,
+  };
+}
+
+export function mappedTargets(modeMap) {
+  const targets = new Set();
+  for (const entry of modeMap?.entries || []) {
+    for (const value of [entry?.id, entry?.mode]) {
+      const target = stripLeadingSlash(value);
+      if (target) targets.add(target);
+    }
+    for (const value of entry?.recommended_skills || []) {
+      const target = stripLeadingSlash(value);
+      if (target) targets.add(target);
+    }
+    for (const value of entry?.recommended_agents || []) {
+      const target = stripLeadingSlash(value);
+      if (target) targets.add(target);
+    }
+  }
+  return targets;
+}
+
+function isMapped(entry, mapped) {
+  return mapped.has(stripLeadingSlash(entry?.name)) || mapped.has(stripLeadingSlash(entry?.id));
+}
+
+export function classifyInventoryEntry(category, entry, mapped = new Set()) {
+  if (category === 'hooks') return 'diagnostic_only';
+  if (category === 'mcp_servers' || category === 'unwired_mcp_refs') return 'dependency_only';
+  if (category === 'project_scoped_skills') return 'project_scoped';
+  if (category === 'agents' && hasMissingMcp(entry)) return 'blocked_missing_mcp';
+  if (category === 'agents_store_skills') {
+    const scope = String(entry?.scope || '');
+    if (scope && scope !== 'global') return 'excluded';
+  }
+  if (isProjectScoped(entry)) return 'project_scoped';
+  if (['skills', 'plugin_skills', 'agents_store_skills', 'agents', 'commands'].includes(category)) {
+    return isMapped(entry, mapped) ? 'routeable' : 'unmapped';
+  }
+  return 'excluded';
+}
+
+export function auditInventoryCoverage(manifest, modeMap) {
+  const mapped = mappedTargets(modeMap);
+  const counts = {};
+  const entries = [];
+  const highValueUnmapped = [];
+  const blockedMissingMcp = [];
+  const recommendationCandidates = [];
+
+  for (const category of INVENTORY_COVERAGE_KEYS) {
+    counts[category] = categoryCounts();
+    for (const name of inventoryNames(manifest?.[category])) {
+      const source = inventoryEntry(manifest, category, name);
+      const classification = classifyInventoryEntry(category, source, mapped);
+      counts[category].discovered += 1;
+      counts[category][classification] = (counts[category][classification] || 0) + 1;
+      const item = { category, name, classification };
+      entries.push(item);
+      if (classification === 'unmapped') {
+        highValueUnmapped.push(item);
+        recommendationCandidates.push(item);
+      } else if (classification === 'blocked_missing_mcp') {
+        blockedMissingMcp.push({
+          ...item,
+          missing_mcp: Array.isArray(source.requires_mcp_not_in_manifest) ? source.requires_mcp_not_in_manifest : [],
+        });
+      }
+    }
+  }
+
+  return {
+    mapped,
+    counts,
+    entries,
+    highValueUnmapped,
+    high_value_unmapped: highValueUnmapped,
+    blockedMissingMcp,
+    blocked_missing_mcp: blockedMissingMcp,
+    recommendationCandidates,
+    recommendation_candidates: recommendationCandidates,
+  };
+}
+
+function namesFromEntries(entries, predicate = () => true) {
+  return new Set((entries || [])
+    .filter(predicate)
+    .map((entry) => stripLeadingSlash(entry?.name || entry?.id))
+    .filter(Boolean));
+}
+
+export function buildTargetIndexes(manifest) {
+  const safeAgent = (entry) => !hasMissingMcp(entry);
+  const blockedAgent = (entry) => hasMissingMcp(entry);
+  const globalAgentsStore = (entry) => String(entry?.scope || '') === 'global';
+  return {
+    commands: namesFromEntries(manifest?.commands),
+    skills: namesFromEntries(manifest?.skills),
+    globalSkills: namesFromEntries(manifest?.skills),
+    pluginSkills: namesFromEntries(manifest?.plugin_skills),
+    globalAgentsStoreSkills: namesFromEntries(manifest?.agents_store_skills, globalAgentsStore),
+    safeAgents: namesFromEntries(manifest?.agents, safeAgent),
+    blockedAgents: namesFromEntries(manifest?.agents, blockedAgent),
+  };
+}
+
+function knownSkillTargets(indexes) {
+  return new Set([
+    ...indexes.globalSkills,
+    ...indexes.pluginSkills,
+    ...indexes.globalAgentsStoreSkills,
+  ]);
+}
+
+function routeDiagnostic(entry, status, target, reason) {
+  return {
+    id: entry?.id || null,
+    invoke_kind: entry?.invoke_kind || null,
+    status,
+    target: target || null,
+    reason,
+  };
+}
+
+export function validateRouteTargets(manifest, modeMap, indexes = buildTargetIndexes(manifest)) {
+  const rows = [];
+  const routeIds = new Set((modeMap?.entries || []).map((entry) => stripLeadingSlash(entry?.id)).filter(Boolean));
+  const skills = knownSkillTargets(indexes);
+
+  for (const entry of modeMap?.entries || []) {
+    const shapeErrors = [];
+    if (!entry?.id) shapeErrors.push(['<entry>', 'missing id']);
+    if (!entry?.invoke_kind || !ROUTE_INVOKE_KINDS.has(entry.invoke_kind)) shapeErrors.push([entry?.invoke_kind || '<invoke_kind>', 'invalid invoke_kind']);
+    if (!Array.isArray(entry?.signal_patterns) || entry.signal_patterns.length === 0) shapeErrors.push(['signal_patterns', 'must be a non-empty array']);
+    if (!Array.isArray(entry?.recommended_skills)) shapeErrors.push(['recommended_skills', 'must be an array']);
+    if (!Array.isArray(entry?.recommended_agents)) shapeErrors.push(['recommended_agents', 'must be an array']);
+    for (const [target, reason] of shapeErrors) rows.push(routeDiagnostic(entry, 'invalid_shape', target, reason));
+    if (shapeErrors.length) continue;
+
+    if (entry.invoke_kind === 'slash') {
+      const mode = stripLeadingSlash(entry.mode);
+      const id = stripLeadingSlash(entry.id);
+      const intentionalRouteAlias = mode && mode !== id && routeIds.has(mode);
+      const intentionalSchemaRoute = mode && mode === id && modeMap?.schema_version;
+      if (!mode || (!indexes.commands.has(mode) && !intentionalRouteAlias && !intentionalSchemaRoute)) {
+        rows.push(routeDiagnostic(entry, 'stale_target', mode || '<mode>', 'slash mode must match a manifest command or intentional mode-map route id'));
+      }
+    }
+
+    if (entry.invoke_kind === 'agent' && entry.recommended_agents.length === 0) {
+      rows.push(routeDiagnostic(entry, 'invalid_shape', '<recommended_agents>', 'invoke_kind agent requires at least one safe agent'));
+    }
+
+    if (entry.invoke_kind === 'warn') {
+      const warning = String(entry.warning || '');
+      if (!warning && (entry.recommended_skills.length > 0 || entry.recommended_agents.length > 0)) {
+        rows.push(routeDiagnostic(entry, 'warning_only', '<warning>', 'warn route needs a warning string when target lists are non-empty'));
+      }
+      if (/Dispatch agent/i.test(warning)) {
+        rows.push(routeDiagnostic(entry, 'warning_only', '<warning>', 'warn route must not imply Dispatch agent wording'));
+      }
+    }
+
+    if (entry.invoke_kind !== 'warn') {
+      for (const target of entry.recommended_skills) {
+        const name = stripLeadingSlash(target);
+        if (!skills.has(name)) rows.push(routeDiagnostic(entry, 'stale_target', name, 'recommended skill is not in global/plugin/global-agents-store skill inventory'));
+      }
+    }
+
+    for (const target of entry.recommended_agents) {
+      const name = stripLeadingSlash(target);
+      if (indexes.blockedAgents.has(name)) {
+        rows.push(routeDiagnostic(entry, 'blocked_dispatch_agent', name, entry.invoke_kind === 'warn'
+          ? 'warn route must not carry missing-MCP agents as dispatch targets'
+          : 'agent requires_mcp_not_in_manifest and cannot be a dispatch target'));
+      } else if (entry.invoke_kind !== 'warn' && !indexes.safeAgents.has(name)) {
+        rows.push(routeDiagnostic(entry, 'stale_target', name, 'agent is not a safe manifest agent'));
+      }
+    }
+
+    if (!rows.some((row) => row.id === entry.id)) rows.push(routeDiagnostic(entry, 'ok', null, 'route targets resolve'));
+  }
+
+  return rows;
+}
+
+const UNMAPPED_RANK_BASIS = 'commands, global skills, plugin skills, safe agents, keyword priority, name';
+const UNMAPPED_KEYWORD_RE = /\b(gsd|router|codebase|debug|test|review|docs?|graph|audit|fix|health|coverage)\b/i;
+
+function sourceLabel(category) {
+  if (category === 'commands') return 'command';
+  if (category === 'skills') return 'global skill';
+  if (category === 'plugin_skills') return 'plugin skill';
+  if (category === 'agents') return 'safe agent';
+  if (category === 'agents_store_skills') return 'global agents-store skill';
+  return category || 'inventory';
+}
+
+function categoryRank(category) {
+  if (category === 'commands') return 0;
+  if (category === 'skills') return 1;
+  if (category === 'plugin_skills') return 2;
+  if (category === 'agents') return 3;
+  if (category === 'agents_store_skills') return 4;
+  return 9;
+}
+
+function keywordRank(name) {
+  return UNMAPPED_KEYWORD_RE.test(String(name || '')) ? 0 : 1;
+}
+
+function enrichUnmappedItem(item, rank = 0) {
+  const source = sourceLabel(item?.category);
+  return {
+    ...item,
+    rank,
+    source,
+    reason: `${source} is present in the manifest but not covered by any mode-map target`,
+    routeability: 'candidate',
+    recommendation: `Add a high-signal mode-map entry or route pattern for ${item?.name}.`,
+  };
+}
+
+function enrichBlockedItem(item) {
+  const missing = Array.isArray(item?.missing_mcp) ? item.missing_mcp.join(', ') : '';
+  return {
+    ...item,
+    source: sourceLabel(item?.category),
+    reason: missing
+      ? `agent requires missing MCP server(s): ${missing}`
+      : 'agent requires missing MCP server(s)',
+    routeability: 'blocked',
+    recommendation: 'Wire missing MCP first, or keep coverage as warn-only diagnostic output.',
+  };
+}
+
+function rankedUnmappedItems(items = []) {
+  return [...items]
+    .sort((a, b) => (
+      categoryRank(a.category) - categoryRank(b.category)
+      || keywordRank(a.name) - keywordRank(b.name)
+      || String(a.name || '').localeCompare(String(b.name || ''))
+    ))
+    .map((item, index) => enrichUnmappedItem(item, index + 1));
+}
+
+function nextFixes({ audit = null, diagnostics = [] } = {}) {
+  const fixes = [];
+  const stale = diagnostics.filter((row) => row.status === 'stale_target' || row.status === 'invalid_shape');
+  const blocked = audit?.blockedMissingMcp || [];
+  const unmapped = audit?.highValueUnmapped || [];
+  if (stale.length) fixes.push({ reason: `${stale.length} route target diagnostics need cleanup`, action: 'Update mode-map entries so ids, modes, skills, and agents resolve to manifest inventory.' });
+  if (blocked.length) fixes.push({ reason: `${blocked.length} agents require missing MCP servers`, action: 'Wire missing MCP servers before exposing those agents as dispatch targets.' });
+  if (unmapped.length) fixes.push({ reason: `${unmapped.length} useful inventory entries are unmapped`, action: 'Add high-signal mode-map routes for the highest-value unmapped skills, agents, or commands.' });
+  if (!fixes.length) fixes.push({ reason: 'No route safety defects found', action: 'Review coverage periodically as inventory changes.' });
+  return fixes;
+}
+
+export function listRoutes(manifest, modeMap) {
+  const diagnostics = validateRouteTargets(manifest, modeMap);
+  const byId = new Map();
+  for (const row of diagnostics) {
+    if (!byId.has(row.id)) byId.set(row.id, []);
+    byId.get(row.id).push(row);
+  }
+  const routes = (modeMap?.entries || []).map((entry) => {
+    const rows = byId.get(entry.id) || [];
+    return {
+      id: entry.id,
+      mode: entry.mode || null,
+      invoke_kind: entry.invoke_kind || null,
+      examples: Array.isArray(entry.signal_patterns) ? entry.signal_patterns.slice(0, 3) : [],
+      recommended_skills: Array.isArray(entry.recommended_skills) ? entry.recommended_skills : [],
+      recommended_agents: Array.isArray(entry.recommended_agents) ? entry.recommended_agents : [],
+      warning: entry.warning || null,
+      args_hint: entry.args_hint || null,
+      target_health: {
+        status: rows.every((row) => row.status === 'ok') ? 'ok' : 'issues',
+        diagnostics: rows,
+      },
+    };
+  });
+  return { status: 'ok', total: routes.length, routes, diagnostics, next_fixes: nextFixes({ diagnostics }) };
+}
+
+export function listUnmapped(manifest, modeMap) {
+  const audit = auditInventoryCoverage(manifest, modeMap);
+  const items = rankedUnmappedItems(audit.highValueUnmapped);
+  return {
+    status: 'ok',
+    total: items.length,
+    rank_basis: UNMAPPED_RANK_BASIS,
+    items,
+    blocked_missing_mcp: audit.blockedMissingMcp.map(enrichBlockedItem),
+    next_fixes: nextFixes({ audit }),
+  };
+}
+
+export function summarizeCoverage(manifest, modeMap) {
+  const audit = auditInventoryCoverage(manifest, modeMap);
+  const routeable_total = Object.values(audit.counts).reduce((sum, counts) => sum + (counts.routeable || 0), 0);
+  const discovered_total = Object.values(audit.counts).reduce((sum, counts) => sum + (counts.discovered || 0), 0);
+  const unmapped_total = Object.values(audit.counts).reduce((sum, counts) => sum + (counts.unmapped || 0), 0);
+  return {
+    status: 'ok',
+    totals: {
+      discovered: discovered_total,
+      routeable: routeable_total,
+      unmapped: unmapped_total,
+      blocked_missing_mcp: audit.blockedMissingMcp.length,
+      diagnostic_only: Object.values(audit.counts).reduce((sum, counts) => sum + (counts.diagnostic_only || 0), 0),
+      dependency_only: Object.values(audit.counts).reduce((sum, counts) => sum + (counts.dependency_only || 0), 0),
+      project_scoped: Object.values(audit.counts).reduce((sum, counts) => sum + (counts.project_scoped || 0), 0),
+      excluded: Object.values(audit.counts).reduce((sum, counts) => sum + (counts.excluded || 0), 0),
+    },
+    mapped_total: audit.mapped.size,
+    categories: audit.counts,
+    entries: audit.entries,
+    high_value_unmapped: rankedUnmappedItems(audit.highValueUnmapped).slice(0, 25),
+    blocked_missing_mcp: audit.blockedMissingMcp.map(enrichBlockedItem),
+    next_fixes: nextFixes({ audit }),
+  };
+}
+
+function fileHealth(path) {
+  try {
+    if (!path || !existsSync(path)) return { exists: false, status: 'missing' };
+    const st = statSync(path);
+    return {
+      exists: true,
+      status: 'ok',
+      size: st.size,
+      mtime: new Date(st.mtimeMs).toISOString(),
+      mode: (st.mode & 0o777).toString(8),
+    };
+  } catch {
+    return { exists: false, status: 'error' };
+  }
+}
+
+function parseJsonFileStatus(path) {
+  const health = fileHealth(path);
+  if (!health.exists || health.status !== 'ok') return { ...health, parse_status: health.status };
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8'));
+    return { ...health, parse_status: 'ok', schema_version: parsed?.schema_version ?? null };
+  } catch {
+    return { ...health, parse_status: 'error' };
+  }
+}
+
+function manifestHealth(path) {
+  const health = parseJsonFileStatus(path);
+  const freshness = checkFreshness(path, BUILD_PY);
+  let age_hours = null;
+  if (health.exists && health.mtime) {
+    age_hours = Math.max(0, Math.round(((Date.now() - Date.parse(health.mtime)) / 36e5) * 10) / 10);
+  }
+  return { ...health, freshness, age_hours };
+}
+
+function telemetryHealth(path) {
+  const health = fileHealth(path);
+  const privacy = {
+    raw_prompt_text: false,
+    raw_lines: false,
+    note: 'telemetry health reports parse status and decision metadata only',
+  };
+  if (!health.exists || health.status !== 'ok') {
+    return { ...health, parse_status: health.status, latest: explainLastStatus(health.status), privacy };
+  }
+  try {
+    const lines = readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean);
+    if (!lines.length) return { ...health, parse_status: 'empty', latest: explainLastStatus('empty'), privacy };
+    let latest = null;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try {
+        latest = JSON.parse(lines[i]);
+        break;
+      } catch {}
+    }
+    if (!latest) return { ...health, parse_status: 'empty', latest: explainLastStatus('empty'), privacy };
+    const latestStatus = explainLastDecision({ telemetryPath: path });
+    return {
+      ...health,
+      parse_status: 'ok',
+      latest: {
+        status: latestStatus.status,
+        prompt_signature: latestStatus.prompt_signature,
+        selected_route: latestStatus.selected_route ? {
+          id: latestStatus.selected_route.id || null,
+          mode: latestStatus.selected_route.mode || null,
+          invoke_kind: latestStatus.selected_route.invoke_kind || null,
+        } : null,
+        confidence_tier: latestStatus.confidence_tier,
+        graph_status: latestStatus.graph_status || null,
+        privacy_note: latestStatus.privacy_note,
+      },
+      privacy,
+    };
+  } catch {
+    return { ...health, parse_status: 'error', latest: explainLastStatus('error'), privacy };
+  }
+}
+
+function routerStatus({ manifest, modeMap, routeDiagnostics = [], coverage = null, telemetry = null, cache = null, weights = null, evolution = null } = {}) {
+  if (!manifest || !modeMap) return 'error';
+  const badRoutes = routeDiagnostics.some((row) => row.status !== 'ok');
+  const blocked = (coverage?.blocked_missing_mcp || []).length > 0;
+  const unmapped = (coverage?.high_value_unmapped || []).length > 0;
+  const staleManifest = coverage && false;
+  const badStatusFiles = [telemetry, cache, weights, evolution?.state].some((item) => item && ['error'].includes(item.parse_status));
+  if (badRoutes || blocked || unmapped || staleManifest || badStatusFiles) return 'warn';
+  return 'ok';
+}
+
+function readJsonForVisibility(path) {
+  const health = parseJsonFileStatus(path);
+  if (health.parse_status !== 'ok') return { health, value: null };
+  try {
+    return { health, value: JSON.parse(readFileSync(path, 'utf8')) };
+  } catch {
+    return { health: { ...health, parse_status: 'error' }, value: null };
+  }
+}
+
+function entryIdForWeightCandidate(candidate, modeMap = null) {
+  if (!candidate) return null;
+  if (typeof candidate === 'string') return candidate;
+  if (candidate.entry && candidate.entry.id) return String(candidate.entry.id);
+  if (candidate.id) return String(candidate.id);
+  if (candidate.route_target && candidate.route_target.id) return String(candidate.route_target.id);
+  if (candidate.selected_route && candidate.selected_route.id) return String(candidate.selected_route.id);
+  const name = candidate.name || candidate.mode || null;
+  const mm = name ? modeMapEntryForName(modeMap, name) : null;
+  return mm && mm.id ? String(mm.id) : (name ? String(name) : null);
+}
+
+export function explainWeightApplication(candidate, context = {}) {
+  const modeMap = context.modeMap || _modeMapForBlend || null;
+  const entryId = entryIdForWeightCandidate(candidate, modeMap);
+  const weights = context.weights || null;
+  const weightsStatus = context.weights_status || null;
+  const reasonCodes = [];
+  const base = {
+    entry_id: entryId,
+    applied: false,
+    effective_weight: null,
+    weight_record_status: 'unknown',
+    reason_codes: reasonCodes,
+    outcomes: null,
+  };
+  if (!entryId) {
+    reasonCodes.push('not_weighted_candidate');
+    return { ...base, weight_record_status: 'not_weighted_candidate' };
+  }
+  if (!weights || !weights.weights || typeof weights.weights !== 'object') {
+    const code = weightsStatus && weightsStatus.parse_status === 'error' ? 'weights_malformed' : 'weights_missing';
+    reasonCodes.push(code);
+    return { ...base, weight_record_status: code };
+  }
+  const mmEntry = modeMap && Array.isArray(modeMap.entries)
+    ? modeMap.entries.find((e) => e && String(e.id || '') === entryId)
+    : null;
+  if (mmEntry && mmEntry.invoke_kind === 'warn') {
+    reasonCodes.push('warn_skipped');
+    const record = weights.weights[entryId] || null;
+    return {
+      ...base,
+      weight_record_status: 'warn_skipped',
+      outcomes: record ? { g: Number(record.g || 0), b: Number(record.b || 0), u: Number(record.u || 0) } : null,
+    };
+  }
+  const record = weights.weights[entryId];
+  if (!record || typeof record !== 'object') {
+    reasonCodes.push('entry_record_missing');
+    return { ...base, weight_record_status: 'missing' };
+  }
+  const score = typeof record.score === 'number' ? record.score : 0;
+  const g = Number(record.g || 0);
+  const b = Number(record.b || 0);
+  const u = Number(record.u || 0);
+  if (score === 0) reasonCodes.push('score_zero');
+  if (g === 0) reasonCodes.push('no_good_outcomes');
+  if (g === 0 && (b + u) > 0) reasonCodes.push('bad_or_unknown_only');
+  if (reasonCodes.length === 0) reasonCodes.push('weight_applied');
+  return {
+    ...base,
+    applied: true,
+    effective_weight: score,
+    weight_record_status: 'ok',
+    reason_codes: reasonCodes,
+    outcomes: { g, b, u },
+    updated_at: record.updated_at || null,
+  };
+}
+
+function proposalBase(status, telemetryStatus, windowMinutes, nowIso, sourceCounts = {}) {
+  return {
+    status,
+    advisory: true,
+    applied: false,
+    generated_at: nowIso,
+    window_minutes: windowMinutes,
+    proposal_counts: { add: 0, edit: 0, prune: 0, total: 0 },
+    counts: { add: 0, edit: 0, prune: 0, total: 0 },
+    proposals: [],
+    suggestions: [],
+    source_counts: { telemetry_records: 0, correlated_outcomes: 0, mode_map_entries: 0, ...sourceCounts },
+    telemetry_status: telemetryStatus,
+    privacy: {
+      raw_prompt_text: false,
+      raw_lines: false,
+      raw_telemetry_lines: false,
+      note: 'proposals are telemetry-metadata-derived; raw prompts, raw lines, and downstream text are omitted',
+    },
+  };
+}
+
+function readTelemetryMetadata(path) {
+  if (!path || !existsSync(path)) return { status: 'missing', records: [], malformed: 0 };
+  let text = '';
+  try { text = readFileSync(path, 'utf8'); }
+  catch { return { status: 'error', records: [], malformed: 0 }; }
+  const lines = text.split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return { status: 'empty', records: [], malformed: 0 };
+  const records = [];
+  let malformed = 0;
+  for (const line of lines) {
+    try {
+      const row = JSON.parse(line);
+      if (!row || typeof row !== 'object') { malformed++; continue; }
+      records.push({
+        ts: typeof row.ts === 'number' ? row.ts : Date.parse(row.ts) || 0,
+        prompt_signature: row.prompt_signature || null,
+        cwd: row.cwd || null,
+        suggested_mode: row.suggested_mode || row.selected_route?.id || null,
+        confidence_tier: row.confidence_tier || null,
+        selected_route: row.selected_route && typeof row.selected_route === 'object' ? {
+          id: row.selected_route.id || null,
+          mode: row.selected_route.mode || null,
+          invoke_kind: row.selected_route.invoke_kind || null,
+        } : null,
+        outcome: row.outcome || null,
+      });
+    } catch { malformed++; }
+  }
+  if (!records.length) return { status: malformed ? 'empty' : 'empty', records: [], malformed };
+  return { status: malformed ? 'error' : 'ok', records, malformed };
+}
+
+function proposalType(raw) {
+  return raw && (raw.kind || raw.type) ? String(raw.kind || raw.type) : 'unknown';
+}
+
+function proposalCounts(proposals) {
+  const counts = { add: 0, edit: 0, prune: 0, total: proposals.length };
+  for (const p of proposals) {
+    const type = proposalType(p);
+    if (type in counts) counts[type]++;
+  }
+  return counts;
+}
+
+function confidenceForProposal(raw, counts) {
+  const type = proposalType(raw);
+  if (type === 'edit' && counts && typeof counts.b === 'number') return Math.min(1, counts.b / Math.max(1, counts.g + counts.b + counts.u));
+  if (type === 'add' && counts && typeof counts.u === 'number') return Math.min(1, counts.u / Math.max(1, counts.g + counts.b + counts.u));
+  if (type === 'prune') return 0.5;
+  return 0.6;
+}
+
+function sanitizePatterns(patterns) {
+  if (!Array.isArray(patterns)) return [];
+  return patterns
+    .map((p) => redact(String(p || '')).replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .map((p) => p.slice(0, 80))
+    .slice(0, 5);
+}
+
+function sanitizeProposal(raw, perEntry) {
+  const type = proposalType(raw);
+  const entryId = raw?.id || raw?.entry?.id || raw?.entry_id || null;
+  const mode = raw?.mode || raw?.entry?.mode || entryId || null;
+  const counts = entryId && perEntry instanceof Map ? (perEntry.get(String(entryId)) || { g: 0, b: 0, u: 0 }) : { g: 0, b: 0, u: 0 };
+  const reason_codes = [];
+  if (type === 'add') reason_codes.push('unknown_cluster');
+  else if (type === 'edit') reason_codes.push('bad_outcome_ratio');
+  else if (type === 'prune') reason_codes.push('not_recently_selected');
+  else reason_codes.push('proposal');
+  const suggested_patterns = sanitizePatterns(raw?.signal_patterns || raw?.entry?.signal_patterns || []);
+  const out = {
+    type,
+    kind: type,
+    entry_id: entryId ? String(entryId) : null,
+    mode: mode ? String(mode) : null,
+    mode_id: mode ? String(mode) : null,
+    reason_codes,
+    confidence: confidenceForProposal(raw, counts),
+    counts: { g: Number(counts.g || 0), b: Number(counts.b || 0), u: Number(counts.u || 0) },
+    suggested_patterns,
+    signal_patterns: suggested_patterns,
+    privacy_note: 'Derived from telemetry metadata and bounded token summaries; raw prompts and downstream events omitted.',
+  };
+  return out;
+}
+
+export function buildTelemetryProposals(options = {}) {
+  const paths = options.paths || {};
+  const telemetryPath = options.telemetryPath || paths.telemetry || TELEMETRY;
+  const modeMapPath = options.modeMapPath || paths.modeMap || MODE_MAP;
+  const windowMinutes = Number(options.windowMinutes || 30);
+  const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
+  const nowMs = now.getTime();
+  const nowIso = Number.isFinite(nowMs) ? now.toISOString() : new Date().toISOString();
+  let modeMap = options.modeMap || null;
+  if (!modeMap) modeMap = loadModeMap(modeMapPath);
+  if (!modeMap || !Array.isArray(modeMap.entries)) modeMap = { entries: [] };
+
+  const telemetry = readTelemetryMetadata(telemetryPath);
+  const base = proposalBase(telemetry.status, telemetry.status, windowMinutes, nowIso, {
+    telemetry_records: telemetry.records.length,
+    mode_map_entries: Array.isArray(modeMap.entries) ? modeMap.entries.length : 0,
+    malformed_lines: telemetry.malformed || 0,
+  });
+  if (telemetry.status !== 'ok' && telemetry.status !== 'error') return base;
+  if (!telemetry.records.length) return base;
+
+  try {
+    const outcomes = correlateOutcomes(telemetry.records, { windowMinutes });
+    const perEntry = aggregatePerEntry(outcomes, modeMap);
+    const rawProposals = [
+      ...proposeAdditions(outcomes, modeMap),
+      ...proposeEdits(perEntry, modeMap, outcomes),
+      ...proposePrunes(outcomes, modeMap, Number.isFinite(nowMs) ? nowMs : Date.now()),
+    ];
+    const proposals = rawProposals.map((p) => sanitizeProposal(p, perEntry));
+    const counts = proposalCounts(proposals);
+    return {
+      ...base,
+      status: telemetry.status === 'error' ? 'error' : 'ok',
+      proposal_counts: counts,
+      counts,
+      proposals,
+      suggestions: proposals,
+      source_counts: {
+        ...base.source_counts,
+        correlated_outcomes: outcomes.length,
+        proposal_primitives: rawProposals.length,
+      },
+    };
+  } catch {
+    return { ...base, status: 'error', telemetry_status: telemetry.status };
+  }
+}
+
+export function summarizeEvolutionVisibility(options = {}) {
+  const paths = options.paths || {};
+  const modeMap = options.modeMap || loadModeMap(options.modeMapPath || paths.modeMap || MODE_MAP) || { entries: [] };
+  const weightsPath = options.weightsPath || paths.weights || WEIGHTS;
+  const statePath = options.evolutionStatePath || paths.evolutionState || EVOLUTION_STATE;
+  const triggerPath = options.triggerPath || paths.evolveTrigger || paths.trigger || TRIGGER;
+  const telemetryPath = options.telemetryPath || paths.telemetry || TELEMETRY;
+  const weightsRead = options.weights
+    ? { health: { exists: true, status: 'ok', parse_status: 'ok', schema_version: options.weights.schema_version ?? null }, value: options.weights }
+    : readJsonForVisibility(weightsPath);
+  const stateRead = options.evolutionState
+    ? { health: { exists: true, status: 'ok', parse_status: 'ok', schema_version: options.evolutionState.schema_version ?? null }, value: options.evolutionState }
+    : readJsonForVisibility(statePath);
+  const telemetry = telemetryHealth(telemetryPath);
+  const trigger = fileHealth(triggerPath);
+  const candidates = Array.isArray(options.candidates) && options.candidates.length
+    ? options.candidates
+    : (Array.isArray(modeMap.entries) ? modeMap.entries.map((entry) => ({ id: entry.id })) : []);
+  const selectedEntryId = options.selectedEntryId || options.selected_entry_id || null;
+  const ids = new Set();
+  if (selectedEntryId) ids.add(String(selectedEntryId));
+  for (const c of candidates) {
+    const id = entryIdForWeightCandidate(c, modeMap);
+    if (id) ids.add(id);
+  }
+  const weightReasons = {};
+  for (const id of ids) {
+    weightReasons[id] = explainWeightApplication(id, {
+      modeMap,
+      weights: weightsRead.value,
+      weights_status: weightsRead.health,
+    });
+  }
+  const state = stateRead.value || {};
+  return {
+    status: weightsRead.health.parse_status === 'error' || stateRead.health.parse_status === 'error' ? 'warn' : 'ok',
+    selected_entry_id: selectedEntryId ? String(selectedEntryId) : null,
+    weights: weightsRead.health,
+    weights_status: weightsRead.health,
+    state: stateRead.health,
+    state_status: stateRead.health,
+    telemetry,
+    trigger,
+    last_run: {
+      status: stateRead.health.parse_status,
+      at: state.last_run || state.last_run_at || state.updated_at || null,
+    },
+    right_pick_rate: typeof state.right_pick_rate === 'number' ? state.right_pick_rate : null,
+    proposal_counts: state.proposal_counts || null,
+    weight_reasons: weightReasons,
+    privacy: {
+      raw_prompt_text: false,
+      raw_lines: false,
+      raw_telemetry_lines: false,
+      note: 'evolution visibility reports statuses, route IDs, counts, and reason codes only',
+    },
+  };
+}
+
+export function diagnoseRouterState(options = {}) {
+  const manifest = options.manifest || loadManifest(options.manifestPath || MANIFEST);
+  const modeMap = options.modeMap || loadModeMap(options.modeMapPath || MODE_MAP);
+  const paths = options.paths || {};
+  const manifestPath = options.manifestPath || paths.manifest || MANIFEST;
+  const modeMapPath = options.modeMapPath || paths.modeMap || MODE_MAP;
+  const coverage = summarizeCoverage(manifest || {}, modeMap || {});
+  const routes = listRoutes(manifest || {}, modeMap || {});
+  const stale = routes.diagnostics.filter((row) => row.status !== 'ok');
+  const telemetry = telemetryHealth(paths.telemetry || TELEMETRY);
+  const cache = parseJsonFileStatus(paths.cache || CACHE);
+  const weights = parseJsonFileStatus(paths.weights || WEIGHTS);
+  const evolution = {
+    state: parseJsonFileStatus(paths.evolutionState || EVOLUTION_STATE),
+    trigger: fileHealth(paths.evolveTrigger || TRIGGER),
+  };
+  const evolution_visibility = summarizeEvolutionVisibility({
+    modeMap,
+    modeMapPath,
+    paths: {
+      weights: paths.weights || WEIGHTS,
+      evolutionState: paths.evolutionState || EVOLUTION_STATE,
+      evolveTrigger: paths.evolveTrigger || TRIGGER,
+      telemetry: paths.telemetry || TELEMETRY,
+    },
+  });
+  const status = routerStatus({ manifest, modeMap, routeDiagnostics: routes.diagnostics, coverage, telemetry, cache, weights, evolution });
+  return {
+    status,
+    privacy: { raw_prompt_text: false, note: 'health diagnostics do not include raw prompt text' },
+    manifest: { readable: !!manifest, ...manifestHealth(manifestPath) },
+    mode_map: { readable: !!modeMap, entries: Array.isArray(modeMap?.entries) ? modeMap.entries.length : 0, ...parseJsonFileStatus(modeMapPath) },
+    coverage,
+    unmapped: { total: coverage.high_value_unmapped.length, items: coverage.high_value_unmapped.slice(0, 25) },
+    missing_mcp: coverage.blocked_missing_mcp.flatMap((entry) => entry.missing_mcp || []),
+    blocked_agents: coverage.blocked_missing_mcp,
+    stale_targets: stale,
+    hook: fileHealth(paths.hook || fileURLToPath(import.meta.url)),
+    cache,
+    telemetry,
+    weights,
+    evolution,
+    evolution_visibility,
+    next_fixes: nextFixes({ audit: auditInventoryCoverage(manifest || {}, modeMap || {}), diagnostics: stale }),
+  };
+}
+
 // Phase 3 / EVO-01: weighted BM25 (D-08/D-09/D-11). Fail-open: returns null on any error.
 export function loadWeights(path = WEIGHTS) {
   try {
@@ -544,6 +1392,21 @@ export function buildCorpus(manifest, modeMap = null) {
   }
   const commands = Array.isArray(manifest.commands) ? manifest.commands : [];
   for (const e of commands) push(e); // summary absent → name+description fallback
+  // Direct warn entries deliberately have no dispatch target, so they cannot be
+  // associated to a manifest skill/agent by recommended_* fields. Add them as
+  // mode-map-owned corpus entries so missing-MCP warnings can route directly.
+  if (modeMap && Array.isArray(modeMap.entries)) {
+    for (const e of modeMap.entries) {
+      if (!e || e.invoke_kind !== 'warn' || !e.id) continue;
+      const name = String(e.id || '');
+      const desc = Array.isArray(e.signal_patterns) ? e.signal_patterns.join(' ') : '';
+      const warning = typeof e.warning === 'string' ? e.warning : '';
+      const toks = tokenize(`${name} ${name} ${name} ${desc} ${warning}`);
+      const tf = new Map();
+      for (const t of toks) tf.set(t, (tf.get(t) || 0) + 1);
+      out.push({ entry: e, name, tokens: tf, dl: toks.length });
+    }
+  }
   // hooks[] deliberately EXCLUDED — no description field, event-bound (§3).
   return out;
 }
@@ -643,14 +1506,14 @@ export function cacheLookup(sig, cache) {
 }
 
 // Cache key (RTE-07). sha256(normalizedPrompt + "|" + intentKeywords.join(" ")
-// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime). Folding mtimes
-// means a mode-map edit, manifest rebuild, OR a graph.json rebuild for cwd
-// invalidates stale entries (key changes). graphMtime defaults to 0 to keep
-// Phase-1 callers backward-compatible.
-export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0) {
+// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime + "|" + surfaceMtime). Folding mtimes
+// means a mode-map edit, manifest rebuild, graph.json rebuild for cwd, OR
+// surface profile change invalidates stale entries (key changes). graphMtime
+// and surfaceMtime default to 0 to keep older callers backward-compatible.
+export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0, surfaceMtime = 0) {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
-  const joined = `${np}|${ik}|${modeMapMtime}|${manifestMtime}|${graphMtime}`;
+  const joined = [np, ik, modeMapMtime, manifestMtime, graphMtime, surfaceMtime].join('|');
   return createHash('sha256').update(joined).digest('hex');
 }
 
@@ -661,6 +1524,19 @@ function readGraphMtime(cwd) {
   try {
     const dir = (cwd && String(cwd)) || process.cwd();
     const p = join(dir, 'graphify-out', 'graph.json');
+    if (!existsSync(p)) return 0;
+    return statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+// Read .gsd-surface.json mtime for the active runtime config dir (best-effort;
+// returns 0 when the surface profile is missing). Used to fold surface profile
+// changes into the persistent route-cache key.
+function readSurfaceMtime(runtimeConfigDir = RUNTIME_CONFIG_DIR) {
+  try {
+    const p = join(runtimeConfigDir, '.gsd-surface.json');
     if (!existsSync(p)) return 0;
     return statSync(p).mtimeMs;
   } catch {
@@ -1103,12 +1979,14 @@ export function applyGuards(route, prompt, manifest, modeMap, ctx = {}) {
         // score). Without this, a single-agent flagged pool normalizes fTop.norm
         // to 1.0 → margin 1.0 → always 'high' → demotes correct routes whose
         // real winner is a valid skill/command (GRD-01 intent, not over-fire).
-        if (fTier === 'high' && (ctx.autoTopScore == null || fTop.score >= ctx.autoTopScore)) {
-          const mcp = (flaggedAgents.find((a) => a.name === fTop.name) || {}).requires_mcp_not_in_manifest[0] || 'unknown';
+        const mcp = (flaggedAgents.find((a) => a.name === fTop.name) || {}).requires_mcp_not_in_manifest[0] || 'unknown';
+        const explicitMissingMcp = mcp && String(prompt || '').toLowerCase().includes(String(mcp).toLowerCase());
+        if (fTier === 'high' && (explicitMissingMcp || ctx.autoTopScore == null || fTop.score >= ctx.autoTopScore)) {
           guards_fired.push(`mcp_demote:${fTop.name}:${mcp}`);
           route = {
             ...route,
             invoke_kind: 'warn',
+            tier: 'high',
             warning: `Agent ${fTop.name} needs MCP ${mcp} which is not in manifest — wire it first`,
             mode: null,
             recommended_skills: [],
@@ -1375,67 +2253,221 @@ export function formatInjection(route, prompt = '', sigHash = '') {
 
 // --- main pipeline --------------------------------------------------------
 
-function main(payload) {
-  // Capture start time for latency telemetry (consumed in Plan 04).
-  const startNs = process.hrtime.bigint();
-  if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
+function routeToInspectShape(state) {
+  const route = state.route || null;
+  return {
+    normalized_prompt: state.includePrompt ? state.normalizedPrompt : '',
+    prompt: state.includePrompt ? state.prompt : undefined,
+    candidates: state.candidates || [],
+    margin: typeof state.margin === 'number' ? state.margin : null,
+    thresholds: state.thresholds || { T_high: null, T_low: null, M: null },
+    selected_tier: state.tier || null,
+    selected_route: route,
+    guards_fired: state.guards_fired || [],
+    cache: state.cache || { status: 'miss', key_prefix: '', scoring_skipped: false },
+    graphify: state.graphify || { status: 'not_triggered', queried: false, symbols: [] },
+    final_injected_context: state.finalInjectedContext || '',
+    pass_through_reason: state.passThroughReason || null,
+    score_debug: state.score_debug || {
+      top_score: null,
+      runner_up_score: null,
+      margin: typeof state.margin === 'number' ? state.margin : null,
+      T_low: state.thresholds ? state.thresholds.T_low : null,
+      T_high: state.thresholds ? state.thresholds.T_high : null,
+      M: state.thresholds ? state.thresholds.M : null,
+      margin_rule_affected_tier: false,
+    },
+    guard_debug: state.guard_debug || {
+      original_route: null,
+      final_route: route,
+      guards_fired: state.guards_fired || [],
+      warning_text: route && route.warning ? route.warning : null,
+    },
+    decision_trace: state.decision_trace || [],
+  };
+}
 
-  // Decision object — mutated at every exit path so the finally block can log
-  // a single telemetry line per prompt (Plan 01-04 Task 1). tier is one of:
-  //   high|medium|low|trivial|user_explicit|stale|manifest_missing|reentry_skipped|deny_filtered
-  // route is the final route object (null on pass-through / deny / no-match).
-  // guards_fired is the array from applyGuards (plus any router-level skips).
-  const decision = {
+function candidateRows(scored, boosted, blended, modeMap) {
+  const rawByName = new Map((scored || []).map((s) => [String(s.name || ''), s]));
+  const boostedByName = new Map((boosted || []).map((s) => [String(s.name || ''), s]));
+  return (blended || []).slice(0, 8).map((s) => {
+    const name = String(s.name || '');
+    const raw = rawByName.get(name) || s;
+    const boostedRow = boostedByName.get(name) || s;
+    const rawScore = Number(raw.score || 0);
+    const boostedScore = Number(boostedRow.score || 0);
+    const mmEntry = modeMapEntryForName(modeMap, name);
+    const row = {
+      id: s.entry && s.entry.id ? s.entry.id : name,
+      name,
+      raw_score: rawScore,
+      normalized_score: Number(s.norm || 0),
+      weight_applied: typeof s.weight_applied === 'number' ? s.weight_applied : null,
+      final_score: Number(s.norm || 0),
+      route_target: mmEntry ? {
+        id: mmEntry.id || null,
+        mode: mmEntry.mode || null,
+        invoke_kind: mmEntry.invoke_kind || null,
+      } : null,
+    };
+    if (boostedScore !== rawScore) row.boosted_score = boostedScore;
+    return row;
+  });
+}
+
+function modeMapEntryForName(modeMap, name) {
+  const target = String(name || '').toLowerCase();
+  if (!target || !modeMap || !Array.isArray(modeMap.entries)) return null;
+  return modeMap.entries.find((e) => {
+    if (!e) return false;
+    if (e.id && String(e.id).toLowerCase() === target) return true;
+    if (e.mode && String(e.mode).toLowerCase() === target) return true;
+    const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])];
+    return recs.some((r) => String(r || '').toLowerCase() === target);
+  }) || null;
+}
+
+function telemetryEntryFromState(decision, startNs) {
+  const guards = decision.guards_fired || [];
+  const denyFiltered = guards.includes('deny_filtered');
+  const top = decision.top || null;
+  const weights = decision.weights || null;
+  const entryId = top && top.entry && top.entry.id;
+  return {
+    ts: Date.now(),
+    prompt_signature: denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords || []),
+    suggested_mode: decision.route ? decision.route.mode : null,
+    suggested_skills: decision.route ? (decision.route.recommended_skills || []) : [],
+    suggested_agents: decision.route ? (decision.route.recommended_agents || []) : [],
+    confidence_tier: decision.tier,
+    invoke_kind: decision.invoke_kind || null,
+    graphify_queried: decision.graphify ? !!decision.graphify.queried : false,
+    graph_status: decision.graphify ? decision.graphify.status || 'not_triggered' : 'not_triggered',
+    guards_fired: guards,
+    downstream_invocations: null,
+    outcome: null,
+    latency_ms: Number(process.hrtime.bigint() - startNs) / 1e6,
+    weight_applied: top && typeof top.weight_applied === 'number' ? top.weight_applied : null,
+    outcomes: weights && weights.weights && entryId && weights.weights[entryId]
+      ? { g: weights.weights[entryId].g || 0, b: weights.weights[entryId].b || 0, u: weights.weights[entryId].u || 0 }
+      : null,
+    evolved_after: decision.evolvedAfter || null,
+    surface_status: decision.surface_status || 'unconfigured',
+    surface_disabled_count: typeof decision.surface_disabled_count === 'number' ? decision.surface_disabled_count : 0,
+    cwd: decision.cwd,
+  };
+}
+
+// Shared dry-run/production route decision helper. Defaults are read-only:
+// no cache writes, telemetry appends, stdout emission, or evolution trigger.
+export function inspectDecision(prompt, options = {}) {
+  const startNs = process.hrtime.bigint();
+  const opts = {
+    cwd: process.cwd(),
+    mutateCache: false,
+    logTelemetry: false,
+    emitInjection: false,
+    bumpEvolution: false,
+    includePrompt: false,
+    manifestPath: MANIFEST,
+    buildPyPath: BUILD_PY,
+    modeMapPath: MODE_MAP,
+    weightsPath: WEIGHTS,
+    cachePath: CACHE,
+    telemetryPath: TELEMETRY,
+    evolutionStatePath: EVOLUTION_STATE,
+    evolveTriggerPath: TRIGGER,
+    runtimeConfigDir: RUNTIME_CONFIG_DIR,
+    ...options,
+  };
+  const state = {
+    prompt: String(prompt || ''),
+    includePrompt: !!opts.includePrompt,
     tier: null,
     route: null,
     guards_fired: [],
-    graphify_queried: false,
-    graph_status: 'not_triggered',
     invoke_kind: null,
-    normalizedPrompt: '',
+    normalizedPrompt: String(prompt || '').toLowerCase().replace(/\s+/g, ' ').trim(),
     intentKeywords: [],
-    // Phase 4 / ANC-01 / D-08 — additive surface filter status. Default
-    // values match the early-exit paths (trivial, user_explicit, reentry,
-    // stale, manifest_missing) so the telemetry write never sees undefined.
+    candidates: [],
+    margin: null,
+    thresholds: { T_high: null, T_low: null, M: null },
+    cache: { status: 'miss', key_prefix: '', scoring_skipped: false },
+    graphify: { status: 'not_triggered', queried: false, symbols: [] },
+    score_debug: {
+      top_score: null,
+      runner_up_score: null,
+      margin: null,
+      T_low: null,
+      T_high: null,
+      M: null,
+      margin_rule_affected_tier: false,
+    },
+    guard_debug: {
+      original_route: null,
+      final_route: null,
+      guards_fired: [],
+      warning_text: null,
+    },
+    decision_trace: ['start'],
+    finalInjectedContext: '',
+    passThroughReason: null,
     surface_status: 'unconfigured',
     surface_disabled_count: 0,
+    cwd: opts.cwd,
+    modeMap: null,
+  };
+
+  const finish = () => {
+    const out = routeToInspectShape(state);
+    const readOnlyInspect = !opts.mutateCache && !opts.logTelemetry && !opts.emitInjection && !opts.bumpEvolution;
+    if (readOnlyInspect || opts.includeEvolutionVisibility) {
+      out.evolution_visibility = summarizeEvolutionVisibility({
+        modeMap: state.modeMap,
+        modeMapPath: opts.modeMapPath,
+        weights: state.weights || opts.weights || null,
+        weightsPath: opts.weightsPath,
+        evolutionStatePath: opts.evolutionStatePath,
+        triggerPath: opts.evolveTriggerPath,
+        telemetryPath: opts.telemetryPath,
+        selectedEntryId: state.route && state.route.id ? state.route.id : null,
+        candidates: out.candidates || [],
+      });
+    }
+    out.telemetry_entry = state.tier !== null ? telemetryEntryFromState(state, startNs) : null;
+    if (opts.logTelemetry && out.telemetry_entry) logTelemetry(out.telemetry_entry, opts.telemetryPath);
+    if (opts.emitInjection && state.finalInjectedContext) emit(state.finalInjectedContext);
+    if (opts.bumpEvolution) { try { bumpEvolveTrigger(); } catch {} }
+    return out;
   };
 
   try {
-    if (!payload || typeof payload.prompt !== 'string') {
-      return; // nothing to do — pass-through (no telemetry: no prompt at all)
+    if (typeof prompt !== 'string') {
+      state.passThroughReason = 'invalid_prompt';
+      return finish();
     }
-    const prompt = payload.prompt;
-    decision.normalizedPrompt = String(prompt).toLowerCase().replace(/\s+/g, ' ').trim();
-
-    // Testability seam: force a throw to prove fail-open.
     if (process.env.ROUTER_TEST_THROW === '1') {
       throw new Error('ROUTER_TEST_THROW forced throw');
     }
-
-    // Trivial prompt short-circuit (runs BEFORE any routing).
     if (trivialPromptDetect(prompt)) {
-      decision.tier = 'trivial';
-      return; // pass-through, no additionalContext
+      state.tier = 'trivial';
+      state.passThroughReason = 'trivial';
+      state.decision_trace.push('pass_through:trivial');
+      return finish();
     }
-
-    // Explicit user override (GRD-04 /-prefix half). Runs BEFORE any routing so
-    // the router never overrides an explicit choice. The named-name half (known
-    // mode-map skill/mode name) runs after modeMap load below.
     if (explicitOverrideDetect(prompt).override) {
-      decision.tier = 'user_explicit';
-      return; // pass-through, status user_explicit
+      state.tier = 'user_explicit';
+      state.passThroughReason = 'user_explicit';
+      state.decision_trace.push('pass_through:user_explicit');
+      return finish();
     }
-
-    // Re-entry dedupe (INJ-05): if the prompt already carries the exact router
-    // sentinel, this is a re-feed/quote — skip injection, pass through.
     if (sentinelScan(prompt)) {
-      decision.tier = 'reentry_skipped';
-      return; // pass-through, status reentry_skipped
+      state.tier = 'reentry_skipped';
+      state.passThroughReason = 'reentry_skipped';
+      state.decision_trace.push('pass_through:reentry_skipped');
+      return finish();
     }
 
-    // Testability seam: force a freshness verdict without touching the real
-    // manifest. Honored only when ROUTER_TEST_FRESHNESS is set.
     let fresh;
     if (process.env.ROUTER_TEST_FRESHNESS) {
       const forced = process.env.ROUTER_TEST_FRESHNESS;
@@ -1443,255 +2475,387 @@ function main(payload) {
       else if (forced === 'manifest_missing') fresh = { status: 'manifest_missing' };
       else fresh = { status: 'fresh' };
     } else {
-      fresh = checkFreshness();
+      fresh = checkFreshness(opts.manifestPath, opts.buildPyPath);
     }
-
     if (fresh.status === 'stale' && fresh.reminder) {
-      // One-line HTML-comment reminder only. No slash -> model cannot auto-invoke.
-      decision.tier = 'stale';
-      emit(fresh.reminder);
-      return;
+      state.tier = 'stale';
+      state.passThroughReason = 'stale';
+      state.finalInjectedContext = fresh.reminder;
+      state.decision_trace.push('pass_through:stale');
+      return finish();
     }
-
     if (fresh.status !== 'fresh') {
-      // manifest_missing or error → pass-through (no additionalContext).
-      decision.tier = fresh.status; // manifest_missing | error
-      return;
+      state.tier = fresh.status;
+      state.passThroughReason = fresh.status;
+      state.decision_trace.push(`pass_through:${fresh.status}`);
+      return finish();
     }
 
-    // fresh → compute the route, apply guards, format the injection, and emit.
-    // Fail-open: any throw in the scoring half is caught by the outer try/catch
-    // and passes through unchanged.
-    const manifest = loadManifest();
-    const modeMap = loadModeMap();
+    const manifest = loadManifest(opts.manifestPath);
+    const modeMap = loadModeMap(opts.modeMapPath);
+    state.modeMap = modeMap;
     if (!manifest || !modeMap) {
-      decision.tier = 'manifest_missing';
-      return; // parse error → pass-through
+      state.tier = 'manifest_missing';
+      state.passThroughReason = 'manifest_missing';
+      state.decision_trace.push('pass_through:manifest_missing');
+      return finish();
     }
-
-    // Phase 3 / EVO-01: feed modeMap into the blend module-level cache
-    // (BLOCKER 3 fix: 3-arg applyWeightBlend needs the modeMap via
-    // setModeMapForBlend; the per-prompt call site is a pure 3-arg form).
+    state.thresholds = modeMap.thresholds || { T_high: 0.6, T_low: 0.3, M: 0.2 };
+    state.score_debug.T_low = state.thresholds.T_low;
+    state.score_debug.T_high = state.thresholds.T_high;
+    state.score_debug.M = state.thresholds.M;
     setModeMapForBlend(modeMap);
-    const weights = loadWeights(WEIGHTS);
+    const weights = opts.weights || loadWeights(opts.weightsPath);
+    state.weights = weights;
     const blendFactor = (weights && typeof weights.blend === 'number') ? weights.blend : 0.15;
-    const evolvedAfter = (() => {
-      try { return new Date(statSync(MODE_MAP).mtimeMs).toISOString(); }
+    state.evolvedAfter = (() => {
+      try { return new Date(statSync(opts.modeMapPath).mtimeMs).toISOString(); }
       catch { return null; }
     })();
 
-    // GRD-04 named-name half: build known-names from the mode-map and check
-    // for a whole-word match. Runs BEFORE scoring so the router never overrides
-    // an explicit named choice. /-prefix half already checked above.
     const knownNames = buildKnownNames(modeMap);
     if (explicitOverrideDetect(prompt, knownNames).override) {
-      decision.tier = 'user_explicit';
-      return; // pass-through, status user_explicit
+      state.tier = 'user_explicit';
+      state.passThroughReason = 'user_explicit';
+      state.decision_trace.push('pass_through:user_explicit');
+      return finish();
     }
 
-    const manifestMtime = statSync(MANIFEST).mtimeMs;
-    const modeMapMtime = statSync(MODE_MAP).mtimeMs;
-
-    // Graphify (GRF-01/02) — runs but has no Phase-1 effect on the route.
-    // Captured into the decision for telemetry (graphify_queried + graph_status)
-    // and the symbols/boostIds are threaded into applyGraphBoost + formatGraphBlock
-    // (Plan 02-02 wiring). graphifyHeuristic never throws — its inner try/catch
-    // (D-10) returns graph_status='error' for any graph.json parse failure etc.
-    const graph = graphifyHeuristic(prompt, process.cwd());
-    decision.graphify_queried = graph.queried;
-    decision.graph_status = graph.status;
-    decision.graph_symbols = graph.symbols || [];
-    decision.graph_boostIds = graph.boostIds || new Set();
-
-    const graphMtime = readGraphMtime(process.cwd());
-
-    const cache = loadCache();
-    const normalizedPrompt = decision.normalizedPrompt;
-    const sig = cacheKey(normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime);
+    const manifestMtime = opts.manifestMtime ?? statSync(opts.manifestPath).mtimeMs;
+    const modeMapMtime = opts.modeMapMtime ?? statSync(opts.modeMapPath).mtimeMs;
+    const graph = graphifyHeuristic(prompt, opts.cwd);
+    const graphMtime = opts.graphMtime ?? readGraphMtime(opts.cwd);
+    state.graphify = {
+      queried: !!graph.queried,
+      status: graph.status || 'not_triggered',
+      symbols: graph.symbols || [],
+      boost_ids: Array.from(graph.boostIds || []).sort(),
+      boost_count: graph.boostIds && typeof graph.boostIds.size === 'number' ? graph.boostIds.size : 0,
+      elapsed_ms: graph.elapsed_ms || 0,
+      graph_mtime: graphMtime,
+    };
+    const surfaceMtime = opts.surfaceMtime ?? readSurfaceMtime(opts.runtimeConfigDir);
+    const sig = cacheKey(state.normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime, surfaceMtime);
+    state.cache.key_prefix = sig.slice(0, 8);
+    state.cache.invalidation_mtimes = {
+      mode_map: modeMapMtime,
+      manifest: manifestMtime,
+      graph: graphMtime,
+      surface: surfaceMtime,
+    };
+    const cache = loadCache(opts.cachePath);
     const cached = cacheLookup(sig, cache);
     if (cached) {
-      // Cache hit — route already computed + guarded at write time. Emit it.
-      // Telemetry records the reuse + refresh hit_count (RTE-06/§8).
-      decision.tier = cached.tier || 'high';
-      decision.route = cached;
-      decision.invoke_kind = cached.invoke_kind;
+      state.tier = cached.tier || 'high';
+      state.route = cached;
+      state.invoke_kind = cached.invoke_kind;
+      state.cache.status = 'hit';
+      state.cache.scoring_skipped = true;
+      state.cache.cached_route = cached;
+      state.passThroughReason = 'cache_hit_scoring_skipped';
+      state.decision_trace.push('cache:hit', 'scoring:skipped');
       const routeBlock = formatInjection(cached, prompt, sig.slice(0, 8));
-      const graphBlock = (decision.graph_symbols && decision.graph_symbols.length)
-        ? formatGraphBlock(decision.graph_symbols) : '';
-      const injection = composeWithCap(routeBlock, graphBlock);
-      if (injection) emit(injection);
-      return;
+      const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
+      state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
+      return finish();
     }
+    state.decision_trace.push('cache:miss');
 
     const corpus = buildCorpus(manifest, modeMap);
-    // Phase 4 / ANC-01: post-filter on buildCorpus output via gsd-surface
-    // (D-01..D-08). The user's surface profile (e.g. `gsd-surface disable
-    // core_loop`) is now authoritative for what can be routed to. The
-    // helper is fail-open: on any throw the input corpus is returned
-    // unchanged with surface_status='absent'. Downstream (bm25Score,
-    // applyGraphBoost, applyWeightBlend, etc.) operates on filteredCorpus
-    // so the boost / blend / tier pipeline respects the surface.
-    const _sf = applySurfaceFilter(corpus, manifest, modeMap);
-    decision.surface_status = _sf.surface_status;
-    decision.surface_disabled_count = _sf.surface_disabled_count;
+    const _sf = applySurfaceFilter(corpus, manifest, modeMap, opts.runtimeConfigDir);
+    state.surface_status = _sf.surface_status;
+    state.surface_disabled_count = _sf.surface_disabled_count;
     const filteredCorpus = _sf.corpus;
     const queryTokens = tokenize(prompt);
     const scored = bm25Score(queryTokens, filteredCorpus);
-    // applyGraphBoost (D-07): insert +0.15 on manifest entries whose name is
-    // in BOTH the graph's top-K boostIds AND the global manifest name set.
-    // Operates on the post-bm25 array BEFORE tier normalization so the boost
-    // influences the top-1 / runner-up decision. The manifestIdSet is
-    // derived from filteredCorpus (not the unfiltered corpus) so graph
-    // boosts can only target enabled-stem entries (D-14 / T-04.1-06).
     const manifestIdSet = new Set((filteredCorpus || []).map((c) => String(c.name || '').toLowerCase()));
     const boosted = (graph.boostIds && graph.boostIds.size > 0)
       ? applyGraphBoost(scored, graph.boostIds, manifestIdSet, GRAPH_BOOST)
       : scored;
     const normed = normalize(boosted);
-    // Phase 3 / EVO-01: weighted BM25 blend (D-09). Pure 3-arg form per
-    // RESEARCH §3 locked signature; modeMap is read from module-level cache
-    // set by setModeMapForBlend(modeMap) above.
     const blended = applyWeightBlend(normed, weights, blendFactor);
+    state.candidates = candidateRows(scored, boosted, blended, modeMap);
     if (blended.length === 0) {
-      decision.tier = 'low';
-      return; // no matches → pass-through (Low tier)
+      state.tier = 'low';
+      state.passThroughReason = 'low_no_match';
+      state.decision_trace.push('score:no_match');
+      return finish();
     }
 
     const top = blended[0];
     const runnerUp = blended[1];
-    // Mode-map tiebreaker (CR-03): when the top candidate is a known canonical
-    // mode (id or mode of any mode-map entry), a near-tie is still a real
-    // signal — the user clearly means SOMETHING in the canonical set. Promote
-    // tier to 'medium' so the model receives the suggestion (it can ignore it).
-    // Without this, a near-tie between two valid canonical modes returns 'low'
-    // and the empty-additionalContext branch suppresses the entire injection.
-    const topName = (top.name || '').toLowerCase();
+    state.top = top;
+    state.margin = (top ? top.norm : 0) - (runnerUp ? runnerUp.norm : 0);
+    state.score_debug.top_score = top ? top.norm : null;
+    state.score_debug.runner_up_score = runnerUp ? runnerUp.norm : null;
+    state.score_debug.margin = state.margin;
+    const topName = String(top.name || '').toLowerCase();
     const hasCanonicalMatch = !!(modeMap && Array.isArray(modeMap.entries)
       && modeMap.entries.some((e) => {
         if (!e) return false;
-        const ids = [e.id, e.mode].filter(Boolean).map((s) => String(s).toLowerCase());
+        const ids = [e.id, e.mode].filter(Boolean).map((x) => String(x).toLowerCase());
         if (ids.includes(topName)) return true;
-        // Also match if the top entry is in the entry's recommended_skills/agents
-        // (e.g. top BM25 hit is a skill like 'high-end-visual-design' that
-        // gsd-ui-phase routes to — canonical via the recommendation graph).
         const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])]
-          .filter(Boolean).map((s) => String(s).toLowerCase());
+          .filter(Boolean).map((x) => String(x).toLowerCase());
         return recs.includes(topName);
       }));
-    const tier = confidenceTier(
-      top.norm,
-      runnerUp ? runnerUp.norm : 0,
-      modeMap.thresholds,
-      hasCanonicalMatch
+    const tier = confidenceTier(top.norm, runnerUp ? runnerUp.norm : 0, state.thresholds, hasCanonicalMatch);
+    state.tier = tier;
+    state.score_debug.margin_rule_affected_tier = (
+      tier === 'low'
+      && top.norm >= (state.thresholds.T_high || 0)
+      && state.margin < (state.thresholds.M || 0)
     );
-    decision.tier = tier;
+    state.decision_trace.push(`score:tier:${tier}`);
+    if (tier === 'low') {
+      state.passThroughReason = state.margin < (state.thresholds.M || 0) ? 'margin_tie' : 'low_threshold';
+    }
 
-    // Map top manifest entry → mode-map entry by name/id match (best effort).
-    // Find the mode-map entry whose id or recommended_skills/agents contains
-    // the top corpus entry's name.
-    const mmEntry = (modeMap.entries || []).find((e) => {
-      if (e.id && e.id.toLowerCase() === topName) return true;
-      const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])];
-      return recs.some((r) => r.toLowerCase() === topName);
-    }) || null;
-
+    const mmEntry = modeMapEntryForName(modeMap, topName);
     const route = {
+      id: mmEntry ? mmEntry.id || null : null,
       mode: mmEntry ? mmEntry.mode : null,
       invoke_kind: mmEntry ? mmEntry.invoke_kind : null,
       recommended_skills: mmEntry ? mmEntry.recommended_skills : [],
       recommended_agents: mmEntry ? mmEntry.recommended_agents : [],
       tier,
       args_hint: mmEntry ? mmEntry.args_hint : null,
+      warning: mmEntry ? mmEntry.warning || null : null,
+      weight_applied: typeof top.weight_applied === 'number' ? top.weight_applied : null,
       scores: blended.slice(0, 3).map((s) => ({ name: s.name, norm: s.norm })),
     };
-    decision.route = route;
-    decision.invoke_kind = route.invoke_kind;
+    state.route = route;
+    state.invoke_kind = route.invoke_kind;
+    state.guard_debug.original_route = route;
 
-    // Apply guards (GRD-01 MCP demote, GRD-03 ralph two-gate, GRD-05 deny).
-    // GRD-02 scope filter already applied in buildCorpus; GRD-04 above.
     const guarded = applyGuards(route, prompt, manifest, modeMap, {
       queryTokens,
-      thresholds: modeMap.thresholds,
+      thresholds: state.thresholds,
       autoTopScore: top.score,
     });
     const finalRoute = guarded.route;
-    decision.guards_fired = guarded.guards_fired;
-
-    // GRD-05 deny-rule → no signature logged (Pitfall 8 belt-and-braces).
+    state.guards_fired = guarded.guards_fired;
+    state.guard_debug.guards_fired = guarded.guards_fired;
+    state.guard_debug.final_route = finalRoute;
+    state.guard_debug.warning_text = finalRoute && finalRoute.warning ? finalRoute.warning : null;
     if (guarded.guards_fired.includes('deny_filtered')) {
-      decision.tier = 'deny_filtered';
-      decision.route = null;
-      decision.invoke_kind = null;
-      return; // pass-through, no signature persisted
+      state.tier = 'deny_filtered';
+      state.route = null;
+      state.invoke_kind = null;
+      state.passThroughReason = 'deny_filtered';
+      state.guard_debug.final_route = null;
+      state.decision_trace.push('guard:deny_filtered');
+      return finish();
     }
+    if (guarded.guards_fired.length) state.decision_trace.push('guard:demoted_or_filtered');
 
-    // Cache ONLY High-tier decisive routes that survived guards (RTE-06/§8).
-    if (tier === 'high' && finalRoute && finalRoute.invoke_kind !== 'warn') {
+    if (tier === 'high' && finalRoute && finalRoute.invoke_kind !== 'warn' && opts.mutateCache) {
       writeCache(cache, sig, finalRoute);
-      try { saveCache(cache); } catch { /* fail-open: cache write error */ }
+      try { saveCache(cache, opts.cachePath); } catch {}
     }
 
-    // Emit the injection (Plan 01-03). Low/no-route → pass-through.
     if (finalRoute) {
-      decision.route = finalRoute;
-      decision.invoke_kind = finalRoute.invoke_kind;
+      state.route = finalRoute;
+      state.invoke_kind = finalRoute.invoke_kind;
+      if (finalRoute.invoke_kind === 'warn') state.passThroughReason = null;
       const routeBlock = formatInjection(finalRoute, prompt, sig.slice(0, 8));
-      const graphBlock = (decision.graph_symbols && decision.graph_symbols.length)
-        ? formatGraphBlock(decision.graph_symbols) : '';
-      const injection = composeWithCap(routeBlock, graphBlock);
-      if (injection) emit(injection);
+      const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
+      state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
+      if (!state.finalInjectedContext && tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
     } else {
-      // Guards dropped the route (e.g. ralph no-verifiable-done-criteria → inline
-      // fallback). Tier stays as computed; route is null. Telemetry logs the
-      // guards_fired entry so Phase 3 can see the fallback.
-      decision.route = null;
-      decision.invoke_kind = null;
+      state.route = null;
+      state.invoke_kind = null;
+      if (!state.passThroughReason) state.passThroughReason = 'guard_dropped';
     }
-  } finally {
-    // Log one telemetry line per prompt on every exit path (Plan 01-04 Task 1).
-    // Fail-open: a telemetry write error MUST NOT block injection.
-    if (decision.tier !== null) {
-      const guards = decision.guards_fired || [];
-      const denyFiltered = guards.includes('deny_filtered');
-      // deny-rule prompt → no signature logged (Pitfall 8 belt-and-braces).
-      const sig = denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords);
-      const entry = {
-        ts: Date.now(),
-        prompt_signature: sig,
-        suggested_mode: decision.route ? decision.route.mode : null,
-        suggested_skills: decision.route ? (decision.route.recommended_skills || []) : [],
-        suggested_agents: decision.route ? (decision.route.recommended_agents || []) : [],
-        confidence_tier: decision.tier,
-        invoke_kind: decision.invoke_kind || null,
-        graphify_queried: decision.graphify_queried || false,
-        graph_status: decision.graph_status || 'not_triggered',
-        guards_fired: guards,
-        downstream_invocations: null, // TEL-03: null v1, Phase 3 populates
-        outcome: null,                // TEL-03: null v1, Phase 3 populates
-        latency_ms: Number(process.hrtime.bigint() - startNs) / 1e6,
-        // Phase 3 / D-23 + RESEARCH §11: 4 new fields. Null on first run; the
-        // worker populates weights.json + evolution-state.json over time.
-        weight_applied: top && typeof top.weight_applied === 'number' ? top.weight_applied : null,
-        outcomes: weights && weights.weights && top && top.entry && top.entry.id && weights.weights[top.entry.id]
-          ? { g: weights.weights[top.entry.id].g || 0, b: weights.weights[top.entry.id].b || 0, u: weights.weights[top.entry.id].u || 0 }
-          : null,
-        evolved_after: evolvedAfter,
-        // Phase 4 / ANC-01 / D-08: additive surface filter status. Always
-        // present (decision init sets 'unconfigured'/0 as defaults), so
-        // existing telemetry consumers never see a new null/undefined value.
-        //   'applied'      — .gsd-surface.json read, resolveSurface succeeded, filter applied
-        //   'unconfigured' — no .gsd-surface.json OR no .gsd-profile; router used full manifest
-        //   'absent'       — surface.cjs/clusters.cjs/capability-registry.cjs unimportable
-        surface_status: decision.surface_status || 'unconfigured',
-        // Authoritative count of corpus entries dropped by the surface filter
-        // (0 when surface_status !== 'applied'). Defaulted to 0 on early-exit
-        // paths where the filter never ran.
-        surface_disabled_count: typeof decision.surface_disabled_count === 'number' ? decision.surface_disabled_count : 0,
-        cwd: process.cwd(),
-      };
-      logTelemetry(entry);
-    }
+    return finish();
+  } catch {
+    state.tier = 'error';
+    state.passThroughReason = 'error';
+    return finish();
   }
+}
+
+function main(payload) {
+  const startNs = process.hrtime.bigint();
+  if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
+  if (!payload || typeof payload.prompt !== 'string') return;
+  inspectDecision(payload.prompt, {
+    cwd: process.cwd(),
+    mutateCache: true,
+    logTelemetry: true,
+    emitInjection: true,
+    includePrompt: false,
+  });
+}
+
+export function explainLastDecision(options = {}) {
+  const telemetryPath = options.telemetryPath || TELEMETRY;
+  let latest = null;
+  try {
+    if (!existsSync(telemetryPath)) return explainLastStatus('missing');
+    const lines = readFileSync(telemetryPath, 'utf8').split(/\r?\n/).filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+      try { latest = JSON.parse(lines[i]); break; } catch {}
+    }
+  } catch {
+    return explainLastStatus('error');
+  }
+  if (!latest) return explainLastStatus('empty');
+  const selectedRoute = {
+    mode: latest.suggested_mode || null,
+    invoke_kind: latest.invoke_kind || null,
+    recommended_skills: Array.isArray(latest.suggested_skills) ? latest.suggested_skills : [],
+    recommended_agents: Array.isArray(latest.suggested_agents) ? latest.suggested_agents : [],
+  };
+  const decision = {
+    ts: latest.ts || null,
+    prompt_signature: latest.prompt_signature || null,
+    selected_route: selectedRoute,
+    suggested_mode: latest.suggested_mode || null,
+    suggested_skills: selectedRoute.recommended_skills,
+    suggested_agents: selectedRoute.recommended_agents,
+    confidence_tier: latest.confidence_tier || null,
+    invoke_kind: latest.invoke_kind || null,
+    graphify_queried: !!latest.graphify_queried,
+    graph_status: latest.graph_status || 'not_triggered',
+    guards_fired: Array.isArray(latest.guards_fired) ? latest.guards_fired : [],
+    latency_ms: typeof latest.latency_ms === 'number' ? latest.latency_ms : null,
+    weight_applied: typeof latest.weight_applied === 'number' ? latest.weight_applied : null,
+    outcomes: latest.outcomes || null,
+    evolved_after: latest.evolved_after || null,
+    surface_status: latest.surface_status || 'unconfigured',
+    surface_disabled_count: typeof latest.surface_disabled_count === 'number' ? latest.surface_disabled_count : 0,
+    cwd: latest.cwd || null,
+    outcome: latest.outcome ?? null,
+    downstream_invocations: latest.downstream_invocations ?? null,
+  };
+  const privacy = {
+    raw_prompt_stored: false,
+    raw_prompt_available: false,
+    note: 'raw prompt text is unavailable by design; telemetry stores prompt signatures and route metadata only',
+  };
+  return {
+    status: 'ok',
+    decision,
+    privacy,
+    ts: decision.ts,
+    prompt_signature: decision.prompt_signature,
+    selected_route: decision.selected_route,
+    suggested_mode: decision.suggested_mode,
+    suggested_skills: decision.suggested_skills,
+    suggested_agents: decision.suggested_agents,
+    confidence_tier: decision.confidence_tier,
+    invoke_kind: decision.invoke_kind,
+    graphify_queried: decision.graphify_queried,
+    graph_status: decision.graph_status,
+    graphify: {
+      queried: decision.graphify_queried,
+      status: decision.graph_status,
+    },
+    guards_fired: decision.guards_fired,
+    latency_ms: decision.latency_ms,
+    weight_applied: decision.weight_applied,
+    outcomes: decision.outcomes,
+    evolved_after: decision.evolved_after,
+    surface_status: decision.surface_status,
+    surface_disabled_count: decision.surface_disabled_count,
+    cwd: decision.cwd,
+    privacy_note: privacy.note,
+  };
+}
+
+function explainLastStatus(status) {
+  const privacy = {
+    raw_prompt_stored: false,
+    raw_prompt_available: false,
+    note: 'raw prompt text is unavailable by design; telemetry stores prompt signatures and route metadata only',
+  };
+  return {
+    status,
+    decision: null,
+    privacy,
+    prompt_signature: null,
+    selected_route: null,
+    confidence_tier: null,
+    privacy_note: privacy.note,
+  };
+}
+
+function cliPrompt(args) {
+  const filtered = args.filter((a) => a !== '--json');
+  return filtered.join(' ').trim();
+}
+
+function runCli(argv) {
+  const [cmd, ...args] = argv;
+  if (cmd === 'inspect' || cmd === 'preview') {
+    const prompt = cliPrompt(args);
+    if (!prompt) {
+      process.stdout.write(JSON.stringify({
+        status: 'error',
+        error: 'missing_prompt',
+        command: cmd,
+      }, null, args.includes('--json') ? 0 : 2));
+      return 1;
+    }
+    const out = inspectDecision(cliPrompt(args), {
+      cwd: process.cwd(),
+      mutateCache: false,
+      logTelemetry: false,
+      emitInjection: false,
+      bumpEvolution: false,
+      includePrompt: true,
+      cachePath: process.env.ROUTER_TEST_CACHE_PATH || CACHE,
+      telemetryPath: process.env.ROUTER_TEST_TELEMETRY_PATH || TELEMETRY,
+      weightsPath: process.env.ROUTER_TEST_WEIGHTS_PATH || WEIGHTS,
+      evolutionStatePath: process.env.ROUTER_TEST_EVOLUTION_STATE_PATH || EVOLUTION_STATE,
+      evolveTriggerPath: process.env.ROUTER_TEST_EVOLVE_TRIGGER_PATH || TRIGGER,
+    });
+    if (cmd === 'preview') {
+      out.preview = true;
+      out.dry_run = true;
+      out.mutations = {
+        cache: false,
+        telemetry: false,
+        evolution_trigger: false,
+        emitted_to_hook: false,
+      };
+    }
+    process.stdout.write(JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'proposals' || cmd === 'proposal' || cmd === 'evolve-proposals') {
+    const out = buildTelemetryProposals({
+      telemetryPath: process.env.ROUTER_TEST_TELEMETRY_PATH || TELEMETRY,
+      modeMapPath: process.env.ROUTER_TEST_MODE_MAP_PATH || MODE_MAP,
+      weightsPath: process.env.ROUTER_TEST_WEIGHTS_PATH || WEIGHTS,
+      evolutionStatePath: process.env.ROUTER_TEST_EVOLUTION_STATE_PATH || EVOLUTION_STATE,
+      triggerPath: process.env.ROUTER_TEST_EVOLVE_TRIGGER_PATH || TRIGGER,
+    });
+    process.stdout.write(JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'explain-last') {
+    process.stdout.write(JSON.stringify(explainLastDecision(), null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'routes') {
+    process.stdout.write(JSON.stringify(listRoutes(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'unmapped') {
+    process.stdout.write(JSON.stringify(listUnmapped(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'coverage') {
+    process.stdout.write(JSON.stringify(summarizeCoverage(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  if (cmd === 'doctor' || cmd === 'health') {
+    process.stdout.write(JSON.stringify(diagnoseRouterState(), null, args.includes('--json') ? 0 : 2));
+    return true;
+  }
+  return false;
 }
 
 function emit(additionalContext) {
@@ -1709,6 +2873,10 @@ function emit(additionalContext) {
 // from hanging the test runner).
 
 if (isMain()) {
+  const cliResult = runCli(process.argv.slice(2));
+  if (cliResult) {
+    process.exit(cliResult === 1 ? 1 : 0);
+  }
   readStdin((input) => {
     let payload;
     try {
@@ -1725,6 +2893,7 @@ if (isMain()) {
     // Phase 3 / EVO-02: bump the evolve trigger counter; spawn the worker on
     // counter % 200 === 0 (non-blocking via spawn().unref()). Non-blocking
     // and try/catch-wrapped so any error in the trigger path is a no-op.
+    // Production mutation is handled inside inspectDecision({ bumpEvolution:true }) for CLI-safe gating.
     try { bumpEvolveTrigger(); } catch {}
     // Debug-only latency line (guarded by env so production is silent).
     // Consumed by tests/router.perf.test.mjs to assert in-process < 100ms.

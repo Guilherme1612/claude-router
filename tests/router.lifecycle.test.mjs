@@ -85,6 +85,17 @@ test('invalid settings fail before creating router-owned state', () => {
   } finally { cleanup(f); }
 });
 
+test('install never overwrites a pre-existing router without ownership evidence', () => {
+  const f = fixture();
+  try {
+    mkdirSync(dirname(f.routerPath), { recursive: true });
+    writeFileSync(f.routerPath, 'pre-existing user router\n');
+    assert.throws(() => installRouter(f.options), /not owned by this installer/);
+    assert.equal(readFileSync(f.routerPath, 'utf8'), 'pre-existing user router\n');
+    assert.equal(existsSync(f.manifestPath), false);
+  } finally { cleanup(f); }
+});
+
 test('uninstall removes owned state and preserves settings added later', () => {
   const f = fixture();
   try {
@@ -163,4 +174,26 @@ test('CLI help leads with one-command install and uninstall', () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /node install-router\.mjs\s+# install/);
   assert.match(result.stdout, /node install-router\.mjs --uninstall/);
+});
+
+test('production lifecycle stays standard-library-only and offline', () => {
+  for (const relative of ['install-router.mjs', 'src/lifecycle/router-lifecycle.mjs']) {
+    const source = readFileSync(join(REPO_ROOT, relative), 'utf8');
+    const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]);
+    assert.ok(imports.every((specifier) => specifier.startsWith('node:') || specifier.startsWith('.')),
+      `${relative} contains only Node or local imports`);
+    assert.doesNotMatch(source, /https?:\/\/|\bfetch\s*\(/, `${relative} has no network path`);
+  }
+});
+
+test('bundled router includes the current operator and safety surfaces', () => {
+  const source = readFileSync(join(REPO_ROOT, 'tests/router.mjs.snapshot'), 'utf8');
+  for (const surface of [
+    'export function validateRouteTargets',
+    'export function buildTelemetryProposals',
+    'export function inspectDecision',
+    'function runCli',
+  ]) assert.match(source, new RegExp(surface), `bundled router must include ${surface}`);
+  assert.match(source, /fileURLToPath\(import\.meta\.url\)/,
+    'doctor must resolve the installed hook from its file URL');
 });
