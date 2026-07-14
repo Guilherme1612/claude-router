@@ -14,6 +14,7 @@ const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const EVOLVE = join(homedir(), '.claude', 'hooks', 'router.evolve.mjs');
 const CALIBRATE = fileURLToPath(new URL('../router.calibrate.mjs', import.meta.url));
 const CALIBRATION_TASKS = fileURLToPath(new URL('../calibration-tasks.json', import.meta.url));
+const VERIFICATION = fileURLToPath(new URL('../.planning/phases/10-safety-coexistence-and-release-gates/10-VERIFICATION.md', import.meta.url));
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
 const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
@@ -95,6 +96,50 @@ test('SAF-08: calibration fixtures and stdout preserve every subset-specific rel
   assert.ok(Number(codebase[1]) >= 5 && Number(codebase[2]) >= 7, `codebase target regressed: ${codebase?.[0]}`);
   assert.match(run.stdout, /Evolution 3:\s+\d+\/3 \(Phase 3 new\)/);
   assert.match(run.stdout, /Combined:\s+\d+ \/ 30 \(threshold: 21\)/);
+});
+
+test('SAF-06/SAF-07: live operator CLI release surface returns parseable privacy-safe JSON', () => {
+  const prompt = 'phase ten release smoke';
+  const commands = [
+    ['inspect', [HOOK, 'inspect', prompt, '--json']],
+    ['preview', [HOOK, 'preview', prompt, '--json']],
+    ['explain-last', [HOOK, 'explain-last', '--json']],
+    ['doctor', [HOOK, 'doctor', '--json']],
+    ['routes', [HOOK, 'routes', '--json']],
+    ['unmapped', [HOOK, 'unmapped', '--json']],
+    ['coverage', [HOOK, 'coverage', '--json']],
+    ['proposals', [HOOK, 'proposals', '--json']],
+    ['status', [EVOLVE, 'status', '--json']],
+  ];
+  const forbiddenTelemetry = 'phase10-raw-telemetry-secret-must-not-appear';
+
+  for (const [name, args] of commands) {
+    const run = spawnSync(NODE, args, { encoding: 'utf8' });
+    assert.equal(run.status, 0, `${name}: ${run.stderr || run.stdout}`);
+    assert.doesNotThrow(() => JSON.parse(run.stdout), `${name} stdout must be JSON`);
+    assert.doesNotMatch(run.stdout, new RegExp(forbiddenTelemetry), `${name} must not leak raw telemetry`);
+    const output = JSON.parse(run.stdout);
+    if (output.privacy && Object.hasOwn(output.privacy, 'raw_prompt_text')) {
+      assert.equal(output.privacy.raw_prompt_text, false, `${name} privacy contract must reject raw prompt leakage`);
+    }
+  }
+});
+
+test('SAF-01 through SAF-08: final verification artifact records every exact release command', () => {
+  assert.ok(existsSync(VERIFICATION), '10-VERIFICATION.md must exist before release');
+  const evidence = readFileSync(VERIFICATION, 'utf8');
+  for (const command of [
+    'node --test tests/router.failopen.test.mjs tests/router.perf.test.mjs tests/router.perf-evolved.test.mjs tests/router.safety-release.test.mjs',
+    'node --test tests/router.coexistence.test.mjs tests/router.settings-diff.test.mjs tests/router.direct-agent-warn.test.mjs tests/router.route-targets.test.mjs tests/router.health.test.mjs',
+    'node --test tests/router.privacy.test.mjs tests/router.telemetry.test.mjs tests/router.inspect.test.mjs tests/router.evolve-proposal.test.mjs tests/router.evolution-visibility.test.mjs',
+    'node --test tests/*.test.mjs',
+    'node router.calibrate.mjs',
+  ]) {
+    assert.ok(evidence.includes(`\`${command}\``), `verification evidence missing command: ${command}`);
+  }
+  assert.match(evidence, /Original 10:\s*10\/10/);
+  assert.match(evidence, /Codebase target:\s*8\/8/);
+  assert.match(evidence, /Release decision:\s*PASS/i);
 });
 
 test('SAF-01/SAF-07: malformed and invalid hook inputs fail open with empty stdout', () => {
