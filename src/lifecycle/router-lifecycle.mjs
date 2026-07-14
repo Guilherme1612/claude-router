@@ -81,6 +81,23 @@ function fileMatches(file, expectedFingerprint) {
   return existsSync(file) && fingerprint(readFileSync(file)) === expectedFingerprint;
 }
 
+function transactionSnapshot(files, directories) {
+  return {
+    files: files.map(file => ({ file, exists: existsSync(file), bytes: existsSync(file) ? readFileSync(file) : null })),
+    directories: [...new Set(directories)].map(directory => ({ directory, exists: existsSync(directory) })),
+  };
+}
+
+function restoreTransaction(snapshot) {
+  for (const entry of snapshot.files) {
+    if (entry.exists) atomicWrite(entry.file, entry.bytes);
+    else rmSync(entry.file, { force: true });
+  }
+  for (const entry of snapshot.directories.sort((a, b) => b.directory.length - a.directory.length)) {
+    if (!entry.exists) removeEmptyDirectory(entry.directory);
+  }
+}
+
 export function installRouter(options) {
   const p = paths(options);
   if (!existsSync(p.sourceRouter) || !statSync(p.sourceRouter).isFile()) {
@@ -119,7 +136,17 @@ export function installRouter(options) {
   if (options.dryRun) return { status: 'dry-run', ready: false, manifestPath: p.manifestPath,
     changes: ownedValues.filter(([file, value]) => !fileMatches(file, fingerprint(value))).map(([file]) => file) };
   const created = [];
-  const rollbackCreated = [];
+  const transactionFiles = [p.settingsPath, p.routerPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file), p.manifestPath];
+  const transactionDirectories = transactionFiles.flatMap(file => {
+    const entries = []; let directory = dirname(file);
+    while (directory.startsWith(p.claudeRoot) || directory.startsWith(p.codexRoot)) {
+      entries.push(directory);
+      if (directory === p.claudeRoot || directory === p.codexRoot) break;
+      directory = dirname(directory);
+    }
+    return entries;
+  });
+  const beforeMutation = transactionSnapshot(transactionFiles, transactionDirectories);
 
   try {
     if (!routerHealthy) {
@@ -129,13 +156,11 @@ export function installRouter(options) {
       copyFileSync(p.sourceRouter, temporary);
       renameSync(temporary, p.routerPath);
       created.push(p.routerPath);
-      if (!wasPresent) rollbackCreated.push(p.routerPath);
     }
     if (!markerHealthy) {
       const wasPresent = existsSync(p.codexMarkerPath);
       atomicWrite(p.codexMarkerPath, markerValue);
       created.push(p.codexMarkerPath);
-      if (!wasPresent) rollbackCreated.push(p.codexMarkerPath);
     }
     if (!bindingExists) {
       settings.hooks.UserPromptSubmit = [
@@ -145,7 +170,7 @@ export function installRouter(options) {
       atomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
     }
     for (const [file, value] of ownedValues) {
-      if (!fileMatches(file, fingerprint(value))) { const wasPresent = existsSync(file); atomicWrite(file, value); created.push(file); if (!wasPresent) rollbackCreated.push(file); }
+      if (!fileMatches(file, fingerprint(value))) { atomicWrite(file, value); created.push(file); }
     }
 
     const manifest = {
@@ -161,6 +186,7 @@ export function installRouter(options) {
       bindings: [{ settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath }],
     };
     atomicWrite(p.manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    if (typeof options.afterMutation === 'function') options.afterMutation();
     const ready = fileMatches(p.routerPath, sourceFingerprint)
       && fileMatches(p.codexMarkerPath, markerFingerprint)
       && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
@@ -178,7 +204,7 @@ export function installRouter(options) {
       changes: created,
     };
   } catch (error) {
-    for (const file of rollbackCreated.reverse()) rmSync(file, { force: true });
+    restoreTransaction(beforeMutation);
     throw error;
   }
 }
