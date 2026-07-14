@@ -149,6 +149,32 @@ test('SAF-06/SAF-07: operator diagnostics are reachable from runCli, not main(pa
   assert.match(mainBody, /\binspectDecision\s*\(/, 'main(payload) should use the shared routing helper');
 });
 
+test('SAF-04/SAF-06/SAF-07: blocked missing-MCP agents stay diagnostic-only across operator reports', () => {
+  const doctorRun = spawnSync(NODE, [HOOK, 'doctor', '--json'], { encoding: 'utf8' });
+  const routesRun = spawnSync(NODE, [HOOK, 'routes', '--json'], { encoding: 'utf8' });
+  assert.equal(doctorRun.status, 0, doctorRun.stderr || doctorRun.stdout);
+  assert.equal(routesRun.status, 0, routesRun.stderr || routesRun.stdout);
+
+  const doctor = JSON.parse(doctorRun.stdout);
+  const routes = JSON.parse(routesRun.stdout);
+  assert.ok(doctor.blocked_agents.length > 0, 'doctor must surface blocked missing-MCP agents');
+  for (const blocked of doctor.blocked_agents) {
+    assert.equal(blocked.classification, 'blocked_missing_mcp');
+    assert.equal(blocked.routeability, 'blocked');
+  }
+
+  const dispatchTargets = routes.routes
+    .filter((route) => route.invoke_kind === 'agent')
+    .flatMap((route) => route.recommended_agents || []);
+  for (const blocked of doctor.blocked_agents) {
+    assert.equal(dispatchTargets.includes(blocked.name), false, `${blocked.name} must not become an agent dispatch target`);
+  }
+  for (const warning of routes.routes.filter((route) => route.invoke_kind === 'warn')) {
+    assert.deepEqual(warning.recommended_agents, [], `${warning.id} must not recommend a blocked agent`);
+    assert.doesNotMatch(warning.warning || '', /Dispatch agent/i, `${warning.id} must remain warning-only`);
+  }
+});
+
 test('SAF-02/SAF-07: warm hook pass-through stays below 100ms wall-clock and self-reported latency', () => {
   for (let i = 0; i < 5; i++) {
     const r = runHook(JSON.stringify({ prompt: 'thanks' }), { ROUTER_DEBUG_LATENCY: '1' });
