@@ -5,7 +5,7 @@
 //   - the ONLY delta is the new hooks.UserPromptSubmit key (additive-only)
 //   - all other top-level keys + all other hooks events deep-equal pre
 //   - the new entry has the absolute node binary + router path + timeout 5 + NO matcher
-//   - rollback (restore backup) is clean (deep-equal to original)
+//   - owned uninstall is clean and preserves unrelated state
 //   - re-running the installer is idempotent (no-op, no double entry)
 //
 // Task 2 extends this file with live smoke tests (route / pass-through / explicit /
@@ -31,13 +31,17 @@ function deepEqual(a, b) {
 }
 
 // Run the installer with explicit temp paths (never the live settings.json).
-function runInstaller(settings, backup, router = LIVE_ROUTER, nodeBinary = NODE) {
+function runInstaller(fixture, ...extra) {
   return spawnSync(NODE, [
     INSTALLER,
-    '--settings', settings,
-    '--backup', backup,
-    '--router', router,
-    '--node-binary', nodeBinary,
+    '--claude-root', fixture.claudeRoot,
+    '--codex-root', fixture.codexRoot,
+    '--source-router', LIVE_ROUTER,
+    '--settings', fixture.settings,
+    '--router', fixture.router,
+    '--manifest', fixture.manifest,
+    '--node-binary', NODE,
+    ...extra,
   ], { encoding: 'utf8' });
 }
 
@@ -48,7 +52,10 @@ function parse(p) {
 function setupTempCopy() {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'router-settings-'));
   const settings = path.join(dir, 'settings.json');
-  const backup = path.join(dir, 'settings.json.pre-router');
+  const claudeRoot = path.join(dir, '.claude');
+  const codexRoot = path.join(dir, '.codex');
+  const router = path.join(claudeRoot, 'hooks', 'router.mjs');
+  const manifest = path.join(claudeRoot, 'router', 'install-manifest.json');
   copyFileSync(LIVE_SETTINGS, settings);
   // The live settings.json now carries the router's UserPromptSubmit binding
   // (Task 1's install is approved and stays). The diff-audit tests measure the
@@ -61,11 +68,12 @@ function setupTempCopy() {
     writeFileSync(settings, JSON.stringify(pre, null, 2) + '\n');
   }
   const original = readFileSync(settings, 'utf8');
-  return { dir, settings, backup, original };
+  return { dir, settings, claudeRoot, codexRoot, router, manifest, original };
 }
 
 test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
-  const { dir, settings, backup, original } = setupTempCopy();
+  const fixture = setupTempCopy();
+  const { dir, settings, router, manifest } = fixture;
   try {
     const pre = parse(settings);
     const preHookKeys = Object.keys(pre.hooks).sort();
@@ -73,12 +81,11 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
       (a, k) => a + (Array.isArray(pre.hooks[k]) ? pre.hooks[k].length : 0), 0);
     assert.ok(!pre.hooks.UserPromptSubmit, 'fixture must not already have UserPromptSubmit');
 
-    const r = runInstaller(settings, backup);
+    const r = runInstaller(fixture);
     assert.equal(r.status, 0, 'installer exit 0\nstdout:\n' + r.stdout + '\nstderr:\n' + r.stderr);
     assert.match(r.stdout, /INSTALL OK/);
 
-    // backup created
-    assert.ok(existsSync(backup), 'backup file created');
+    assert.ok(existsSync(manifest), 'ownership manifest created');
 
     const post = parse(settings);
     // top-level keys unchanged
@@ -110,7 +117,7 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
     const h = group.hooks[0];
     assert.equal(h.type, 'command');
     assert.ok(h.command.includes(NODE), 'command uses absolute node binary');
-    assert.ok(h.command.includes(LIVE_ROUTER), 'command points at router.mjs');
+    assert.ok(h.command.includes(router), 'command points at installed router.mjs');
     assert.equal(h.timeout, 5, 'timeout is 5');
 
     // enabledPlugins + statusLine intact
@@ -121,33 +128,35 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
   }
 });
 
-test('rollback restores the exact pre-router state', () => {
-  const { dir, settings, backup, original } = setupTempCopy();
+test('owned uninstall restores pre-router settings semantically', () => {
+  const fixture = setupTempCopy();
+  const { dir, settings, router, manifest, original } = fixture;
   try {
-    runInstaller(settings, backup);
-    assert.ok(existsSync(backup));
-    // rollback: copy backup over settings
-    copyFileSync(backup, settings);
-    const restored = readFileSync(settings, 'utf8');
-    assert.equal(restored, original, 'rollback is byte-identical to original');
+    assert.equal(runInstaller(fixture).status, 0);
+    const removal = runInstaller(fixture, '--uninstall');
+    assert.equal(removal.status, 0, removal.stderr);
+    assert.deepEqual(parse(settings), JSON.parse(original));
+    assert.equal(existsSync(router), false);
+    assert.equal(existsSync(manifest), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 test('installer is idempotent — re-running no-ops with no double entry', () => {
-  const { dir, settings, backup } = setupTempCopy();
+  const fixture = setupTempCopy();
+  const { dir, settings } = fixture;
   try {
-    const r1 = runInstaller(settings, backup);
+    const r1 = runInstaller(fixture);
     assert.equal(r1.status, 0, 'first install exit 0');
     assert.match(r1.stdout, /INSTALL OK/);
     const after1 = parse(settings);
     assert.equal(after1.hooks.UserPromptSubmit.length, 1, 'one entry after first install');
 
     // second run — backup already exists (skipped), UserPromptSubmit present (no-op)
-    const r2 = runInstaller(settings, backup);
+    const r2 = runInstaller(fixture);
     assert.equal(r2.status, 0, 'second install exit 0');
-    assert.match(r2.stdout, /already installed/);
+    assert.match(r2.stdout, /ALREADY INSTALLED/);
     const after2 = parse(settings);
     assert.equal(after2.hooks.UserPromptSubmit.length, 1, 'still exactly one entry (no duplicate)');
     // no other event duplicated
@@ -167,9 +176,10 @@ test('installer preserves the exact byte format of non-UserPromptSubmit content'
   // The diff audit is the safety gate: round-tripping through JSON must not alter
   // any pre-existing content. This test asserts the original text (minus the new
   // UserPromptSubmit block) round-trips identically.
-  const { dir, settings, backup, original } = setupTempCopy();
+  const fixture = setupTempCopy();
+  const { dir, settings, original } = fixture;
   try {
-    runInstaller(settings, backup);
+    runInstaller(fixture);
     const post = readFileSync(settings, 'utf8');
     // Remove the UserPromptSubmit block from the post text; the remainder must
     // match the original. The block is the only added lines.
