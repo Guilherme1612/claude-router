@@ -25,6 +25,17 @@ affects:
   - COV-10
   - COV-11
   - COV-12
+requirements_completed:
+  - COV-03
+  - COV-04
+  - COV-05
+  - COV-06
+  - COV-07
+  - COV-08
+  - COV-09
+  - COV-10
+  - COV-11
+  - COV-12
 tech_stack:
   added:
     - node:test

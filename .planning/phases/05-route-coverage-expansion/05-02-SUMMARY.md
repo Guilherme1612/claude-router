@@ -11,6 +11,17 @@ key-files:
   - /Users/guilherme/.claude/router/mode-map.json
   - tests/router.coverage.test.mjs
   - tests/router.route-targets.test.mjs
+requirements_completed:
+  - COV-03
+  - COV-04
+  - COV-05
+  - COV-06
+  - COV-07
+  - COV-08
+  - COV-09
+  - COV-10
+  - COV-11
+  - COV-12
 metrics:
   tests: 10
   failures: 0
@@ -55,4 +66,3 @@ Result: 10/10 passed.
 ## Self-Check
 
 PASSED
-

@@ -18,6 +18,11 @@ affects:
   - COV-02
   - COV-11
   - COV-12
+requirements_completed:
+  - COV-01
+  - COV-02
+  - COV-11
+  - COV-12
 tech_stack:
   added:
     - node:test

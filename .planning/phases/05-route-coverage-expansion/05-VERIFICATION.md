@@ -1,6 +1,6 @@
 ---
 phase: 05-route-coverage-expansion
-verified: 2026-07-09T19:41:40Z
+verified: 2026-07-14T00:00:00Z
 status: passed
 score: 12/12 must-haves verified
 behavior_unverified: 0
@@ -10,13 +10,13 @@ overrides_applied: 0
 # Phase 5: Route Coverage Expansion Verification Report
 
 **Phase Goal:** Audit the manifest against `mode-map.json` and add high-value route coverage across missing clusters, including direct `agent` and `warn` entries.
-**Verified:** 2026-07-09T19:41:40Z
+**Verified:** 2026-07-14
 **Status:** passed
-**Re-verification:** No - initial verification
+**Re-verification:** Yes - refreshed after `requirements_completed` frontmatter reconciliation
 
 ## Goal Achievement
 
-The phase goal is achieved. Verification checked the actual test files, global route data, global router hook, calibration harness, and v1.1 requirement traceability rather than relying on SUMMARY.md claims.
+The phase goal remains achieved. Re-verification checked the current test files, global route data, global router hook, calibration harness, and v1.1 requirement traceability rather than relying on SUMMARY.md claims. The reconciled `requirements_completed` frontmatter now accounts for COV-01 through COV-12 across `05-01-SUMMARY.md` through `05-04-SUMMARY.md`, matching the completed requirements table.
 
 ### Observable Truths
 
@@ -86,8 +86,8 @@ The phase goal is achieved. Verification checked the actual test files, global r
 | Behavior | Command | Result | Status |
 |---|---|---|---|
 | Phase 05 targeted route coverage tests | `node --test tests/router.coverage.test.mjs tests/router.route-targets.test.mjs tests/router.direct-agent-warn.test.mjs tests/router.calibration-coverage.test.mjs` | 16/16 passed | PASS |
-| Calibration gate | `node router.calibrate.mjs` | 23/27 right, threshold 21; Original 10: 10/10 preserved; Phase 05 fixtures passed | PASS |
-| Full regression suite | `node --test tests/*.test.mjs` | 324/324 passed | PASS |
+| Calibration gate | `node router.calibrate.mjs` | 29/30 right, threshold 21; Original 10: 10/10 preserved; all 9 Phase 05 fixtures passed | PASS |
+| Full regression suite | `node --test tests/*.test.mjs` | 377/377 passed | PASS |
 
 ### Probe Execution
 
@@ -110,7 +110,7 @@ No separate `scripts/*/tests/probe-*.sh` probes were declared or found for this 
 | COV-11 | 05-01, 05-02, 05-03, 05-04 | Missing-MCP flows warn rather than auto-dispatch blocked agents. | SATISFIED | Warn entries have no targets; validation rejects blocked dispatch; direct warn test passed. |
 | COV-12 | 05-01, 05-02, 05-03, 05-04 | Direct `agent` and `warn` entries supported. | SATISFIED | Direct route tests and calibration channel fixtures pass. |
 
-All Phase 5 requirement IDs in `.planning/REQUIREMENTS.md` are accounted for. No additional Phase 5 COV requirement IDs are orphaned.
+All Phase 5 requirement IDs in `.planning/REQUIREMENTS.md` are accounted for. The plan and summary frontmatter now explicitly records completion coverage for every COV-01 through COV-12 requirement, and no additional Phase 5 COV requirement IDs are orphaned.
 
 ### Anti-Patterns Found
 
@@ -131,5 +131,5 @@ No blocking gaps found. Phase 05 satisfies the roadmap success criteria and all 
 
 ---
 
-_Verified: 2026-07-09T19:41:40Z_
+_Re-verified: 2026-07-14 after requirements frontmatter reconciliation_
 _Verifier: the agent (gsd-verifier)_
