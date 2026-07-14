@@ -191,6 +191,10 @@ depth = 8
     assert.equal(cached.type, 'plugin_skill');
     assert.equal(cached.invocation.command, '/context-mode-ops');
     assert.match(cached.provenance[0].relative_path, /^plugins\/cache\//);
+    assert.deepEqual(
+      { origin: cached.provenance[0].origin, package: cached.provenance[0].package, version: cached.provenance[0].version },
+      { origin: 'cache', package: 'cache/context-mode/context-mode', version: '1.0.169' },
+    );
     assert.equal(skill.invocation.command, '$native');
     assert.deepEqual(agent.invocation.args, ['--safe', '--native']);
     assert.equal(agent.runtime_variants[0].native_invocation.args.includes('Multiline instructions stay inert.'), false);

@@ -3,11 +3,22 @@ import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { validateCapability } from '../registry/schema.mjs';
 
-const CLAUDE_VERSION = 'claude-adapter/2';
+const CLAUDE_VERSION = 'claude-adapter/3';
+const MAX_ARTIFACT_BYTES = 1024 * 1024;
+const MAX_NESTING = 24;
 
 function within(root, candidate) { return candidate === root || candidate.startsWith(`${root}${sep}`); }
 function fingerprint(bytes) { return createHash('sha256').update(bytes).digest('hex'); }
 function portable(path) { return path.replaceAll(sep, '/'); }
+function packageProvenance(relativePath) {
+  const parts = portable(relativePath).split('/');
+  const marker = parts.indexOf('.claude');
+  if (parts[0] !== 'plugins' || marker < 2) return {};
+  const version = marker > 2 && /^v?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.-]+)?$/.test(parts[marker - 1])
+    ? parts[marker - 1] : null;
+  const packageParts = parts.slice(1, version ? marker - 1 : marker);
+  return { origin: packageParts[0], package: packageParts.join('/'), ...(version ? { version } : {}) };
+}
 function diagnostic(code, runtime, logicalRoot, path, reason, severity = 'build-blocking', localPath) {
   return { code, runtime, logical_root: logicalRoot, relative_path: portable(path), reason, severity,
     ...(localPath ? { local_path: localPath } : {}) };
@@ -22,56 +33,138 @@ function walk(root) {
   try { visit(root); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
   return files;
 }
-function scalar(value) {
-  const text = value.trim();
-  if (/^\[.*\]$/.test(text) || /^\{.*\}$/.test(text)) {
-    try { return JSON.parse(text); } catch { return text; }
+function splitCollection(value, delimiter = ',') {
+  const parts = []; let start = 0; let quote = null; let depth = 0;
+  for (let i = 0; i < value.length; i += 1) {
+    const ch = value[i];
+    if (quote) {
+      if (ch === quote && (quote === "'" || value[i - 1] !== '\\')) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if ('[{'.includes(ch)) depth += 1;
+    else if (']}'.includes(ch)) { depth -= 1; if (depth < 0) throw new Error('malformed inline collection'); }
+    else if (ch === delimiter && depth === 0) { parts.push(value.slice(start, i).trim()); start = i + 1; }
   }
+  if (quote || depth !== 0) throw new Error('unterminated inline collection');
+  parts.push(value.slice(start).trim());
+  return parts.filter(Boolean);
+}
+function unquote(text) {
+  if (text.startsWith('"')) { try { return JSON.parse(text); } catch { throw new Error('invalid quoted scalar'); } }
+  if (text.startsWith("'")) {
+    if (!text.endsWith("'")) throw new Error('unterminated quoted scalar');
+    return text.slice(1, -1).replaceAll("''", "'");
+  }
+  return text;
+}
+function scalar(value, depth = 0) {
+  if (depth > MAX_NESTING) throw new Error('maximum nesting depth exceeded');
+  const text = value.trim();
+  if (text.startsWith('[')) {
+    if (!text.endsWith(']')) throw new Error('malformed inline array');
+    return splitCollection(text.slice(1, -1)).map((entry) => scalar(entry, depth + 1));
+  }
+  if (text.startsWith('{')) {
+    if (!text.endsWith('}')) throw new Error('malformed inline map');
+    const result = {};
+    for (const entry of splitCollection(text.slice(1, -1))) {
+      const separator = entry.indexOf(':') >= 0 ? entry.indexOf(':') : entry.indexOf('=');
+      if (separator < 1) throw new Error('malformed inline map entry');
+      const key = unquote(entry.slice(0, separator).trim());
+      if (Object.hasOwn(result, key)) throw new Error(`duplicate key: ${key}`);
+      result[key] = scalar(entry.slice(separator + 1), depth + 1);
+    }
+    return result;
+  }
+  if (text.startsWith(']') || text.startsWith('}')) throw new Error('malformed inline collection');
   if (/^(true|false)$/.test(text)) return text === 'true';
-  if (/^\d+$/.test(text)) return Number(text);
-  return text.replace(/^['"]|['"]$/g, '');
+  if (/^(null|~)$/i.test(text)) return null;
+  if (/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(text)) return Number(text);
+  return unquote(text);
 }
 function markdown(bytes) {
+  if (bytes.length > MAX_ARTIFACT_BYTES) throw new Error('artifact exceeds byte limit');
   const text = bytes.toString('utf8');
   const match = text.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
   if (!match) throw new Error('markdown frontmatter is missing or unterminated');
-  const data = {};
-  for (const line of match[1].split(/\r?\n/)) {
-    if (!line.trim()) continue;
-    const pair = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
-    if (!pair) throw new Error(`unsupported frontmatter line: ${line}`);
-    data[pair[1]] = scalar(pair[2]);
+  const lines = match[1].split(/\r?\n/); const root = {}; const stack = [{ indent: -1, value: root }];
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]; if (!raw.trim() || raw.trimStart().startsWith('#')) continue;
+    if (/\t/.test(raw.slice(0, raw.length - raw.trimStart().length))) throw new Error('tabs are not allowed in indentation');
+    const indent = raw.length - raw.trimStart().length;
+    while (stack.length > 1 && indent <= stack.at(-1).indent) stack.pop();
+    if (indent > stack.at(-1).indent && stack.length > 1 && indent !== stack.at(-1).indent + 2) throw new Error(`invalid indentation at line ${index + 1}`);
+    const parent = stack.at(-1).value; const content = raw.trim();
+    if (content.startsWith('- ')) {
+      if (!Array.isArray(parent)) throw new Error(`sequence without list parent at line ${index + 1}`);
+      const item = content.slice(2); const pair = item.match(/^([A-Za-z0-9_.-]+):(?:\s+(.*))?$/);
+      if (pair) { const object = {}; object[pair[1]] = pair[2] === undefined ? {} : scalar(pair[2]); parent.push(object); stack.push({ indent, value: object }); }
+      else parent.push(scalar(item));
+      continue;
+    }
+    const pair = content.match(/^([A-Za-z0-9_.-]+):(?:\s*(.*))?$/);
+    if (!pair || Array.isArray(parent)) throw new Error(`unsupported frontmatter line: ${raw}`);
+    const key = pair[1]; if (Object.hasOwn(parent, key)) throw new Error(`duplicate key: ${key}`);
+    const remainder = pair[2] || '';
+    if (remainder === '|' || remainder === '>') {
+      const block = []; const base = indent;
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1]; const nextIndent = next.length - next.trimStart().length;
+        if (next.trim() && nextIndent <= base) break;
+        index += 1; block.push(next.trim() ? next.slice(Math.min(next.length, base + 2)) : '');
+      }
+      parent[key] = remainder === '>' ? `${block.join(' ').replace(/\s+/g, ' ').trim()}\n` : `${block.join('\n')}\n`;
+    } else if (!remainder) {
+      const next = lines.slice(index + 1).find((line) => line.trim());
+      const child = next?.trimStart().startsWith('- ') ? [] : {};
+      parent[key] = child; stack.push({ indent, value: child });
+    } else parent[key] = scalar(remainder);
   }
-  return data;
+  return root;
 }
 function toml(bytes) {
-  const data = { mcp_servers: {} };
-  let section = data;
-  for (const raw of bytes.toString('utf8').split(/\r?\n/)) {
-    const line = raw.replace(/#.*$/, '').trim();
+  if (bytes.length > MAX_ARTIFACT_BYTES) throw new Error('artifact exceeds byte limit');
+  const data = {}; let section = data; const lines = bytes.toString('utf8').split(/\r?\n/);
+  const assignPath = (target, keys) => keys.reduce((value, key) => {
+    if (!Object.hasOwn(value, key)) value[key] = {};
+    else if (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key])) throw new Error(`duplicate key: ${keys.join('.')}`);
+    return value[key];
+  }, target);
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]; const line = raw.trim();
     if (!line) continue;
-    const header = line.match(/^\[mcp_servers\.([A-Za-z0-9_-]+)\]$/);
-    if (header) { section = data.mcp_servers[header[1]] = {}; continue; }
-    const pair = line.match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
+    if (line.startsWith('#')) continue;
+    const header = line.match(/^\[([A-Za-z0-9_.-]+)\]$/);
+    if (header) { section = assignPath(data, header[1].split('.')); continue; }
+    const pair = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/);
     if (!pair) throw new Error(`unsupported TOML line: ${raw}`);
     let value = pair[2].trim();
-    if (value.startsWith('[{') && value.endsWith('}]')) {
-      value = value.slice(2, -2).split(',').reduce((out, item) => {
-        const p = item.trim().match(/^([A-Za-z0-9_-]+)\s*=\s*(.+)$/);
-        if (!p) throw new Error(`unsupported TOML inline table: ${item}`);
-        out[p[1]] = scalar(p[2]); return out;
-      }, {});
-      value = [value];
+    const delimiter = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : null;
+    if (delimiter) {
+      let content = value.slice(3); const chunks = [];
+      if (content.includes(delimiter)) chunks.push(content.slice(0, content.indexOf(delimiter)));
+      else {
+        if (content) chunks.push(content);
+        let closed = false;
+        while (++index < lines.length) { const end = lines[index].indexOf(delimiter); if (end >= 0) { chunks.push(lines[index].slice(0, end)); closed = true; break; } chunks.push(lines[index]); }
+        if (!closed) throw new Error('unterminated multiline string');
+      }
+      value = chunks.join('\n').replace(/^\n/, '');
     } else value = scalar(value);
-    section[pair[1]] = value;
+    const keys = pair[1].split('.'); const target = keys.length > 1 ? assignPath(section, keys.slice(0, -1)) : section; const key = keys.at(-1);
+    if (Object.hasOwn(target, key)) throw new Error(`duplicate key: ${pair[1]}`);
+    target[key] = value;
   }
+  if (!data.mcp_servers) data.mcp_servers = {};
   return data;
 }
 
 function claudeLayout(rel) {
   if (rel === 'settings.json') return { type: 'settings', format: 'json' };
   if (/^skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'skill', format: 'markdown' };
-  if (/^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'plugin_skill', format: 'markdown' };
+  if (/^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(rel)
+    || /^plugins\/.+\/\.claude\/skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'plugin_skill', format: 'markdown' };
   if (/^agents-store\/.+\/skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'agents_store_skill', format: 'markdown' };
   if (/^agents\/[^/]+\.md$/.test(rel)) return { type: 'agent', format: 'markdown' };
   if (/^commands\/[^/]+\.md$/.test(rel)) return { type: 'command', format: 'markdown' };
@@ -148,7 +241,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
       lifecycle: dispatchable ? 'ready' : 'partial', scope, dispatchable,
       invocation: { runtime, command: String(command), args: Array.isArray(nativeInvocation.args) ? nativeInvocation.args.map(String) : [] },
       dependencies: { state: declared ? 'declared' : 'unknown', items },
-      provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion }],
+      provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion, ...packageProvenance(nativeRecord.relativePath) }],
       runtime_variants: [{ runtime, native_identity: String(nativeRecord.data.native_identity || nativeRecord.name), native_invocation: nativeInvocation }],
       conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
       ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),

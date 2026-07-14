@@ -25,7 +25,7 @@ function expandConfig(base) {
   return records;
 }
 
-const adapter = createAdapter({ runtime: 'codex', adapterVersion: 'codex-adapter/2', layout, configExpander: expandConfig });
+const adapter = createAdapter({ runtime: 'codex', adapterVersion: 'codex-adapter/3', layout, configExpander: expandConfig });
 export const parseArtifact = adapter.parseArtifact;
 export const normalizeArtifact = adapter.normalizeArtifact;
 export const compileInvocation = adapter.compileInvocation;
