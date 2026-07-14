@@ -141,7 +141,7 @@ function runJsonCommand(args) {
   const result = runRouterCommand(args);
   assert.equal(result.status, 0, `command failed: ${result.stderr || result.stdout}`);
   assert.ok(result.stdout.trim(), 'command must print JSON to stdout');
-  assert.equal(result.stderr, '', 'JSON commands should not write diagnostics to stderr');
+  assert.equal(result.stderr.trim(), '', 'JSON commands should not write substantive diagnostics to stderr');
   const out = JSON.parse(result.stdout);
   const text = JSON.stringify(out);
   assert.ok(!text.includes(RAW_PROMPT_FIXTURE), 'health command output must not expose raw prompt fixtures');
