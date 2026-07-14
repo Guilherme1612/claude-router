@@ -101,6 +101,9 @@ export function createAdapter({ runtime, adapterVersion, types }) {
         native_invocation: invocation }],
       conflicts: [],
       precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
+      ...(typeof nativeRecord.data?.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
+      ...(nativeRecord.data?.shared_origin?.authority && nativeRecord.data?.shared_origin?.identity
+        ? { shared_origin: { authority: String(nativeRecord.data.shared_origin.authority), identity: String(nativeRecord.data.shared_origin.identity) } } : {}),
     };
     validateCapability(record);
     return record;
