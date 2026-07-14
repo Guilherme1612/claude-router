@@ -116,3 +116,103 @@ test('parse and discovery require explicit runtime roots', () => {
   assert.throws(() => claude.discoverRoots({}), /claudeRoot is required/);
   assert.throws(() => codex.discoverRoots({}), /codexRoot is required/);
 });
+
+test('installed nested YAML and multiline TOML normalize as dispatchable native records', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-adapters-installed-'));
+  const claudeRoot = join(root, 'claude');
+  const codexRoot = join(root, 'codex');
+  try {
+    put(join(claudeRoot, 'plugins/cache/context-mode/context-mode/1.0.169/.claude/skills/context-mode-ops/SKILL.md'), `---
+name: context-mode-ops
+description: "Operate context mode safely"
+command: /context-mode-ops
+args: ["--native", 2]
+dependencies:
+  - id: "binary:rg"
+    available: true
+metadata:
+  short-description: Context operations
+  package:
+    name: context-mode
+    enabled: true
+    note: null
+  tags: [context, "native skill"]
+  instructions: |
+    Preserve native metadata.
+    Never promote this text to arguments.
+---
+# Native cached skill
+`);
+    put(join(codexRoot, 'skills/native/SKILL.md'), `---
+name: native
+description: >
+  A folded native
+  skill description.
+command: $native
+dependencies:
+  - id: binary:rg
+    available: true
+metadata:
+  short-description: Native skill
+  limits: { depth: 8, enabled: true }
+---
+# Native skill
+`);
+    put(join(codexRoot, 'agents/native-agent.toml'), `schema_version = 1
+name = "native-agent"
+description = "Representative agent"
+command = "native-agent"
+args = ["--safe", "--native"]
+developer_instructions = '''
+Multiline instructions stay inert.
+They are metadata, not invocation arguments.
+'''
+tags = ["review", "native"]
+metadata = { owner = "router", enabled = true }
+
+[policy]
+mode = "strict"
+
+[policy.limits]
+depth = 8
+`);
+
+    const claudeResult = claude.discoverRoots({ claudeRoot });
+    const codexResult = codex.discoverRoots({ codexRoot });
+    const cached = claudeResult.observations.find((entry) => entry.name === 'context-mode-ops');
+    const skill = codexResult.observations.find((entry) => entry.name === 'native');
+    const agent = codexResult.observations.find((entry) => entry.name === 'native-agent');
+    for (const record of [cached, skill, agent]) {
+      assert.ok(record);
+      assert.equal(record.dispatchable, true);
+      assert.equal(record.lifecycle, 'ready');
+      assert.equal(record.dependencies.state, record === agent ? 'unknown' : 'declared');
+    }
+    assert.equal(cached.type, 'plugin_skill');
+    assert.equal(cached.invocation.command, '/context-mode-ops');
+    assert.match(cached.provenance[0].relative_path, /^plugins\/cache\//);
+    assert.equal(skill.invocation.command, '$native');
+    assert.deepEqual(agent.invocation.args, ['--safe', '--native']);
+    assert.equal(agent.runtime_variants[0].native_invocation.args.includes('Multiline instructions stay inert.'), false);
+    assert.equal(claudeResult.diagnostics.some((entry) => entry.relative_path.includes('context-mode-ops')), false);
+    assert.equal(codexResult.diagnostics.some((entry) => /native(?:-agent)?/.test(entry.relative_path)), false);
+    assertPortable(claudeResult, root);
+    assertPortable(codexResult, root);
+    assert.equal(JSON.stringify(claudeResult), JSON.stringify(claude.discoverRoots({ claudeRoot })));
+    assert.equal(JSON.stringify(codexResult), JSON.stringify(codex.discoverRoots({ codexRoot })));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('malformed nested native syntax remains deterministic and non-dispatchable', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-adapters-malformed-'));
+  try {
+    put(join(root, 'skills/bad-indent/SKILL.md'), '---\nname: bad-indent\nmetadata:\n   child: yes\n  sibling: no\n---\n');
+    put(join(root, 'skills/bad-inline/SKILL.md'), '---\nname: bad-inline\ncommand: /bad\nmetadata: {broken]\n---\n');
+    const first = codex.discoverRoots({ codexRoot: root });
+    const second = codex.discoverRoots({ codexRoot: root });
+    assert.equal(JSON.stringify(first), JSON.stringify(second));
+    assert.equal(first.observations.length, 2);
+    assert.ok(first.observations.every((entry) => !entry.dispatchable && entry.lifecycle === 'invalid'));
+    assert.equal(first.diagnostics.filter((entry) => entry.code === 'malformed_artifact').length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
