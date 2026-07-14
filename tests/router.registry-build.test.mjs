@@ -40,3 +40,40 @@ test('full registry is deterministic, evidence-gated, scoped, diagnostic, and re
     assert.doesNotMatch(stableStringify(first), new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('linked variants synthesize complete typed deterministic conflicts', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-conflicts-'));
+  try {
+    const common = { canonical_identity: 'shared/conflicted', description: 'shared description' };
+    artifact(root, 'claude', 'global', 'skills', 'claude-name', {
+      ...common, invocation: { command: 'claude-command', args: ['--one'] },
+      dependencies: [{ id: 'claude-only', available: true }],
+    });
+    artifact(root, 'codex', 'global', 'commands', 'codex-name', {
+      ...common, description: 'different description', invocation: { command: 'codex-command', args: ['--two'] },
+      dependencies: [{ id: 'codex-only', available: false }],
+    });
+    const options = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex') };
+    const first = buildFullRegistry(options);
+    const record = first.registry.records.find(entry => entry.id === 'shared/conflicted');
+    assert.ok(record);
+    assert.equal(record.runtime_variants.length, 2);
+    assert.equal(record.provenance.length, 2);
+    for (const field of ['name', 'type', 'description', 'lifecycle', 'dispatchable', 'invocation', 'dependencies']) {
+      const conflict = record.conflicts.find(entry => entry.field === field);
+      assert.ok(conflict, `conflict emitted for ${field}`);
+      assert.equal(conflict.type, 'linked-variant-disagreement');
+      assert.ok(['informational', 'dispatch-blocking', 'build-blocking'].includes(conflict.severity));
+      assert.equal(conflict.sources.length, 2);
+      assert.equal(conflict.values.length, 2);
+    }
+    assert.equal(new Set(record.conflicts.map(stableStringify)).size, record.conflicts.length);
+
+    const claude = readFileSync(join(root, 'claude', 'skills', 'claude-name.json'));
+    const codex = readFileSync(join(root, 'codex', 'commands', 'codex-name.json'));
+    writeFileSync(join(root, 'claude', 'skills', 'claude-name.json'), codex);
+    writeFileSync(join(root, 'codex', 'commands', 'codex-name.json'), claude);
+    const permuted = buildFullRegistry(options);
+    assert.equal(stableStringify(first), stableStringify(permuted));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});

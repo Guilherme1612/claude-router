@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -33,6 +33,16 @@ function fixture({ withSettings = true } = {}) {
 
 function cleanup(f) {
   rmSync(f.root, { recursive: true, force: true });
+}
+
+function snapshot(root) {
+  if (!existsSync(root)) return null;
+  const walk = (directory, relative = '') => readdirSync(directory).sort().flatMap(name => {
+    const absolute = join(directory, name); const path = relative ? join(relative, name) : name;
+    return statSync(absolute).isDirectory() ? [{ path, type: 'directory' }, ...walk(absolute, path)]
+      : [{ path, type: 'file', bytes: readFileSync(absolute).toString('base64') }];
+  });
+  return walk(root);
 }
 
 test('one command installs router, binding, Codex marker, and complete ownership manifest', () => {
@@ -68,6 +78,29 @@ test('candidate dry-run is mutation-free and build failure occurs before install
     assert.equal(existsSync(f.routerPath), false);
     assert.equal(existsSync(f.manifestPath), false);
     assert.deepEqual(readFileSync(f.settingsPath), settingsBefore);
+  } finally { cleanup(f); }
+});
+
+test('post-mutation failure restores exact fresh-install state', () => {
+  const f = fixture();
+  try {
+    const before = snapshot(f.root);
+    assert.throws(() => installRouter({ ...f.options, afterMutation() { throw new Error('injected readiness failure'); } }), /injected readiness failure/);
+    assert.deepEqual(snapshot(f.root), before);
+  } finally { cleanup(f); }
+});
+
+test('post-mutation repair failure restores every owned byte and manifest', () => {
+  const f = fixture();
+  try {
+    installRouter(f.options);
+    const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
+    const candidate = manifest.files.find(entry => entry.path.endsWith('/candidate/registry.json')).path;
+    writeFileSync(candidate, 'pre-repair custom bytes\n');
+    writeFileSync(f.routerPath, 'pre-repair router bytes\n');
+    const before = snapshot(f.root);
+    assert.throws(() => installRouter({ ...f.options, afterMutation() { throw new Error('injected readiness failure'); } }), /injected readiness failure/);
+    assert.deepEqual(snapshot(f.root), before);
   } finally { cleanup(f); }
 });
 
