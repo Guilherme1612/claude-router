@@ -23,6 +23,9 @@ The design must reduce prompt latency and token use by keeping discovery, parsin
 - Prevent deleted or invalid targets from surviving through stale aliases or schema exceptions.
 - Keep prompt-time routing deterministic, compact, local, and below the existing latency ceiling.
 - Evolve routing weights and signals from privacy-safe outcome telemetry.
+- Let the user express the least possible text—such as `continue`, `finish it`, or `use the design`—while the router safely reconstructs the active goal and chooses the best valid next workflow.
+- Select capabilities from prompt intent plus current project, workflow, and execution state rather than prompt keywords alone.
+- Load the least sufficient context needed for a reliable decision instead of repeatedly injecting full histories, manifests, specifications, or planning directories.
 
 ## Non-Goals
 
@@ -63,6 +66,12 @@ The Registry Controller watches runtime roots, normalizes native artifacts, comp
 ### Data plane
 
 Claude and Codex prompt routers read immutable compiled indexes. They never scan directories, parse capability files, rebuild registries, or call an external model. If the control plane fails, routing continues with the last known-good version.
+
+### Context plane
+
+A Context Resolver maintains a compact, versioned **context capsule** for each active workspace and conversation. The capsule connects short or referential prompts to the user's current goal without loading broad history into every turn.
+
+The resolver may read richer source material only when the capsule is missing, stale, contradictory, or insufficient for a safe decision. It then refreshes the capsule and returns a bounded routing context to the data plane.
 
 ## Canonical Capability Model
 
@@ -197,6 +206,69 @@ Evolution may:
 
 Evolution may not invent invocation targets, change permissions, install dependencies, or bypass validation. Changes use canary activation and roll back automatically when routing quality degrades.
 
+### 8. Context Resolver and capsule store
+
+The Context Resolver combines:
+
+- the current user prompt and explicit capability names
+- recent conversation intent and unresolved user corrections
+- active goal, checkpoint, or approval state
+- project and workspace identity
+- current milestone, phase, plan, and workflow position
+- approved design, specification, and plan references
+- git branch, worktree, dirty-state summary, and recent relevant commits
+- last successful route, unfinished operation, and permitted next transitions
+- blockers, missing dependencies, and required human actions
+
+It writes a compact context capsule:
+
+```yaml
+workspace_id: stable project identity
+conversation_id: current thread identity
+goal:
+  summary: one bounded sentence
+  status: active | waiting | complete | blocked
+workflow:
+  kind: canonical workflow identity
+  position: current milestone/phase/plan/checkpoint
+  next_valid_transitions: []
+artifacts:
+  approved_design: optional path and fingerprint
+  active_spec: optional path and fingerprint
+  active_plan: optional path and fingerprint
+state:
+  branch: name
+  dirty_summary: bounded summary
+  blockers: []
+capabilities:
+  last_route: canonical route identity
+  required_dependencies: []
+freshness:
+  source_versions: {}
+  updated_at: timestamp
+```
+
+Capsules contain references and bounded summaries, not full documents. Sensitive text and raw prompts are excluded. Source fingerprints make stale capsules detectable.
+
+### 9. Workflow Orchestrator
+
+The Workflow Orchestrator resolves the best next action from the goal, capsule, canonical registry, and runtime policy. It selects a workflow before selecting individual capabilities.
+
+Selection order:
+
+1. Honor explicit user instructions and named capabilities.
+2. Resume an active approved workflow when the prompt is referential, such as `continue`.
+3. Derive the next valid transition from persisted workflow state.
+4. Select the strongest compatible command or skill that owns that transition.
+5. Select agents or subagents required by that workflow.
+6. Resolve MCPs, tools, models, permissions, and hooks as dependencies or lifecycle services.
+7. Load only the context required by the selected workflow's declared contract.
+8. Execute, verify, and persist the new capsule state.
+
+MCP servers and tools are selected because the chosen workflow requires them, not merely because their names resemble words in the prompt. Hooks remain event-bound and are validated for correct registration; they are not treated as freely invokable prompt capabilities.
+
+If several workflows remain plausible and the confidence margin is below policy, the orchestrator asks one concise clarification question rather than loading more context speculatively or choosing an unsafe action.
+
 ## Change Lifecycle
 
 ```text
@@ -215,6 +287,30 @@ filesystem change
 
 Failures route to quarantine. The active version remains unchanged.
 
+## Prompt and Workflow Lifecycle
+
+```text
+minimal user prompt
+  → explicit instruction and active-goal check
+  → context capsule lookup and freshness validation
+  → goal and workflow-state resolution
+  → best next workflow transition
+  → capability and dependency selection
+  → least-sufficient context loading
+  → execution and verification
+  → capsule/state update
+```
+
+Example: `continue and use the design`
+
+1. Resolve `continue` against the active goal and unfinished workflow.
+2. Resolve `the design` to the approved, fingerprinted design artifact in the capsule.
+3. Detect that design approval is complete and implementation planning is the next valid transition.
+4. Select the planning workflow and its registered planner/checker capabilities.
+5. Check runtime availability, MCPs, tools, permissions, and agent dependencies.
+6. Load the approved design plus only the project constraints and state required by the planning contract.
+7. Execute the plan workflow, verify its artifact, and persist the next position.
+
 ## Deletion and Rename Semantics
 
 - A removed capability is disabled in the candidate before any scoring occurs.
@@ -227,6 +323,13 @@ Failures route to quarantine. The active version remains unchanged.
 
 ## Prompt-Time Routing and Token Efficiency
 
+Routing decisions use four bounded inputs:
+
+- the user's current prompt
+- the fresh context capsule
+- the compact compiled capability index
+- the workflow transition policy
+
 The compiled index contains only:
 
 - normalized trigger tokens
@@ -238,16 +341,29 @@ The compiled index contains only:
 
 Detailed descriptions, docs, provenance, validation history, and telemetry remain external.
 
+The context capsule contains only the active goal, workflow position, artifact references, relevant blockers, and bounded state summaries. Full conversation history, full planning directories, complete manifests, and entire specifications are not injected by default.
+
+The orchestrator follows a **least-sufficient-context** rule:
+
+1. Begin with prompt, capsule, and compact index.
+2. Select a likely workflow and inspect its declared context contract.
+3. Load referenced source sections only when required by that contract.
+4. Stop loading when decision confidence and workflow preconditions are satisfied.
+5. Ask one concise question when missing information would materially change the action.
+
 Routing tiers:
 
 1. Explicit capability name or command: constant-time lookup.
-2. Known high-confidence pattern: deterministic cached route.
-3. Moderate confidence: local lexical scoring over the compact index.
-4. Ambiguous prompt: pass through with a short recommendation and queue optional background analysis.
+2. Referential continuation with a fresh active capsule: deterministic workflow-state transition.
+3. Known high-confidence pattern: deterministic cached route.
+4. Moderate confidence: local lexical scoring over the compact index plus bounded capsule signals.
+5. Ambiguous prompt: ask one concise clarification or pass through with a short recommendation; queue optional background analysis.
 
 Cache keys include registry version, routing-policy version, project-scope fingerprint, and normalized prompt signature. Registry activation invalidates stale decisions by changing the version pointer rather than rewriting the cache.
 
 Background model jobs receive only changed capability summaries, nearest route families, collisions, and failed calibration examples. They never receive the full registry or runtime directories.
+
+Each workflow declares a context budget and allowed sources. The router records estimated input tokens for routing context, loaded artifacts, and injected instructions. Repeatedly loading the same unchanged artifact is treated as a cache miss defect and surfaced by diagnostics.
 
 ## Operator Workflow
 
@@ -257,6 +373,9 @@ Background model jobs receive only changed capability summaries, nearest route f
 - `router doctor` — adapters, roots, fingerprints, bindings, dependencies, and activation health.
 - `router rollback` — atomically restore a known-good registry.
 - `router registry verify` — compare incremental state with a clean rebuild.
+- `router context` — show the active goal, workflow position, artifact references, freshness, and next valid transitions without raw conversation text.
+- `router context refresh` — rebuild a stale or inconsistent capsule from authoritative project and workflow state.
+- `router why-next` — explain why the orchestrator selected the current next action and which alternatives were rejected.
 
 Healthy operation is silent. Alerts are emitted only for quarantined changes, repeated watcher failures, rollback events, or changes that cannot safely activate.
 
@@ -270,6 +389,10 @@ Healthy operation is silent. Alerts are emitted only for quarantined changes, re
 - Telemetry regression: rollback the candidate policy/index version.
 - Missing dependency: keep capability visible diagnostically but non-dispatchable.
 - Corrupt active index: fall back to the most recent verified version and emit a critical health event.
+- Missing or stale context capsule: reconstruct it from authoritative workflow and workspace state before routing referential prompts.
+- Contradictory prompt and capsule: the newest explicit user instruction wins; invalidate the conflicting capsule fields.
+- Ambiguous continuation with no active goal: ask one concise clarification and do not infer a destructive or externally visible action.
+- Context budget exceeded: retain the highest-priority goal, constraints, and preconditions; replace lower-priority material with references rather than truncated prose.
 
 ## Test Strategy
 
@@ -304,6 +427,12 @@ For every capability type, test:
 - cross-runtime identity and invocation
 - telemetry privacy and rollback
 - prompt latency and token budget
+- minimal prompts such as `continue`, `finish it`, `use the design`, and `do the next phase`
+- interrupted workflow recovery across new sessions and process restarts
+- explicit user instruction overriding stale capsule state
+- capsule freshness after design, plan, phase, branch, or dependency changes
+- least-sufficient-context enforcement and repeated-artifact cache reuse
+- workflow-first selection followed by skills, commands, agents, MCPs, and tools
 
 ## Acceptance Criteria
 
@@ -318,6 +447,13 @@ For every capability type, test:
 - Background LLM work is limited to changed ambiguous entries and obeys a configurable daily budget.
 - Prompt injection remains compact and capped.
 - Every activation and rollback is attributable to a registry and policy version.
+- A user can resume a uniquely identifiable active workflow with `continue` and no restatement of project history.
+- Referential prompts resolve approved artifacts and workflow position from the context capsule with no full-history injection.
+- Workflow selection uses prompt, capsule, project state, transition policy, and capability compatibility—not prompt keywords alone.
+- MCPs and tools are loaded only when required by the selected workflow or verification path.
+- The default routing decision loads no full manifest, planning directory, conversation history, or complete design document.
+- Each workflow enforces a declared context budget and reports token-cost regressions.
+- When context is genuinely insufficient, the system asks at most one focused question before re-evaluating.
 
 ## Delivery Decomposition
 
@@ -327,8 +463,9 @@ This design should be implemented in staged vertical slices:
 2. Fingerprint tree, watcher, incremental diff, and periodic repair.
 3. Target validation, deletion/rename safety, hook reconciliation, and quarantine.
 4. Deterministic mapping, compiled indexes, atomic activation, and rollback.
-5. Token-efficient prompt adapters and versioned cache invalidation.
-6. Background ambiguity resolution, canary evolution, and telemetry rollback.
-7. End-to-end lifecycle, performance, privacy, and release gates.
+5. Context Resolver, capsule store, workflow transition policy, and interrupted-session recovery.
+6. Token-efficient prompt adapters, least-sufficient-context contracts, and versioned cache invalidation.
+7. Background ambiguity resolution, canary evolution, and telemetry rollback.
+8. End-to-end lifecycle, minimal-prompt, performance, privacy, and release gates.
 
 No later slice may weaken the fail-open, privacy, dependency, scope, or prompt-latency guarantees established by the existing router.
