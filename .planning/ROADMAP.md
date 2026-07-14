@@ -25,7 +25,7 @@ v1.2 turns the verified prompt router into a guarded dual-runtime control plane.
 
 ### Phase 11: Canonical Registry and Runtime Adapters
 **Goal**: Users get one stable, runtime-neutral view of available Claude and Codex capabilities without losing native invocation or scope details.
-**Depends on**: Nothing (v1.1 release gates already shipped)
+**Depends on**: Nothing
 **Requirements**: REG-01, REG-02, ADP-01, ADP-02
 **Success Criteria** (what must be TRUE):
   1. The same capability keeps a stable canonical identity across deterministic rebuilds and supported runtime layouts.
