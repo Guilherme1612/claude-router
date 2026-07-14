@@ -141,7 +141,10 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
       dependencies: { state: declared ? 'declared' : 'unknown', items },
       provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion }],
       runtime_variants: [{ runtime, native_identity: String(nativeRecord.data.native_identity || nativeRecord.name), native_invocation: nativeInvocation }],
-      conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'] };
+      conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
+      ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
+      ...(nativeRecord.data.shared_origin?.authority && nativeRecord.data.shared_origin?.identity
+        ? { shared_origin: { authority: String(nativeRecord.data.shared_origin.authority), identity: String(nativeRecord.data.shared_origin.identity) } } : {}) };
     validateCapability(record); return record;
   }
   function normalizePartial(partial) {
