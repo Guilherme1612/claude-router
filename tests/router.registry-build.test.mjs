@@ -3,7 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildFullRegistry, buildIncrementalRegistry } from '../src/registry/build.mjs';
+import {
+  acquireRegistry,
+  assembleRegistry,
+  buildFullRegistry,
+  buildIncrementalRegistry,
+  refreshIncrementalAcquisition,
+} from '../src/registry/build.mjs';
 import { discoverRoots as discoverClaude } from '../src/adapters/claude.mjs';
 import { discoverRoots as discoverCodex } from '../src/adapters/codex.mjs';
 import { diffFingerprintTrees } from '../src/registry/diff.mjs';
@@ -81,6 +87,19 @@ function acquire(options, overrides = {}) {
   const codex = (overrides.discoverCodex || discoverCodex)(options);
   return { claude, codex };
 }
+
+test('full and incremental entry points expose one acquisition and assembly composition', () => {
+  const options = {
+    discoverClaude: () => ({ observations: [], diagnostics: [] }),
+    discoverCodex: () => ({ observations: [], diagnostics: [] }),
+  };
+  const acquisition = acquireRegistry(options);
+  assert.deepEqual(buildFullRegistry(options), assembleRegistry(acquisition));
+  const diff = { events: [], diagnostics: [] };
+  const refreshed = refreshIncrementalAcquisition(acquisition, diff, options);
+  assert.deepEqual(refreshed, acquisition);
+  assert.deepEqual(buildIncrementalRegistry(acquisition, diff, options), assembleRegistry(refreshed));
+});
 
 function snapshot(acquisition) {
   return {

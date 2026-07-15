@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createRegistryWatcher } from '../src/registry/watcher.mjs';
+import { createRegistryReconciler, createRegistryWatcher } from '../src/registry/watcher.mjs';
 
 function clock() {
   let now = 0, id = 0;
@@ -115,6 +115,38 @@ test('failed reconcile retains the last valid state and reports the error', asyn
   assert.deepEqual(h.writes, ['scan-1']);
   assert.deepEqual(h.errors, ['candidate rejected']);
   await h.controller.close();
+});
+
+test('deployed reconciler consumes the real lifecycle diff and advances acquisition only after both publications', async () => {
+  const initial = { claude: { observations: [], diagnostics: [] }, codex: { observations: [], diagnostics: [] }, generation: 0 };
+  const lifecycle = { events: [], diagnostics: [], marker: 'authoritative-diff' };
+  const refreshCalls = [];
+  const writes = [];
+  let failReport = true;
+  const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+    acquireRegistry: () => initial,
+    refreshIncrementalAcquisition(previous, diff) {
+      refreshCalls.push({ previous, diff });
+      return { ...previous, generation: previous.generation + 1 };
+    },
+    assembleRegistry(acquisition) {
+      return { registry: { generation: acquisition.generation }, diagnostics: [], summary: { generation: acquisition.generation } };
+    },
+    async writeJson(path, value) {
+      writes.push({ path, value });
+      if (path === '/report' && failReport) throw new Error('report rejected');
+    },
+  });
+
+  await assert.rejects(reconcile({ diff: lifecycle }), /report rejected/);
+  failReport = false;
+  await reconcile({ diff: lifecycle });
+  assert.equal(refreshCalls.length, 2);
+  assert.strictEqual(refreshCalls[0].diff, lifecycle);
+  assert.strictEqual(refreshCalls[1].diff, lifecycle);
+  assert.equal(refreshCalls[0].previous.generation, 0);
+  assert.equal(refreshCalls[1].previous.generation, 0, 'failed publication must retain acquisition baseline');
+  assert.deepEqual(writes.slice(-2).map(item => item.path), ['/candidate', '/report']);
 });
 
 test('close releases watchers and timers and makes callbacks inert', async () => {
