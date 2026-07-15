@@ -84,10 +84,15 @@ function annotatePrecedence(records) {
   }
 }
 
+export function acquireRegistry(options = {}) {
+  return {
+    claude: (options.discoverClaude || discoverClaude)(options),
+    codex: (options.discoverCodex || discoverCodex)(options),
+  };
+}
+
 export function buildFullRegistry(options = {}) {
-  const claude = (options.discoverClaude || discoverClaude)(options);
-  const codex = (options.discoverCodex || discoverCodex)(options);
-  return assembleRegistry({ claude, codex });
+  return assembleRegistry(acquireRegistry(options));
 }
 
 function validateAcquisition(acquisition, label = 'acquisition') {
@@ -152,7 +157,7 @@ function replaceDirty(previous, refreshed, roots) {
   };
 }
 
-export function buildIncrementalRegistry(previous, diff, options = {}) {
+export function refreshIncrementalAcquisition(previous, diff, options = {}) {
   validateAcquisition(previous, 'previous');
   const dirty = dirtyLogicalRoots(diff);
   const next = {
@@ -167,7 +172,11 @@ export function buildIncrementalRegistry(previous, diff, options = {}) {
       : (options.discoverCodex || discoverCodex);
     next[runtime] = replaceDirty(previous[runtime], discover(options), roots);
   }
-  return assembleRegistry(next);
+  return next;
+}
+
+export function buildIncrementalRegistry(previous, diff, options = {}) {
+  return assembleRegistry(refreshIncrementalAcquisition(previous, diff, options));
 }
 
 export function assembleRegistry(acquisition) {

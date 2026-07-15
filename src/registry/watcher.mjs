@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanFingerprintTree, loadFingerprintState, saveFingerprintState } from './fingerprint.mjs';
 import { diffFingerprintTrees } from './diff.mjs';
-import { buildFullRegistry } from './build.mjs';
+import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from './build.mjs';
 import { stableStringify } from './schema.mjs';
 
 function hash(value) {
@@ -164,27 +164,13 @@ export async function runRegistryWatcher(options) {
     schema_version: 1, state, instance_id: instanceId, pid: process.pid,
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
   });
-  const reconcile = async () => {
-    const built = buildFullRegistry({
-      claudeRoot: config.claude_root, codexRoot: config.codex_root,
-      ...(config.project_root ? { projectRoot: config.project_root, scopeId: config.scope_id } : {}),
-    });
-    await atomicJson(config.candidate_path, built.registry);
-    await atomicJson(config.report_path, { diagnostics: built.diagnostics, summary: built.summary });
-  };
+  const reconcile = createRegistryReconciler(config);
   const controller = createRegistryWatcher({
     roots: config.roots,
     statePath: config.state_path,
     debounceMs: config.debounce_ms,
     maxLatencyMs: config.max_latency_ms,
     repairMs: config.repair_ms,
-    diff(previous, current) {
-      return {
-        changed: previous?.hash !== current.hash,
-        previous_hash: previous?.hash || null,
-        current_hash: current.hash,
-      };
-    },
     reconcile,
     onError: async error => {
       await atomicJson(config.status_path, {
@@ -218,6 +204,27 @@ export async function runRegistryWatcher(options) {
   process.once('SIGTERM', close);
   process.once('SIGINT', close);
   return { controller, instanceId, configurationFingerprint, close };
+}
+
+export function createRegistryReconciler(config, dependencies = {}) {
+  const acquisitionOptions = {
+    claudeRoot: config.claude_root,
+    codexRoot: config.codex_root,
+    ...(config.project_root ? { projectRoot: config.project_root, scopeId: config.scope_id } : {}),
+  };
+  const acquire = dependencies.acquireRegistry || acquireRegistry;
+  const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;
+  const assemble = dependencies.assembleRegistry || assembleRegistry;
+  const writeJson = dependencies.writeJson || atomicJson;
+  let baseline = acquire(acquisitionOptions);
+
+  return async ({ diff }) => {
+    const next = refresh(baseline, diff, acquisitionOptions);
+    const built = assemble(next);
+    await writeJson(config.candidate_path, built.registry);
+    await writeJson(config.report_path, { diagnostics: built.diagnostics, summary: built.summary });
+    baseline = next;
+  };
 }
 
 function cliArgument(name) {
