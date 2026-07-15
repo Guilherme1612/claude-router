@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { createRegistryReconciler, createRegistryWatcher } from '../src/registry/watcher.mjs';
+import { createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler } from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 
 function hashForTest(value) {
@@ -199,6 +199,25 @@ test('installed reconciliation publishes eligible inactive candidate and determi
   assert.equal(writes[1].value.active_bytes, activeBytes);
   assert.deepEqual(activations, []);
   assert.equal(reconcile.lastReconciliation.disposition, 'eligible');
+});
+
+test('eligible watcher pipeline maps then verifies then activates, including safe unmapped', async () => {
+  const calls = [];
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned' }, {
+    acquireRegistry: () => ({ generation: 0 }),
+    refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{}\n', fingerprint: 'active' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{}\n', active_fingerprint: 'active' }),
+    writeJson: async () => {},
+    recoverActiveVersion: async () => ({ recovery_status: 'healthy' }),
+    mapCandidateRegistry: async () => { calls.push('map'); return { disposition: 'complete', results: [{ disposition: 'unmapped' }], report_fingerprint: 'map' }; },
+    produceActivationVerification: async () => { calls.push('verify'); return { disposition: 'passing', complete: true }; },
+    activateCandidate: async () => { calls.push('activate'); return { activation_status: 'activated' }; },
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(calls, ['map', 'verify', 'activate']);
+  assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
 });
 
 test('quarantine publishes corrective diagnostics and preserves exact active authority', async () => {

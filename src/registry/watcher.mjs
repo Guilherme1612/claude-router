@@ -9,6 +9,9 @@ import { scanFingerprintTree, loadFingerprintState, saveFingerprintState } from 
 import { diffFingerprintTrees } from './diff.mjs';
 import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from './build.mjs';
 import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
+import { mapCandidateRegistry } from './map.mjs';
+import { produceActivationVerification } from './validate.mjs';
+import { activateCandidate, recoverActiveVersion } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 
 function hash(value) {
@@ -232,6 +235,10 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;
   const assemble = dependencies.assembleRegistry || assembleRegistry;
   const evaluate = dependencies.reconcileCandidate || reconcileRegistryCandidate;
+  const mapper = dependencies.mapCandidateRegistry || mapCandidateRegistry;
+  const verifier = dependencies.produceActivationVerification || produceActivationVerification;
+  const activator = dependencies.activateCandidate || activateCandidate;
+  const recovery = dependencies.recoverActiveVersion || recoverActiveVersion;
   const writeJson = dependencies.writeJson || atomicJson;
   const readActive = dependencies.readActive || (async () => {
     if (!config.active_path) {
@@ -243,6 +250,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     return { registry: JSON.parse(bytes), bytes, fingerprint: createHash('sha256').update(bytes).digest('hex') };
   });
   let baseline = acquire(acquisitionOptions);
+  let recovered = false;
 
   const reconcile = async ({ diff }) => {
     const next = refresh(baseline, diff, acquisitionOptions);
@@ -272,6 +280,26 @@ export function createRegistryReconciler(config, dependencies = {}) {
     };
     await writeJson(config.candidate_path, candidatePublication);
     await writeJson(config.report_path, reportPublication);
+    let activation = { activation_status: 'preserved', reason_code: report.disposition };
+    if (config.activation_root) {
+      if (!recovered) {
+        const recoveryResult = await recovery({ ownedRoot: config.activation_root });
+        recovered = true;
+        if (!['healthy', 'recovered', 'blocked'].includes(recoveryResult.recovery_status)) {
+          activation = { activation_status: 'recovery_required', reason_code: recoveryResult.reason_code };
+        }
+      }
+      if (report.disposition === 'eligible' && activation.activation_status !== 'recovery_required') {
+        const mapping = await mapper({ candidate: built.registry, reconciliation: report, lifecycle: diff, existingMappings: config.mappings || [], policy: config.mapping_policy });
+        const ambiguous = mapping.disposition === 'ambiguous' || mapping.results?.some(item => item.disposition === 'ambiguous');
+        if (!ambiguous) {
+          const verification = await verifier({ candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {} });
+          if (verification.disposition === 'passing' && verification.complete === true) {
+            activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher' });
+          } else activation = { activation_status: 'preserved', reason_code: 'verification_non_passing' };
+        } else activation = { activation_status: 'preserved', reason_code: 'mapping_ambiguous' };
+      }
+    }
     baseline = next;
     reconcile.lastReconciliation = {
       strategy: 'incremental',
@@ -279,9 +307,18 @@ export function createRegistryReconciler(config, dependencies = {}) {
       disposition: report.disposition,
       active_bytes: report.active_bytes,
       active_fingerprint: report.active_fingerprint,
+      ...(config.activation_root ? {
+        activation_status: activation.activation_status,
+        activation_reason: activation.reason_code || null,
+      } : {}),
     };
   };
   return reconcile;
+}
+
+export function createTestRegistryReconciler(config, dependencies) {
+  if (!dependencies || typeof dependencies !== 'object') throw new TypeError('test dependencies required');
+  return createRegistryReconciler(config, dependencies);
 }
 
 function cliArgument(name) {
