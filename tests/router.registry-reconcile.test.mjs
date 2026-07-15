@@ -77,3 +77,64 @@ test('malformed candidates and injected failures fail closed without changing ac
   }
 });
 
+test('deletion and every invalid target kind invalidate the complete reverse alias set', () => {
+  const active = activeSnapshot();
+  for (const type of ['command', 'skill', 'agent', 'hook', 'binding']) {
+    const targetId = `router/${type}`;
+    const result = reconcileCandidate({
+      candidate: candidate([]), active,
+      aliases: [alias(`${type}-one`, targetId), alias(`${type}-two`, targetId)],
+      lifecycle: { events: [{ canonical_id: targetId, primary: 'removed', facets: [], old_provenance: capability({ type, canonical_identity: targetId }).provenance, new_provenance: null }], diagnostics: [] },
+    });
+    assert.equal(result.disposition, 'quarantined');
+    assert.deepEqual(result.verdicts.filter(value => value.subject.kind === 'alias').map(value => value.subject.id), [`${type}-one`, `${type}-two`]);
+    assert.ok(result.verdicts.every(value => value.dispatchable === false));
+  }
+});
+
+test('strong stable continuity transfers aliases but weak rename evidence quarantines', () => {
+  const moved = capability({ canonical_identity: 'router/stable', name: 'new-name', provenance: [{ runtime: 'claude', scope: 'global', logical_root: 'claude_global', relative_path: 'skills/new-name/SKILL.md', source_fingerprint: 'sha:new', adapter: 'claude/1' }] });
+  const strong = reconcileCandidate({
+    candidate: candidate([moved]), aliases: [alias('old-name', 'router/stable')],
+    lifecycle: { events: [{ canonical_id: 'router/stable', primary: 'renamed', facets: [], old_provenance: capability({ canonical_identity: 'router/stable', name: 'old-name' }).provenance, new_provenance: moved.provenance }], diagnostics: [] },
+  });
+  assert.equal(strong.disposition, 'eligible');
+
+  const weak = reconcileCandidate({
+    candidate: candidate([capability({ canonical_identity: 'router/new', name: 'similar' })]),
+    aliases: [alias('old-name', 'router/old')],
+    lifecycle: { events: [], diagnostics: [{ code: 'possible_match', authoritative: false }] },
+  });
+  assert.equal(weak.disposition, 'quarantined');
+  assert.ok(weak.verdicts.some(value => value.code === 'alias_continuity_uncertain'));
+});
+
+test('aliases never chain, cycle, duplicate, or fall back across same-name runtime and scope records', () => {
+  const projectBroken = capability({
+    canonical_identity: 'router/project-tool', name: 'tool', lifecycle: 'partial', dispatchable: false,
+    scope: { kind: 'project', repository: 'repo:router', worktree: 'main' },
+  });
+  const globalHealthy = capability({ canonical_identity: 'router/global-tool', name: 'tool', runtime: 'codex', invocation: { runtime: 'codex', command: 'tool', args: [] }, runtime_variants: [{ runtime: 'codex', native_identity: 'skill:tool' }] });
+  const result = reconcileCandidate({
+    candidate: candidate([projectBroken, globalHealthy]),
+    aliases: [alias('tool', 'router/project-tool'), alias('chain', 'tool'), alias('cycle-a', 'cycle-b'), alias('cycle-b', 'cycle-a'), alias('duplicate', 'router/global-tool'), alias('duplicate', 'router/project-tool')],
+  });
+  assert.equal(result.disposition, 'quarantined');
+  assert.ok(result.verdicts.some(value => value.code === 'alias_claim_ambiguous'));
+  assert.ok(result.verdicts.some(value => value.subject.id === 'tool' && value.subject.target_id === 'router/project-tool'));
+  assert.equal(result.verdicts.some(value => value.subject.id === 'tool' && value.subject.target_id === 'router/global-tool'), false);
+});
+
+test('alias-set evaluation is atomic under permutation and injected commit failure', () => {
+  const active = activeSnapshot();
+  const aliases = [alias('one'), alias('two'), alias('three')];
+  const results = permutations(aliases).map(values => reconcileCandidate({
+    candidate: candidate(), active, aliases: values, commitAliasSet: () => { throw new Error('injected commit failure'); },
+  }));
+  assert.equal(new Set(results.map(stableStringify)).size, 1);
+  for (const result of results) {
+    assert.equal(result.disposition, 'quarantined');
+    assert.equal(result.active_bytes, active.bytes);
+    assert.equal(result.active_fingerprint, active.fingerprint);
+  }
+});
