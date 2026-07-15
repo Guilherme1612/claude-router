@@ -14,6 +14,47 @@ function contained(root, path) { const target = resolve(path); if (target !== ro
 function readPointer(p) { try { const value = JSON.parse(readFileSync(p, 'utf8')); return validId(value.version_id) ? value : null; } catch { return null; } }
 function syncDir(path) { const fd = openSync(path, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 function durableWrite(path, bytes, flag = 'wx') { const fd = openSync(path, flag, 0o600); try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); } }
+const waitArray = new Int32Array(new SharedArrayBuffer(4));
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function mutationLock(p, options = {}) {
+  const lockPath = join(p.root, '.mutation.lock');
+  const deadline = Date.now() + (options.timeout_ms ?? 2_000);
+  const staleMs = options.stale_ms ?? 30_000;
+  const token = randomUUID();
+  mkdirSync(p.root, { recursive: true });
+  while (Date.now() <= deadline) {
+    try {
+      mkdirSync(lockPath, { mode: 0o700 });
+      durableWrite(join(lockPath, 'owner.json'), json({ schema_version: 1, token, pid: process.pid, started_at: Date.now() }));
+      syncDir(lockPath); syncDir(p.root);
+      return {
+        acquired: true,
+        release() {
+          try {
+            const owner = JSON.parse(readFileSync(join(lockPath, 'owner.json'), 'utf8'));
+            if (owner.token === token) { rmSync(lockPath, { recursive: true, force: true }); syncDir(p.root); }
+          } catch { /* lock ownership changed or root unavailable */ }
+        },
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') return { acquired: false, reason_code: 'mutation_lock_failed' };
+      try {
+        const owner = JSON.parse(readFileSync(join(lockPath, 'owner.json'), 'utf8'));
+        if (Date.now() - owner.started_at > staleMs && !processAlive(owner.pid)) {
+          rmSync(lockPath, { recursive: true, force: true });
+          continue;
+        }
+      } catch { /* owner publication may still be in progress */ }
+      Atomics.wait(waitArray, 0, 0, 10);
+    }
+  }
+  return { acquired: false, reason_code: 'mutation_lock_timeout' };
+}
 
 function trusted(options, now = Date.now()) {
   const verification = options?.verification;
@@ -78,18 +119,22 @@ export function verifyVersion({ ownedRoot, versionId, expectedFingerprint }) {
 export function replaceActivePointer({ ownedRoot, destination, reason, expectedSequence, io = {} }) {
   const p = paths(ownedRoot); mkdirSync(p.root, { recursive: true });
   const verified = verifyVersion({ ownedRoot, versionId: destination }); if (!verified.valid) return { pointer_status: 'blocked', reason_code: verified.reason_code };
-  const current = readPointer(p.active), sequence = current?.sequence || 0;
-  if (expectedSequence !== undefined && expectedSequence !== sequence) return { pointer_status: 'blocked', reason_code: 'stale_pointer_sequence' };
-  const pointer = { schema_version: 1, version_id: destination, bundle_fingerprint: verified.bundle_fingerprint, previous_version_id: current?.version_id || null, reason: String(reason || 'activation').slice(0, 128), sequence: sequence + 1 };
-  const temp = `${p.active}.tmp.${randomUUID()}`;
+  const lock = mutationLock(p, io.lock || {});
+  if (!lock.acquired) return { pointer_status: 'blocked', reason_code: lock.reason_code };
+  let temp;
   try {
+    const current = readPointer(p.active), sequence = current?.sequence || 0;
+    if (expectedSequence !== undefined && expectedSequence !== sequence) return { pointer_status: 'blocked', reason_code: 'stale_pointer_sequence' };
+    const pointer = { schema_version: 1, version_id: destination, bundle_fingerprint: verified.bundle_fingerprint, previous_version_id: current?.version_id || null, reason: String(reason || 'activation').slice(0, 128), sequence: sequence + 1 };
+    temp = `${p.active}.tmp.${randomUUID()}`;
     durableWrite(temp, json(pointer));
     if ((io.beforeRename || (() => {}))({ destination, pointer }) === false) throw new Error('toctou');
     const reverified = verifyVersion({ ownedRoot, versionId: destination, expectedFingerprint: verified.bundle_fingerprint }); if (!reverified.valid || reverified.verification_fingerprint !== verified.verification_fingerprint) throw new Error('verification_to_pointer_toctou');
     renameSync(temp, p.active);
     try { syncDir(p.root); } catch { return { pointer_status: 'recovery_required', reason_code: 'pointer_durability_uncertain', pointer }; }
     return { pointer_status: 'replaced', pointer };
-  } catch (error) { rmSync(temp, { force: true }); return { pointer_status: 'blocked', reason_code: error.message === 'verification_to_pointer_toctou' ? error.message : 'durability_failed' }; }
+  } catch (error) { if (temp) rmSync(temp, { force: true }); return { pointer_status: 'blocked', reason_code: error.message === 'verification_to_pointer_toctou' ? error.message : 'durability_failed' }; }
+  finally { lock.release(); }
 }
 
 export function activateCandidate(options) {
