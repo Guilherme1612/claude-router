@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { scanFingerprintTree, loadFingerprintState, saveFingerprintState } from './fingerprint.mjs';
 import { diffFingerprintTrees } from './diff.mjs';
 import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from './build.mjs';
+import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
 import { stableStringify } from './schema.mjs';
 
 function hash(value) {
@@ -230,16 +231,55 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const acquire = dependencies.acquireRegistry || acquireRegistry;
   const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;
   const assemble = dependencies.assembleRegistry || assembleRegistry;
+  const evaluate = dependencies.reconcileCandidate || reconcileRegistryCandidate;
   const writeJson = dependencies.writeJson || atomicJson;
+  const readActive = dependencies.readActive || (async () => {
+    if (!config.active_path) {
+      const registry = { schema_version: 1, records: [] };
+      const bytes = `${stableStringify(registry)}\n`;
+      return { registry, bytes, fingerprint: createHash('sha256').update(bytes).digest('hex') };
+    }
+    const bytes = await readFile(config.active_path, 'utf8');
+    return { registry: JSON.parse(bytes), bytes, fingerprint: createHash('sha256').update(bytes).digest('hex') };
+  });
   let baseline = acquire(acquisitionOptions);
 
   const reconcile = async ({ diff }) => {
     const next = refresh(baseline, diff, acquisitionOptions);
     const built = assemble(next);
-    await writeJson(config.candidate_path, built.registry);
-    await writeJson(config.report_path, { diagnostics: built.diagnostics, summary: built.summary });
+    const active = await readActive();
+    const report = evaluate({
+      candidate: built.registry,
+      active,
+      lifecycle: diff,
+      aliases: config.aliases || [],
+      mappings: config.mappings || [],
+      ...(config.scope ? { scope: config.scope } : {}),
+    });
+    const candidatePublication = report.disposition === 'eligible'
+      ? { ...built.registry, disposition: 'eligible', activated: false, candidate_fingerprint: report.candidate_fingerprint }
+      : {
+          schema_version: 1,
+          disposition: 'quarantined',
+          activated: false,
+          candidate_fingerprint: report.candidate_fingerprint,
+          verdicts: report.verdicts,
+        };
+    const reportPublication = {
+      ...report,
+      diagnostics: built.diagnostics,
+      summary: { ...built.summary, activated: false },
+    };
+    await writeJson(config.candidate_path, candidatePublication);
+    await writeJson(config.report_path, reportPublication);
     baseline = next;
-    reconcile.lastReconciliation = { strategy: 'incremental', lifecycle_hash: diff.hash || hash(diff) };
+    reconcile.lastReconciliation = {
+      strategy: 'incremental',
+      lifecycle_hash: diff.hash || hash(diff),
+      disposition: report.disposition,
+      active_bytes: report.active_bytes,
+      active_fingerprint: report.active_fingerprint,
+    };
   };
   return reconcile;
 }

@@ -164,6 +164,9 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
   assert.deepEqual(reconcile.lastReconciliation, {
     strategy: 'incremental',
     lifecycle_hash: hashForTest(lifecycle),
+    disposition: 'quarantined',
+    active_bytes: `${stableStringify({ schema_version: 1, records: [] })}\n`,
+    active_fingerprint: createHash('sha256').update(`${stableStringify({ schema_version: 1, records: [] })}\n`).digest('hex'),
   });
 });
 
