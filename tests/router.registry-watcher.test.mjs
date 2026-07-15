@@ -167,6 +167,83 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
   });
 });
 
+function reconcilerCapability(overrides = {}) {
+  return {
+    schema_version: 1, type: 'skill', name: 'planner', canonical_identity: 'router/planner',
+    lifecycle: 'ready', scope: { kind: 'global' }, dispatchable: true,
+    invocation: { runtime: 'claude', command: 'planner', args: [] },
+    dependencies: { state: 'unknown', items: [] },
+    provenance: [{ runtime: 'claude', scope: 'global', logical_root: 'claude_global', relative_path: 'skills/planner/SKILL.md', source_fingerprint: 'sha:planner', adapter: 'claude/1' }],
+    runtime_variants: [{ runtime: 'claude', native_identity: 'skill:planner' }], conflicts: [], ...overrides,
+  };
+}
+
+test('installed reconciliation publishes eligible inactive candidate and deterministic report without activation', async () => {
+  const writes = [], activations = [];
+  const activeBytes = '{"active":true}\n';
+  const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+    acquireRegistry: () => ({ generation: 0 }),
+    refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } }),
+    readActive: async () => ({ bytes: activeBytes, fingerprint: createHash('sha256').update(activeBytes).digest('hex') }),
+    activate: value => activations.push(value),
+    writeJson: async (path, value) => writes.push({ path, value }),
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(writes.map(value => value.path), ['/candidate', '/report']);
+  assert.equal(writes[0].value.activated, false);
+  assert.equal(writes[1].value.disposition, 'eligible');
+  assert.equal(writes[1].value.active_bytes, activeBytes);
+  assert.deepEqual(activations, []);
+  assert.equal(reconcile.lastReconciliation.disposition, 'eligible');
+});
+
+test('quarantine publishes corrective diagnostics and preserves exact active authority', async () => {
+  const writes = [], activations = [];
+  const activeBytes = '{"version":"last-known-good"}\n';
+  const activeFingerprint = createHash('sha256').update(activeBytes).digest('hex');
+  const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+    acquireRegistry: () => ({ generation: 0 }),
+    refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability({ lifecycle: 'partial', dispatchable: false })] }, diagnostics: [], summary: { activated: false } }),
+    readActive: async () => ({ bytes: activeBytes, fingerprint: activeFingerprint }),
+    activate: value => activations.push(value),
+    writeJson: async (path, value) => writes.push({ path, value }),
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(writes.map(value => value.path), ['/candidate', '/report']);
+  assert.equal(writes[0].value.disposition, 'quarantined');
+  const report = writes[1].value;
+  assert.equal(report.disposition, 'quarantined');
+  assert.equal(report.active_bytes, activeBytes);
+  assert.equal(report.active_fingerprint, activeFingerprint);
+  assert.ok(report.verdicts.every(value => value.corrective_action && value.dispatchable === false));
+  assert.doesNotMatch(stableStringify(report), /\/Users\/|[A-Za-z]:\\\\/);
+  assert.deepEqual(activations, []);
+});
+
+test('evaluation and paired publication failures retain baselines and retry from last success', async () => {
+  const initial = { generation: 0 };
+  const activeBytes = '{"active":true}\n';
+  for (const failure of ['evaluate', 'candidate', 'report']) {
+    const generations = [];
+    let fail = true;
+    const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+      acquireRegistry: () => initial,
+      refreshIncrementalAcquisition(previous) { generations.push(previous.generation); return { generation: previous.generation + 1 }; },
+      assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } }),
+      readActive: async () => ({ bytes: activeBytes, fingerprint: createHash('sha256').update(activeBytes).digest('hex') }),
+      reconcileCandidate: options => { if (failure === 'evaluate' && fail) throw new Error('evaluate failed'); return { disposition: 'eligible', verdicts: [], candidate_fingerprint: 'candidate', report_fingerprint: 'report', active_bytes: options.active.bytes, active_fingerprint: options.active.fingerprint }; },
+      writeJson: async path => { if (failure === 'candidate' && path === '/candidate' && fail) throw new Error('candidate failed'); if (failure === 'report' && path === '/report' && fail) throw new Error('report failed'); },
+    });
+    await assert.rejects(reconcile({ diff: { events: [], diagnostics: [] } }), /failed/);
+    fail = false;
+    await reconcile({ diff: { events: [], diagnostics: [] } });
+    assert.deepEqual(generations, [0, 0], failure);
+    assert.equal(reconcile.lastReconciliation.active_bytes, activeBytes);
+  }
+});
+
 test('close releases watchers and timers and makes callbacks inert', async () => {
   const h = harness();
   await h.controller.ready;
