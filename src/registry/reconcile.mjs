@@ -68,6 +68,103 @@ function sourceCompatible(event, target) {
   )));
 }
 
+function scopeApplies(recordScope, requestedScope) {
+  if (!requestedScope || recordScope.kind === 'global') return true;
+  if (recordScope.kind !== requestedScope.kind) return false;
+  if (recordScope.repository !== requestedScope.repository) return false;
+  return recordScope.kind !== 'worktree' || recordScope.worktree === requestedScope.worktree;
+}
+
+function targetVerdict(code, record, evidence, reason, correctiveAction, severity = 'dispatch-blocking') {
+  return verdict({
+    code,
+    subject: { kind: 'target', id: record.id },
+    evidence,
+    reason,
+    correctiveAction,
+    severity,
+  });
+}
+
+function wholeCandidateVerdicts(candidate, options) {
+  const findings = [];
+  const recordsById = new Map(candidate.records.map(record => [record.id, record]));
+  for (const record of candidate.records) {
+    for (const dependency of record.dependencies.items) {
+      const dependencyTarget = recordsById.get(dependency.id);
+      if (dependency.available && (!dependencyTarget || (dependencyTarget.dispatchable && dependencyTarget.lifecycle === 'ready'))) continue;
+      findings.push(targetVerdict(
+        'dependency_unavailable', record,
+        { dependency_id: dependency.id, declared_available: dependency.available, ...(dependencyTarget ? { dependency_lifecycle: dependencyTarget.lifecycle } : {}) },
+        'A required dependency is absent or not dispatchable.',
+        'Install, enable, or repair the exact declared dependency before dispatch.',
+      ));
+    }
+    const permissions = record.permissions;
+    if (permissions && Array.isArray(permissions.required)) {
+      const grants = new Set(Array.isArray(permissions.grants) ? permissions.grants : []);
+      const denied = new Set(Array.isArray(permissions.denied) ? permissions.denied : []);
+      for (const permission of [...new Set(permissions.required)].sort()) {
+        if (denied.has(permission)) {
+          findings.push(targetVerdict('permission_denied', record, { permission }, 'A required permission is explicitly denied.', 'Remove the denial only after reviewing and explicitly granting the required permission.'));
+        } else if (!grants.has(permission)) {
+          findings.push(targetVerdict('permission_missing', record, { permission }, 'A required permission has not been explicitly granted.', 'Declare an explicit least-privilege grant for the required permission.'));
+        }
+      }
+    }
+    if (!scopeApplies(record.scope, options.scope)) {
+      findings.push(targetVerdict(
+        'scope_inapplicable', record,
+        { requested_scope: options.scope, target_scope: record.scope },
+        'The target scope does not apply to the requested repository or worktree.',
+        'Select a canonical target in the exact requested scope; do not fall back outward or sideways.',
+      ));
+    }
+    const blocking = record.conflicts.filter(conflict => ['dispatch-blocking', 'build-blocking'].includes(conflict.severity));
+    if (blocking.length) {
+      findings.push(targetVerdict(
+        'blocking_collision', record, { conflicts: blocking },
+        'The target contains a blocking canonical conflict.',
+        'Resolve every blocking conflict at its authoritative source before dispatch.',
+        'build-blocking',
+      ));
+    }
+  }
+  const identities = new Map();
+  const native = new Map();
+  for (const record of candidate.records) {
+    if (!identities.has(record.id)) identities.set(record.id, []);
+    identities.get(record.id).push(record);
+    for (const variant of record.runtime_variants) {
+      const key = stableStringify({ runtime: variant.runtime, type: record.type, native_identity: variant.native_identity, scope: record.scope });
+      if (!native.has(key)) native.set(key, []);
+      native.get(key).push(record);
+    }
+  }
+  for (const [id, records] of identities) {
+    if (records.length < 2) continue;
+    for (const record of records) findings.push(targetVerdict('canonical_identity_collision', record, { canonical_id: id, claim_count: records.length }, 'Multiple records claim the same canonical identity.', 'Remove duplicate authoritative claims or explicitly link valid runtime variants.', 'build-blocking'));
+  }
+  for (const [identity, records] of native) {
+    const ids = [...new Set(records.map(record => record.id))];
+    if (ids.length < 2) continue;
+    for (const record of records) findings.push(targetVerdict('native_identity_collision', record, { native_identity_key: identity, canonical_ids: ids.sort() }, 'One native identity is claimed by multiple canonical targets.', 'Resolve the native identity collision at the adapter source.', 'build-blocking'));
+  }
+  for (const mapping of Array.isArray(options.mappings) ? options.mappings : []) {
+    const targets = [...new Set(Array.isArray(mapping?.target_ids) ? mapping.target_ids : [])].sort();
+    if (targets.length < 2) continue;
+    findings.push(verdict({
+      code: 'mapping_ambiguous',
+      subject: { kind: 'mapping', id: mapping.subject_id || 'unknown', target_ids: targets },
+      evidence: { plausible_target_count: targets.length },
+      reason: 'More than one plausible canonical mapping remains.',
+      correctiveAction: 'Choose one explicit canonical target using authoritative evidence.',
+      severity: 'build-blocking',
+    }));
+  }
+  return findings;
+}
+
 function failureResult(active, error) {
   const failure = verdict({
     code: 'candidate_reconciliation_failed',
@@ -95,7 +192,7 @@ export function reconcileCandidate(options = {}) {
       if (!claims.has(alias.id)) claims.set(alias.id, new Set());
       claims.get(alias.id).add(alias.target_id);
     }
-    const verdicts = [];
+    const verdicts = wholeCandidateVerdicts(candidate, options);
     for (const [id, targets] of [...claims].sort(([left], [right]) => left.localeCompare(right))) {
       if (targets.size < 2) continue;
       verdicts.push(verdict({
