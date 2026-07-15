@@ -1,15 +1,34 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { REQUIRED_ACTIVATION_GATES, createTestActivationVerifier } from '../src/registry/validate.mjs';
+import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
 import { activateCandidate } from '../src/registry/activate.mjs';
 import { runRouterControl } from '../src/cli/router-control.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
+const hash = value => createHash('sha256').update(stableStringify(value)).digest('hex');
+
+function productionVerification(exact, now) {
+  const gates = REQUIRED_ACTIVATION_GATES.map(id => {
+    const runner = PRODUCTION_GATE_RUNNERS[id];
+    const gate = { id, runner_id: runner.id, runner_version: runner.version, passed: true, reason_code: 'passed', threshold: runner.threshold, measured: {} };
+    return { ...gate, evidence_fingerprint: hash(gate) };
+  });
+  const canonical = {
+    schema_version: 1, verification_policy_version: 'activation-verification-v1', trusted: true, complete: true,
+    generated_at: now, expires_at: now + 300_000, required_gate_ids: [...REQUIRED_ACTIVATION_GATES],
+    candidate_fingerprint: hash(exact.candidate), reconciliation_fingerprint: hash(exact.reconciliation),
+    mapping_fingerprint: hash(exact.mapping), policy_fingerprint: hash(exact.policy),
+    gates, disposition: 'passing', test_only: false,
+  };
+  return { ...canonical, verification_fingerprint: hash(canonical) };
+}
 
 function snapshot(root) {
   const walk = directory => readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
@@ -21,14 +40,16 @@ function snapshot(root) {
 
 async function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'router-control-'));
-  const verifier = createTestActivationVerifier(Object.fromEntries(REQUIRED_ACTIVATION_GATES.map(id => [id, async () => ({ passed: true })])));
+  const baseNow = Date.now();
   const make = async (generation, subject, target) => {
     const candidate = { schema_version: 1, generation, records: [{ id: target, lifecycle: 'ready', dispatchable: true, invocation: { command: 'safe' } }] };
     const mapping = { schema_version: 1, policy_version: 'mapping-v1', policy_fingerprint: `policy-${generation}`, report_fingerprint: `mapping-${generation}`, subjects: [{ subject_id: subject, target_id: target, disposition: 'mapped', reason_code: 'explicit_metadata', winning_rule: 'explicit_metadata', confidence: { score: 1, band: 'authoritative' }, alternatives: [], evidence: [{ tier: 1, rule: 'explicit_metadata', accepted: true, target_id: target, reason_code: 'accepted' }] }] };
     const reconciliation = { disposition: 'eligible', verdicts: [] };
     const policy = { policy_version: 'mapping-v1' };
-    const verification = await verifier({ candidate, mapping, reconciliation, policy, now: generation * 1000, freshnessMs: 1e9 });
-    return activateCandidate({ ownedRoot: root, candidate, mapping, reconciliation, policy, verification, now: generation * 1000, reason: 'fixture' });
+    const exact = { candidate, mapping, reconciliation, policy };
+    const now = baseNow + generation;
+    const verification = productionVerification(exact, now);
+    return activateCandidate({ ownedRoot: root, ...exact, verification, now, reason: 'fixture' });
   };
   const first = await make(1, 'alpha', 'target-a');
   const second = await make(2, 'alpha', 'target-b');
