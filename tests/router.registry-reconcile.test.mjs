@@ -205,3 +205,13 @@ test('whole-candidate report bytes are identical for equivalent full and increme
   assert.equal(stableStringify(outputs[0]), stableStringify(outputs[1]));
   assert.equal(outputs[0].report_fingerprint, outputs[1].report_fingerprint);
 });
+
+test('unsafe hook inventory composes with candidate gates and preserves active authority', () => {
+  const active = activeSnapshot();
+  const hookInventory = [{ schema_version: 1, kind: 'file', runtime: 'claude', scope: { kind: 'global' }, event: 'Stop', logical_root: 'claude_global', relative_path: 'hooks/stop.json', source_fingerprint: 'sha:stop', target_ref: 'hooks/stop.mjs', command: 'node', args: ['hooks/stop.mjs'], valid: true }];
+  const result = reconcileCandidate({ candidate: candidate(), active, hookInventory });
+  assert.equal(result.disposition, 'quarantined');
+  assert.ok(result.verdicts.some(value => value.code === 'hook_orphan_file'));
+  assert.equal(result.active_bytes, active.bytes);
+  assert.equal(result.active_fingerprint, active.fingerprint);
+});

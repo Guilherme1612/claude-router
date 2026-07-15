@@ -5,14 +5,15 @@ import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as claude from '../src/adapters/claude.mjs';
 import * as codex from '../src/adapters/codex.mjs';
+import { reconcileHookInventory } from '../src/registry/hook-reconcile.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 
 export function hookFile(overrides = {}) {
-  return { runtime: 'claude', event: 'UserPromptSubmit', logical_root: 'claude_global', relative_path: 'hooks/router.mjs', native_identity: 'hook:router', ...overrides };
+  return { schema_version: 1, kind: 'file', runtime: 'claude', scope: { kind: 'global' }, event: 'UserPromptSubmit', logical_root: 'claude_global', relative_path: 'hooks/router.json', source_fingerprint: 'sha:file', target_ref: 'hooks/router.mjs', command: 'node', args: ['hooks/router.mjs'], valid: true, ...overrides };
 }
 
 export function hookBinding(overrides = {}) {
-  return { runtime: 'claude', event: 'UserPromptSubmit', command: 'hooks/router.mjs', args: [], native_identity: 'binding:router', ...overrides };
+  return { schema_version: 1, kind: 'binding', runtime: 'claude', scope: { kind: 'global' }, event: 'UserPromptSubmit', logical_root: 'claude_global', relative_path: 'settings.json', source_fingerprint: 'sha:binding', target_ref: 'hooks/router.mjs', command: 'node', args: ['hooks/router.mjs'], valid: true, ...overrides };
 }
 
 export function permuteHookInventory(files, bindings) {
@@ -70,4 +71,49 @@ test('unsupported shell binding syntax remains non-dispatchable evidence', () =>
     assert.equal(binding.hook_observation.valid, false);
     assert.equal(binding.hook_observation.reason, 'unsupported_command_form');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('full outer join classifies valid pairs and both orphan directions without synthesis', () => {
+  const valid = reconcileHookInventory([hookFile(), hookBinding()]);
+  assert.deepEqual(valid.classifications.map(value => value.classification), ['valid_pair']);
+  assert.equal(valid.classifications[0].active, false);
+  assert.deepEqual(valid.verdicts, []);
+
+  const orphanFile = reconcileHookInventory([hookFile()]);
+  assert.deepEqual(orphanFile.classifications.map(value => value.classification), ['orphan_file']);
+  assert.equal(orphanFile.classifications.some(value => value.binding), false);
+  assert.equal(orphanFile.verdicts[0].code, 'hook_orphan_file');
+
+  const orphanBinding = reconcileHookInventory([hookBinding()]);
+  assert.deepEqual(orphanBinding.classifications.map(value => value.classification), ['orphan_binding']);
+  assert.equal(orphanBinding.classifications.some(value => value.file), false);
+  assert.equal(orphanBinding.verdicts[0].code, 'hook_orphan_binding');
+});
+
+test('duplicates mismatch malformed escape runtime and scope isolation fail closed deterministically', () => {
+  const cases = [
+    { code: 'hook_ambiguous', observations: [hookFile(), hookFile({ source_fingerprint: 'sha:duplicate' }), hookBinding()] },
+    { code: 'hook_invocation_mismatch', observations: [hookFile(), hookBinding({ target_ref: 'hooks/other.mjs', args: ['hooks/other.mjs'] })] },
+    { code: 'hook_invalid_observation', observations: [hookFile({ valid: false, reason: 'path_escape', target_ref: null })] },
+    { code: 'hook_orphan_file', observations: [hookFile(), hookBinding({ runtime: 'codex', logical_root: 'codex_home' })] },
+    { code: 'hook_orphan_file', observations: [hookFile(), hookBinding({ scope: { kind: 'project', repository: 'repo:x', worktree: 'main' } })] },
+  ];
+  for (const row of cases) {
+    const outputs = [row.observations, [...row.observations].reverse()].map(reconcileHookInventory);
+    assert.equal(stableStringify(outputs[0]), stableStringify(outputs[1]), row.code);
+    assert.ok(outputs[0].verdicts.some(value => value.code === row.code), row.code);
+    assert.ok(outputs[0].verdicts.every(value => value.dispatchable === false && value.corrective_action));
+  }
+});
+
+test('both runtime valid pairs remain separate inactive consistency evidence', () => {
+  const observations = [
+    hookFile(), hookBinding(),
+    hookFile({ runtime: 'codex', logical_root: 'codex_home', event: 'after_turn', relative_path: 'hooks/notify.json', target_ref: 'hooks/notify.mjs' }),
+    hookBinding({ runtime: 'codex', logical_root: 'codex_home', event: 'after_turn', relative_path: 'bindings/notify.json', target_ref: 'hooks/notify.mjs' }),
+  ];
+  const result = reconcileHookInventory(observations);
+  assert.deepEqual(result.classifications.map(value => value.classification), ['valid_pair', 'valid_pair']);
+  assert.ok(result.classifications.every(value => value.active === false));
+  assert.equal(result.verdicts.length, 0);
 });
