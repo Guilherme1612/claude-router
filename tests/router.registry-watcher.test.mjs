@@ -307,6 +307,29 @@ test('ambiguous canonical subject fails closed despite optimistic or malformed s
   assert.equal(verdict.passed, false);
 });
 
+test('incremental/full equivalence compares canonical registry bytes, not schema presence', async () => {
+  const emptyAcquisition = {
+    claude: { observations: [], diagnostics: [] },
+    codex: { observations: [], diagnostics: [] },
+  };
+  const equivalence = {
+    previous: emptyAcquisition,
+    diff: { events: [], diagnostics: [] },
+    options: {
+      discoverClaude: () => ({ observations: [], diagnostics: [] }),
+      discoverCodex: () => ({ observations: [], diagnostics: [] }),
+    },
+  };
+  const passing = await PRODUCTION_GATE_RUNNERS.incremental_full_equivalence.run({
+    candidate: { schema_version: 1, records: [] }, equivalence,
+  });
+  assert.equal(passing.passed, true);
+  const substituted = await PRODUCTION_GATE_RUNNERS.incremental_full_equivalence.run({
+    candidate: { schema_version: 1, records: [{ id: 'substituted' }] }, equivalence,
+  });
+  assert.equal(substituted.passed, false);
+});
+
 test('blocked recovery preserves authority and is retried before later activation', async () => {
   const calls = [];
   let recoveryAttempt = 0;
