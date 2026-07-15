@@ -229,10 +229,22 @@ test('installed activation paths bootstrap one immutable version and active poin
   const ownedRoot = mkdtempSync(join(tmpdir(), 'router-watcher-activation-'));
   const candidate = { schema_version: 1, records: [reconcilerCapability()] };
   const now = Date.now();
-  const verification = {
-    schema_version: 1, trusted: true, complete: true, disposition: 'passing', expires_at: now + 60_000,
-    gates: REQUIRED_ACTIVATION_GATES.map(id => ({ id, passed: true })),
+  const reconciliation = { disposition: 'eligible', candidate_fingerprint: hashForTest(candidate), report_fingerprint: 'report', verdicts: [], active_bytes: `${stableStringify({ schema_version: 1, records: [] })}\n`, active_fingerprint: 'active' };
+  const mapping = { schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' };
+  const policy = {};
+  const gates = REQUIRED_ACTIVATION_GATES.map(id => {
+    const runner = PRODUCTION_GATE_RUNNERS[id];
+    const gate = { id, runner_id: runner.id, runner_version: runner.version, passed: true, reason_code: 'passed', threshold: runner.threshold, measured: {} };
+    return { ...gate, evidence_fingerprint: hashForTest(gate) };
+  });
+  const canonicalVerification = {
+    schema_version: 1, verification_policy_version: 'activation-verification-v1', trusted: true, complete: true,
+    generated_at: now, expires_at: now + 60_000, required_gate_ids: [...REQUIRED_ACTIVATION_GATES],
+    candidate_fingerprint: hashForTest(candidate), reconciliation_fingerprint: hashForTest(reconciliation),
+    mapping_fingerprint: hashForTest(mapping), policy_fingerprint: hashForTest(policy),
+    gates, disposition: 'passing', test_only: false,
   };
+  const verification = { ...canonicalVerification, verification_fingerprint: hashForTest(canonicalVerification) };
   try {
     const reconcile = createTestRegistryReconciler({
       candidate_path: join(ownedRoot, 'candidate.json'), report_path: join(ownedRoot, 'report.json'),
@@ -241,8 +253,8 @@ test('installed activation paths bootstrap one immutable version and active poin
       acquireRegistry: () => ({ generation: 0 }),
       refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
       assembleRegistry: () => ({ registry: candidate, diagnostics: [], summary: {} }),
-      reconcileCandidate: options => ({ disposition: 'eligible', candidate_fingerprint: hashForTest(candidate), report_fingerprint: 'report', verdicts: [], active_bytes: options.active.bytes, active_fingerprint: options.active.fingerprint }),
-      mapCandidateRegistry: () => ({ schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' }),
+      reconcileCandidate: () => reconciliation,
+      mapCandidateRegistry: () => mapping,
       produceActivationVerification: () => verification,
     });
     await reconcile({ diff: { events: [], diagnostics: [] } });

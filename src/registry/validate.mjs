@@ -59,7 +59,7 @@ function producer(runners, testOnly) {
     const now = options.now ?? Date.now();
     const fingerprints = {
       candidate_fingerprint: hash(options.candidate || null), reconciliation_fingerprint: hash(options.reconciliation || null),
-      mapping_fingerprint: options.mapping?.report_fingerprint || hash(options.mapping || null), policy_fingerprint: hash(options.policy || null),
+      mapping_fingerprint: hash(options.mapping || null), policy_fingerprint: hash(options.policy || null),
     };
     const gates = [];
     for (const id of REQUIRED_ACTIVATION_GATES) {

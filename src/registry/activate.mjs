@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { stableStringify } from './schema.mjs';
-import { REQUIRED_ACTIVATION_GATES } from './validate.mjs';
+import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from './validate.mjs';
 
 const hash = value => createHash('sha256').update(typeof value === 'string' || Buffer.isBuffer(value) ? value : stableStringify(value)).digest('hex');
 const json = value => `${stableStringify(value)}\n`;
@@ -15,9 +15,27 @@ function readPointer(p) { try { const value = JSON.parse(readFileSync(p, 'utf8')
 function syncDir(path) { const fd = openSync(path, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } }
 function durableWrite(path, bytes, flag = 'wx') { const fd = openSync(path, flag, 0o600); try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); } }
 
-function trusted(verification, now = Date.now()) {
-  return verification?.trusted === true && verification.complete === true && verification.disposition === 'passing'
-    && verification.expires_at >= now && REQUIRED_ACTIVATION_GATES.every(id => verification.gates?.some(g => g.id === id && g.passed === true));
+function trusted(options, now = Date.now()) {
+  const verification = options?.verification;
+  if (!verification || verification.schema_version !== 1 || verification.verification_policy_version !== 'activation-verification-v1'
+    || verification.trusted !== true || verification.complete !== true || verification.disposition !== 'passing' || verification.test_only !== false) return false;
+  if (!Number.isFinite(verification.generated_at) || !Number.isFinite(verification.expires_at)
+    || verification.generated_at > now || verification.expires_at < now || verification.expires_at - verification.generated_at > 300_000) return false;
+  if (stableStringify(verification.required_gate_ids) !== stableStringify(REQUIRED_ACTIVATION_GATES)) return false;
+  if (verification.candidate_fingerprint !== hash(options.candidate || null)
+    || verification.reconciliation_fingerprint !== hash(options.reconciliation || null)
+    || verification.mapping_fingerprint !== hash(options.mapping || null)
+    || verification.policy_fingerprint !== hash(options.policy || null)) return false;
+  if (!Array.isArray(verification.gates) || verification.gates.length !== REQUIRED_ACTIVATION_GATES.length) return false;
+  for (const [index, id] of REQUIRED_ACTIVATION_GATES.entries()) {
+    const gate = verification.gates[index];
+    const runner = PRODUCTION_GATE_RUNNERS[id];
+    if (!gate || gate.id !== id || gate.runner_id !== runner.id || gate.runner_version !== runner.version || gate.passed !== true) return false;
+    const { evidence_fingerprint: evidenceFingerprint, ...evidence } = gate;
+    if (evidenceFingerprint !== hash(evidence)) return false;
+  }
+  const { verification_fingerprint: verificationFingerprint, ...canonical } = verification;
+  return verificationFingerprint === hash(canonical);
 }
 
 export function writeImmutableVersion({ ownedRoot, candidate, mapping, reconciliation, policy, verification, now = Date.now() }) {
@@ -75,9 +93,11 @@ export function replaceActivePointer({ ownedRoot, destination, reason, expectedS
 }
 
 export function activateCandidate(options) {
-  if (!trusted(options.verification, options.now)) return { activation_status: 'blocked', reason_code: 'verification_not_trusted' };
+  if (!trusted(options, options.now)) return { activation_status: 'blocked', reason_code: 'verification_not_trusted' };
   try {
-    const version = writeImmutableVersion(options); const pointer = replaceActivePointer({ ...options, destination: version.version_id, expectedSequence: options.expectedSequence });
+    const version = writeImmutableVersion(options);
+    if (!trusted(options, options.now)) return { activation_status: 'blocked', reason_code: 'verification_not_trusted' };
+    const pointer = replaceActivePointer({ ...options, destination: version.version_id, expectedSequence: options.expectedSequence });
     if (pointer.pointer_status !== 'replaced') return { activation_status: pointer.pointer_status === 'recovery_required' ? 'recovery_required' : 'blocked', reason_code: pointer.reason_code, ...version };
     return { activation_status: 'activated', ...version, pointer: pointer.pointer };
   } catch (error) { return { activation_status: 'blocked', reason_code: error.code === 'EINVAL' ? 'durability_unsupported' : 'durability_failed' }; }
