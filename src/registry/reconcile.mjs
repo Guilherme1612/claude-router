@@ -56,6 +56,18 @@ function canonicalAliases(aliases) {
   }).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
 }
 
+function sourceCompatible(event, target) {
+  const oldSources = Array.isArray(event.old_provenance) ? event.old_provenance : [];
+  const newSources = Array.isArray(event.new_provenance) ? event.new_provenance : [];
+  if (!oldSources.length || !newSources.length) return false;
+  const targetSources = new Set((target.provenance || []).map(source => stableStringify(portable(source))));
+  return oldSources.some(oldSource => newSources.some(newSource => (
+    oldSource.runtime === newSource.runtime
+    && oldSource.scope === newSource.scope
+    && targetSources.has(stableStringify(portable(newSource)))
+  )));
+}
+
 function failureResult(active, error) {
   const failure = verdict({
     code: 'candidate_reconciliation_failed',
@@ -75,10 +87,52 @@ export function reconcileCandidate(options = {}) {
     const candidate = canonicalCandidate(options.candidate);
     const aliases = canonicalAliases(options.aliases || []);
     const recordsById = new Map(candidate.records.map(record => [record.id, record]));
+    const lifecycle = options.lifecycle && typeof options.lifecycle === 'object' ? options.lifecycle : { events: [], diagnostics: [] };
+    const events = Array.isArray(lifecycle.events) ? lifecycle.events : [];
+    const diagnostics = Array.isArray(lifecycle.diagnostics) ? lifecycle.diagnostics : [];
+    const claims = new Map();
+    for (const alias of aliases) {
+      if (!claims.has(alias.id)) claims.set(alias.id, new Set());
+      claims.get(alias.id).add(alias.target_id);
+    }
     const verdicts = [];
+    for (const [id, targets] of [...claims].sort(([left], [right]) => left.localeCompare(right))) {
+      if (targets.size < 2) continue;
+      verdicts.push(verdict({
+        code: 'alias_claim_ambiguous',
+        subject: { kind: 'alias', id, target_ids: [...targets].sort() },
+        evidence: { claim_count: targets.size },
+        reason: 'The alias has multiple canonical destination claims.',
+        correctiveAction: 'Retain exactly one explicit canonical target claim for this alias.',
+        severity: 'build-blocking',
+      }));
+    }
     for (const alias of aliases) {
       options.evaluateAlias?.({ alias: structuredClone(alias), candidate: structuredClone(candidate) });
       const target = recordsById.get(alias.target_id);
+      const removal = events.find(event => event?.canonical_id === alias.target_id && event.primary === 'removed');
+      const continuity = events.find(event => event?.canonical_id === alias.target_id && ['renamed', 'moved'].includes(event.primary));
+      const weakContinuity = diagnostics.some(item => item?.code === 'possible_match' && item.authoritative !== true);
+      if (removal || (!target && weakContinuity)) {
+        verdicts.push(verdict({
+          code: removal ? 'alias_target_removed' : 'alias_continuity_uncertain',
+          subject: { kind: 'alias', id: alias.id, target_id: alias.target_id },
+          evidence: removal ? { lifecycle_primary: 'removed' } : { continuity_authoritative: false },
+          reason: removal ? 'The canonical alias target was authoritatively removed.' : 'Only weak rename or move evidence is available for this alias target.',
+          correctiveAction: 'Remove the alias or explicitly remap it after verifying stable identity and portable source continuity.',
+        }));
+        continue;
+      }
+      if (target && continuity && !sourceCompatible(continuity, target)) {
+        verdicts.push(verdict({
+          code: 'alias_continuity_uncertain',
+          subject: { kind: 'alias', id: alias.id, target_id: alias.target_id },
+          evidence: { lifecycle_primary: continuity.primary, continuity_authoritative: false },
+          reason: 'Stable identity is not accompanied by compatible portable source evidence.',
+          correctiveAction: 'Verify the source continuity or explicitly remap the alias to the intended canonical target.',
+        }));
+        continue;
+      }
       if (!target || target.lifecycle !== 'ready' || !target.dispatchable
         || !target.invocation?.command?.trim()) {
         verdicts.push(verdict({
@@ -101,6 +155,11 @@ export function reconcileCandidate(options = {}) {
       }));
     }
     verdicts.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+    options.commitAliasSet?.({
+      aliases: structuredClone(aliases),
+      verdicts: structuredClone(verdicts),
+      disposition: verdicts.length ? 'quarantined' : 'eligible',
+    });
     const canonical = { disposition: verdicts.length ? 'quarantined' : 'eligible', verdicts };
     return {
       ...canonical,
