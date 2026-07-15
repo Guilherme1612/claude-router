@@ -1,0 +1,119 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
+import { REQUIRED_ACTIVATION_GATES, createTestActivationVerifier } from '../src/registry/validate.mjs';
+import { activateCandidate } from '../src/registry/activate.mjs';
+
+const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
+
+function snapshot(root) {
+  const walk = directory => readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name)).flatMap(entry => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? walk(path) : [[path.slice(root.length + 1), readFileSync(path).toString('base64'), statSync(path).mode]];
+  });
+  return walk(root);
+}
+
+async function fixture() {
+  const root = mkdtempSync(join(tmpdir(), 'router-control-'));
+  const verifier = createTestActivationVerifier(Object.fromEntries(REQUIRED_ACTIVATION_GATES.map(id => [id, async () => ({ passed: true })])));
+  const make = async (generation, subject, target) => {
+    const candidate = { schema_version: 1, generation, records: [{ id: target, lifecycle: 'ready', dispatchable: true, invocation: { command: 'safe' } }] };
+    const mapping = { schema_version: 1, policy_version: 'mapping-v1', policy_fingerprint: `policy-${generation}`, report_fingerprint: `mapping-${generation}`, subjects: [{ subject_id: subject, target_id: target, disposition: 'mapped', reason_code: 'explicit_metadata', winning_rule: 'explicit_metadata', confidence: { score: 1, band: 'authoritative' }, alternatives: [], evidence: [{ tier: 1, rule: 'explicit_metadata', accepted: true, target_id: target, reason_code: 'accepted' }] }] };
+    const reconciliation = { disposition: 'eligible', verdicts: [] };
+    const policy = { policy_version: 'mapping-v1' };
+    const verification = await verifier({ candidate, mapping, reconciliation, policy, now: generation * 1000, freshnessMs: 1e9 });
+    return activateCandidate({ ownedRoot: root, candidate, mapping, reconciliation, policy, verification, now: generation * 1000, reason: 'fixture' });
+  };
+  const first = await make(1, 'alpha', 'target-a');
+  const second = await make(2, 'alpha', 'target-b');
+  return { root, first, second };
+}
+
+function run(root, ...args) {
+  return spawnSync(process.execPath, [CLI.pathname, ...args, '--owned-root', root], { encoding: 'utf8' });
+}
+
+test('read-only controls share stable canonical JSON and never mutate owned bytes', async () => {
+  const f = await fixture();
+  try {
+    for (const args of [['status'], ['registry', 'verify'], ['diff'], ['explain', 'alpha']]) {
+      const before = snapshot(f.root);
+      const first = run(f.root, ...args, '--format', 'json');
+      const second = run(f.root, ...args, '--format', 'json');
+      assert.equal(first.status, 0, first.stderr);
+      assert.equal(first.stdout, second.stdout);
+      const result = JSON.parse(first.stdout);
+      assert.deepEqual(Object.keys(result), ['command', 'data', 'ok', 'reason_code', 'schema_version', 'warnings']);
+      assert.deepEqual(snapshot(f.root), before);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('diff supports active-to-latest and two explicit immutable versions', async () => {
+  const f = await fixture();
+  try {
+    const implicit = JSON.parse(run(f.root, 'diff', '--format', 'json').stdout);
+    const explicit = JSON.parse(run(f.root, 'diff', f.first.version_id, f.second.version_id, '--format', 'json').stdout);
+    assert.equal(implicit.data.source.version_id, f.second.version_id);
+    assert.equal(explicit.data.source.version_id, f.first.version_id);
+    assert.equal(explicit.data.destination.version_id, f.second.version_id);
+    assert.deepEqual(explicit.data.mapping_changes, [{ subject_id: 'alpha', from: 'target-a', to: 'target-b' }]);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('explain exposes complete deterministic mapping evidence and filters', async () => {
+  const f = await fixture();
+  try {
+    const result = JSON.parse(run(f.root, 'explain', 'alpha', '--format', 'json').stdout);
+    assert.equal(result.data.subject.disposition, 'mapped');
+    assert.equal(result.data.subject.winning_rule, 'explicit_metadata');
+    assert.ok(Array.isArray(result.data.subject.evidence));
+    assert.ok(Array.isArray(result.data.subject.alternatives));
+    assert.ok(result.data.filters);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('rollback is detailed preview-first and exact confirmation is mandatory', async () => {
+  const f = await fixture();
+  try {
+    const before = snapshot(f.root);
+    const preview = JSON.parse(run(f.root, 'rollback', f.first.version_id, '--format', 'json').stdout);
+    assert.equal(preview.data.preview.destination.version_id, f.first.version_id);
+    assert.equal(preview.data.mutation.type, 'active_pointer_replacement_only');
+    assert.ok(preview.data.preview.preview_fingerprint);
+    assert.deepEqual(snapshot(f.root), before);
+    assert.equal(run(f.root, 'rollback', f.first.version_id, '--execute', '--confirm', 'yes').status, 2);
+    const executed = run(f.root, 'rollback', f.first.version_id, '--execute', '--confirm', f.first.version_id, '--format', 'json');
+    assert.equal(executed.status, 0, executed.stderr);
+    assert.equal(JSON.parse(executed.stdout).data.rollback.rollback_status, 'rolled_back');
+    assert.equal(JSON.parse(readFileSync(join(f.root, 'active.json'), 'utf8')).version_id, f.first.version_id);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('interactive execution reads exact destination and errors use stable exit taxonomy', async () => {
+  const f = await fixture();
+  try {
+    const mismatch = spawnSync(process.execPath, [CLI.pathname, 'rollback', f.first.version_id, '--execute', '--owned-root', f.root], { encoding: 'utf8', input: 'yes\n' });
+    assert.equal(mismatch.status, 2);
+    const invalid = run(f.root, 'registry', 'verify', 'not-a-version', '--format', 'json');
+    assert.equal(invalid.status, 3);
+    assert.equal(JSON.parse(invalid.stdout).reason_code, 'invalid_version_id');
+    const missing = run(f.root, 'rollback', 'v1-0000000000000000', '--format', 'json');
+    assert.equal(missing.status, 4);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('operator output is portable and bounded', async () => {
+  const f = await fixture();
+  try {
+    const output = run(f.root, 'status', '--format', 'json').stdout;
+    assert.doesNotMatch(output, new RegExp(f.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.doesNotMatch(output, /prompt|secret|api[_-]?key/i);
+    assert.doesNotMatch(output, /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
