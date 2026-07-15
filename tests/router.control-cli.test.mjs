@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { REQUIRED_ACTIVATION_GATES, createTestActivationVerifier } from '../src/registry/validate.mjs';
 import { activateCandidate } from '../src/registry/activate.mjs';
+import { runRouterControl } from '../src/cli/router-control.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
 
@@ -115,5 +116,25 @@ test('operator output is portable and bounded', async () => {
     assert.doesNotMatch(output, new RegExp(f.root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.doesNotMatch(output, /prompt|secret|api[_-]?key/i);
     assert.doesNotMatch(output, /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('verification-to-pointer destination replacement fails closed', async () => {
+  const f = await fixture();
+  try {
+    const activeBefore = readFileSync(join(f.root, 'active.json'), 'utf8');
+    const outcome = runRouterControl({
+      argv: ['rollback', f.first.version_id, '--execute', '--confirm', f.first.version_id, '--owned-root', f.root, '--format', 'json'],
+      dependencies: {
+        rollbackIo: {
+          beforeRename() {
+            writeFileSync(join(f.root, 'versions', f.first.version_id, 'registry.json'), '{"substituted":true}\n');
+          },
+        },
+      },
+    });
+    assert.equal(outcome.exitCode, 4);
+    assert.equal(outcome.result.reason_code, 'verification_to_pointer_toctou');
+    assert.equal(readFileSync(join(f.root, 'active.json'), 'utf8'), activeBefore);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

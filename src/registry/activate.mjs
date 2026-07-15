@@ -106,11 +106,11 @@ export function previewRollback({ ownedRoot, destination, now = Date.now() }) {
   return { ...body, preview_status: 'ready', preview_fingerprint: hash(body) };
 }
 
-export function executeRollback({ ownedRoot, preview, confirmation, now = Date.now(), reason = 'rollback' }) {
+export function executeRollback({ ownedRoot, preview, confirmation, now = Date.now(), reason = 'rollback', io }) {
   if (preview?.preview_status !== 'ready' || confirmation !== preview.destination_version_id) return { rollback_status: 'blocked', reason_code: 'confirmation_mismatch' };
   const fresh = previewRollback({ ownedRoot, destination: preview.destination_version_id, now: preview.generated_at });
   if (fresh.preview_fingerprint !== preview.preview_fingerprint) return { rollback_status: 'blocked', reason_code: 'stale_preview' };
-  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence });
+  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io });
   const event = { schema_version: 1, source: preview.source_version_id, destination: preview.destination_version_id, time: now, outcome: result.pointer_status, reason: String(reason).slice(0, 128) };
   if (result.pointer_status === 'replaced') { appendFileSync(paths(ownedRoot).audit, json(event), { mode: 0o600 }); return { rollback_status: 'rolled_back', event }; }
   return { rollback_status: result.pointer_status === 'recovery_required' ? 'recovery_required' : 'blocked', reason_code: result.reason_code };
