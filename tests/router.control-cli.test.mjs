@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
-import { activateCandidate } from '../src/registry/activate.mjs';
+import { activateCandidate, writeImmutableVersion } from '../src/registry/activate.mjs';
 import { runRouterControl } from '../src/cli/router-control.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 
@@ -27,6 +27,11 @@ function productionVerification(exact, now) {
     mapping_fingerprint: hash(exact.mapping), policy_fingerprint: hash(exact.policy),
     gates, disposition: 'passing', test_only: false,
   };
+  return { ...canonical, verification_fingerprint: hash(canonical) };
+}
+
+function resealVerification(verification) {
+  const { verification_fingerprint: _ignored, ...canonical } = verification;
   return { ...canonical, verification_fingerprint: hash(canonical) };
 }
 
@@ -188,5 +193,46 @@ test('verification-to-pointer destination replacement fails closed', async () =>
     assert.equal(outcome.exitCode, 4);
     assert.equal(outcome.result.reason_code, 'verification_to_pointer_toctou');
     assert.equal(readFileSync(join(f.root, 'active.json'), 'utf8'), activeBefore);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('corrupt active history returns stable recovery guidance before projection', async () => {
+  for (const corrupt of ['manifest', 'registry']) {
+    const f = await fixture();
+    try {
+      const path = join(f.root, 'versions', f.second.version_id, corrupt === 'manifest' ? 'manifest.json' : 'registry.json');
+      writeFileSync(path, '{corrupt');
+      for (const args of [['status'], ['diff'], ['explain', 'alpha'], ['rollback', f.first.version_id]]) {
+        const json = run(f.root, ...args, '--format', 'json');
+        assert.notEqual(json.status, 0, `${corrupt}:${args.join(' ')}`);
+        const result = JSON.parse(json.stdout);
+        assert.equal(result.reason_code, 'invalid_active_version');
+        assert.equal(result.data.source_verdict.reason_code, corrupt === 'manifest' ? 'malformed_version' : 'file_mismatch');
+        assert.equal(result.data.next_action, 'run_registry_recovery');
+        const text = run(f.root, ...args, '--format', 'text');
+        assert.notEqual(text.status, 0);
+        assert.match(text.stdout, /REASON invalid_active_version/);
+        assert.match(text.stdout, /NEXT_ACTION run_registry_recovery/);
+        assert.doesNotMatch(text.stdout, /internal_error|stack/i);
+      }
+    } finally { await rm(f.root, { recursive: true, force: true }); }
+  }
+
+  const f = await fixture();
+  try {
+    const now = Date.now();
+    const candidate = { schema_version: 1, records: [], generation: 99 };
+    const mapping = { schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 } };
+    const reconciliation = { disposition: 'eligible', verdicts: [] };
+    const policy = { policy_version: 'mapping-v1' };
+    const exact = { candidate, mapping, reconciliation, policy };
+    const verification = resealVerification({ ...productionVerification(exact, now), test_only: true });
+    const unsafe = writeImmutableVersion({ ownedRoot: f.root, ...exact, verification, now });
+    writeFileSync(join(f.root, 'active.json'), `${JSON.stringify({ schema_version: 1, version_id: unsafe.version_id, bundle_fingerprint: unsafe.bundle_fingerprint, previous_version_id: f.second.version_id, reason: 'fixture', sequence: 3 })}\n`);
+    const result = run(f.root, 'diff', '--format', 'json');
+    assert.notEqual(result.status, 0);
+    const body = JSON.parse(result.stdout);
+    assert.equal(body.reason_code, 'invalid_active_version');
+    assert.equal(body.data.source_verdict.reason_code, 'verification_not_trusted');
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
