@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -12,7 +12,7 @@ import {
 import { stableStringify } from '../src/registry/schema.mjs';
 import {
   activateCandidate, executeRollback, previewRollback, recoverActiveVersion,
-  replaceActivePointer, verifyVersion, writeImmutableVersion,
+  recoverRollbackJournal, replaceActivePointer, verifyVersion, writeImmutableVersion,
 } from '../src/registry/activate.mjs';
 
 function inputs() {
@@ -199,6 +199,39 @@ test('recovery orders equally dated known-good versions by stable version id, ne
     const recovered = recoverActiveVersion({ ownedRoot: root, now });
     assert.equal(recovered.recovery_status, 'recovered');
     assert.equal(recovered.version_id, expected);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('rollback journal reports truthful outcomes before and after pointer publication', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-rollback-journal-'));
+  const now = Date.now();
+  try {
+    const firstInputs = inputs();
+    const secondInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 4 } };
+    const first = writeImmutableVersion({ ownedRoot: root, ...firstInputs, verification: productionVerification(firstInputs, now), now: 10 });
+    const second = writeImmutableVersion({ ownedRoot: root, ...secondInputs, verification: productionVerification(secondInputs, now), now: 20 });
+    assert.equal(replaceActivePointer({ ownedRoot: root, destination: second.version_id, expectedSequence: 0, now }).pointer_status, 'replaced');
+    const preview = previewRollback({ ownedRoot: root, destination: first.version_id, now });
+    const before = readFileSync(join(root, 'active.json'), 'utf8');
+
+    const notCommitted = executeRollback({ ownedRoot: root, preview, confirmation: first.version_id, now, reason: 'operator', io: { failJournalStage: 'pending' } });
+    assert.equal(notCommitted.rollback_status, 'blocked');
+    assert.equal(notCommitted.reason_code, 'journal_not_durable');
+    assert.equal(readFileSync(join(root, 'active.json'), 'utf8'), before);
+
+    const committed = executeRollback({ ownedRoot: root, preview, confirmation: first.version_id, now, reason: 'operator', io: { failJournalStage: 'completed' } });
+    assert.equal(committed.rollback_status, 'committed_recovery_required');
+    assert.equal(JSON.parse(readFileSync(join(root, 'active.json'), 'utf8')).version_id, first.version_id);
+    const journalDir = join(root, 'rollback-journal');
+    const pendingPath = join(journalDir, readdirSync(journalDir).find(name => name.endsWith('.json')));
+    const pending = JSON.parse(readFileSync(pendingPath, 'utf8'));
+    assert.deepEqual(Object.keys(pending).sort(), ['destination', 'expected_sequence', 'operation_id', 'outcome', 'reason', 'source', 'time']);
+    assert.equal(pending.outcome, 'pending');
+
+    const recovered = recoverRollbackJournal({ ownedRoot: root });
+    assert.equal(recovered.recovery_status, 'recovered');
+    assert.equal(recovered.operations[0].outcome, 'completed');
+    assert.equal(JSON.parse(readFileSync(pendingPath, 'utf8')).outcome, 'completed');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
