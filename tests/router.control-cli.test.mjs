@@ -38,12 +38,18 @@ function snapshot(root) {
   return walk(root);
 }
 
-async function fixture() {
+async function fixture({ count = 1 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-control-'));
   const baseNow = Date.now();
   const make = async (generation, subject, target) => {
-    const candidate = { schema_version: 1, generation, records: [{ id: target, lifecycle: 'ready', dispatchable: true, invocation: { command: 'safe' } }] };
-    const mapping = { schema_version: 1, policy_version: 'mapping-v1', policy_fingerprint: `policy-${generation}`, report_fingerprint: `mapping-${generation}`, subjects: [{ subject_id: subject, target_id: target, disposition: 'mapped', reason_code: 'explicit_metadata', winning_rule: 'explicit_metadata', confidence: { score: 1, band: 'authoritative' }, alternatives: [], evidence: [{ tier: 1, rule: 'explicit_metadata', accepted: true, target_id: target, reason_code: 'accepted' }] }] };
+    const records = Array.from({ length: count }, (_, index) => ({ id: count === 1 ? target : `${target}-${String(index).padStart(3, '0')}`, lifecycle: 'ready', dispatchable: true, invocation: { command: 'safe' } }));
+    const subjects = Array.from({ length: count }, (_, index) => {
+      const subjectId = count === 1 ? subject : `${subject}-${String(index).padStart(3, '0')}`;
+      const targetId = records[index].id;
+      return { subject_id: subjectId, target_id: targetId, disposition: 'mapped', reason_code: 'explicit_metadata', winning_rule: 'explicit_metadata', confidence: { score: 1, band: 'authoritative' }, alternatives: [], evidence: [{ tier: 1, rule: 'explicit_metadata', accepted: true, target_id: targetId, reason_code: 'accepted' }] };
+    });
+    const candidate = { schema_version: 1, generation, records };
+    const mapping = { schema_version: 1, policy_version: 'mapping-v1', policy_fingerprint: `policy-${generation}`, report_fingerprint: `mapping-${generation}`, subjects };
     const reconciliation = { disposition: 'eligible', verdicts: [] };
     const policy = { policy_version: 'mapping-v1' };
     const exact = { candidate, mapping, reconciliation, policy };
@@ -85,6 +91,31 @@ test('diff supports active-to-latest and two explicit immutable versions', async
     assert.equal(explicit.data.source.version_id, f.first.version_id);
     assert.equal(explicit.data.destination.version_id, f.second.version_id);
     assert.deepEqual(explicit.data.mapping_changes, [{ subject_id: 'alpha', from: 'target-a', to: 'target-b' }]);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('large diff and rollback preview expose deterministic bounded totals in JSON and text', async () => {
+  const f = await fixture({ count: 300 });
+  try {
+    const args = ['diff', f.first.version_id, f.second.version_id];
+    const firstJson = run(f.root, ...args, '--format', 'json');
+    const secondJson = run(f.root, ...args, '--format', 'json');
+    assert.equal(firstJson.status, 0, firstJson.stderr);
+    assert.equal(firstJson.stdout, secondJson.stdout);
+    const data = JSON.parse(firstJson.stdout).data;
+    assert.deepEqual(data.record_changes_meta, { total: 600, returned: 256, truncated: true, limit: 256, next_offset: 256 });
+    assert.deepEqual(data.mapping_changes_meta, { total: 300, returned: 256, truncated: true, limit: 256, next_offset: 256 });
+    assert.equal(data.record_changes.length, 256);
+    assert.equal(data.mapping_changes.length, 256);
+
+    const text = run(f.root, ...args, '--format', 'text');
+    assert.equal(text.status, 0, text.stderr);
+    assert.match(text.stdout, new RegExp(`RECORD_CHANGES_META ${stableStringify(data.record_changes_meta)}`));
+    assert.match(text.stdout, new RegExp(`MAPPING_CHANGES_META ${stableStringify(data.mapping_changes_meta)}`));
+
+    const preview = JSON.parse(run(f.root, 'rollback', f.first.version_id, '--format', 'json').stdout).data;
+    assert.deepEqual(preview.record_changes_meta, data.record_changes_meta);
+    assert.deepEqual(preview.mapping_changes_meta, data.mapping_changes_meta);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
