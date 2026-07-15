@@ -156,11 +156,11 @@ test('REG-03 incremental return remains byte-identical after every supported mut
     };
     check('access-denial diagnostic', () => {}, { discoverClaude: denied });
 
-    const forward = buildIncrementalRegistry(previous, { events: [], diagnostics: [], hash: 'fixture' }, options);
+    const forward = buildIncrementalRegistry(previous, { events: [], diagnostics: [] }, options);
     const reversed = buildIncrementalRegistry({
       claude: { ...previous.claude, observations: [...previous.claude.observations].reverse(), diagnostics: [...previous.claude.diagnostics].reverse() },
       codex: { ...previous.codex, observations: [...previous.codex.observations].reverse(), diagnostics: [...previous.codex.diagnostics].reverse() },
-    }, { events: [], diagnostics: [], hash: 'fixture' }, options);
+    }, { events: [], diagnostics: [] }, options);
     assert.equal(stableStringify(forward), stableStringify(reversed));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

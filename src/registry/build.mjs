@@ -85,8 +85,94 @@ function annotatePrecedence(records) {
 }
 
 export function buildFullRegistry(options = {}) {
-  const claude = discoverClaude(options);
-  const codex = discoverCodex(options);
+  const claude = (options.discoverClaude || discoverClaude)(options);
+  const codex = (options.discoverCodex || discoverCodex)(options);
+  return assembleRegistry({ claude, codex });
+}
+
+function validateAcquisition(acquisition, label = 'acquisition') {
+  if (!acquisition || typeof acquisition !== 'object') throw new TypeError(`${label} is required`);
+  for (const runtime of ['claude', 'codex']) {
+    const result = acquisition[runtime];
+    if (!result || !Array.isArray(result.observations) || !Array.isArray(result.diagnostics)) {
+      throw new TypeError(`${label}.${runtime} must contain observations and diagnostics arrays`);
+    }
+    for (const observation of result.observations) validateCapability(observation);
+  }
+}
+
+function logicalRootOf(value) {
+  return value?.logical_root || value?.provenance?.[0]?.logical_root || null;
+}
+
+function runtimeForRoot(logicalRoot) {
+  if (logicalRoot === 'claude_global' || logicalRoot?.endsWith(':claude')) return 'claude';
+  if (logicalRoot === 'codex_home' || logicalRoot?.endsWith(':codex')) return 'codex';
+  return null;
+}
+
+function dirtyLogicalRoots(diff) {
+  if (!diff || !Array.isArray(diff.events) || !Array.isArray(diff.diagnostics)) {
+    throw new TypeError('diff must contain events and diagnostics arrays');
+  }
+  const roots = new Set();
+  for (const event of diff.events) {
+    if (!event || typeof event !== 'object' || typeof event.primary !== 'string'
+      || !Array.isArray(event.facets) || !Array.isArray(event.old_provenance ?? [])
+      || !Array.isArray(event.new_provenance ?? [])) {
+      throw new TypeError('diff contains an invalid lifecycle event');
+    }
+  }
+  if (diff.hash !== undefined) {
+    if (!/^[a-f0-9]{64}$/.test(diff.hash)
+      || diff.hash !== fingerprint({ events: diff.events, diagnostics: diff.diagnostics })) {
+      throw new TypeError('diff hash does not match lifecycle contents');
+    }
+  }
+  for (const item of [...diff.events, ...diff.diagnostics]) {
+    const direct = logicalRootOf(item);
+    if (direct) roots.add(direct);
+    for (const provenance of [...(item.old_provenance || []), ...(item.new_provenance || [])]) {
+      if (provenance?.logical_root) roots.add(provenance.logical_root);
+    }
+  }
+  for (const root of roots) {
+    if (!runtimeForRoot(root)) throw new TypeError(`diff references unsupported logical root: ${root}`);
+  }
+  return [...roots].sort();
+}
+
+function replaceDirty(previous, refreshed, roots) {
+  const dirty = new Set(roots);
+  const keep = values => values.filter(value => !dirty.has(logicalRootOf(value)));
+  const take = values => values.filter(value => dirty.has(logicalRootOf(value)));
+  return {
+    observations: [...keep(previous.observations), ...take(refreshed.observations)],
+    diagnostics: [...keep(previous.diagnostics), ...take(refreshed.diagnostics)],
+  };
+}
+
+export function buildIncrementalRegistry(previous, diff, options = {}) {
+  validateAcquisition(previous, 'previous');
+  const dirty = dirtyLogicalRoots(diff);
+  const next = {
+    claude: { observations: [...previous.claude.observations], diagnostics: [...previous.claude.diagnostics] },
+    codex: { observations: [...previous.codex.observations], diagnostics: [...previous.codex.diagnostics] },
+  };
+  for (const runtime of ['claude', 'codex']) {
+    const roots = dirty.filter(root => runtimeForRoot(root) === runtime);
+    if (!roots.length) continue;
+    const discover = runtime === 'claude'
+      ? (options.discoverClaude || discoverClaude)
+      : (options.discoverCodex || discoverCodex);
+    next[runtime] = replaceDirty(previous[runtime], discover(options), roots);
+  }
+  return assembleRegistry(next);
+}
+
+export function assembleRegistry(acquisition) {
+  validateAcquisition(acquisition);
+  const { claude, codex } = acquisition;
   const observations = [...claude.observations, ...codex.observations];
   const groups = new Map();
   for (const record of observations) {
