@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
+import { reconcileCandidate } from '../registry/reconcile.mjs';
 import { stableStringify } from '../registry/schema.mjs';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
@@ -187,12 +188,23 @@ export async function installRouter(options) {
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
   const built = (options.buildRegistry || buildFullRegistry)({ claudeRoot: p.claudeRoot, codexRoot: p.codexRoot,
     ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}) });
-  const candidateValue = stableStringify(built.registry) + '\n';
-  const reportValue = stableStringify({ diagnostics: built.diagnostics, summary: built.summary }) + '\n';
+  const emptyActiveRegistry = { schema_version: 1, records: [] };
+  const activeBytes = stableStringify(emptyActiveRegistry) + '\n';
+  const reconciliation = reconcileCandidate({
+    candidate: built.registry,
+    active: { registry: emptyActiveRegistry, bytes: activeBytes, fingerprint: fingerprint(activeBytes) },
+    lifecycle: { events: [], diagnostics: [] },
+  });
+  const candidatePublication = reconciliation.disposition === 'eligible'
+    ? { ...built.registry, disposition: 'eligible', activated: false, candidate_fingerprint: reconciliation.candidate_fingerprint }
+    : { schema_version: 1, disposition: 'quarantined', activated: false, candidate_fingerprint: reconciliation.candidate_fingerprint, verdicts: reconciliation.verdicts };
+  const candidateValue = stableStringify(candidatePublication) + '\n';
+  const reportValue = stableStringify({ ...reconciliation, diagnostics: built.diagnostics, summary: { ...built.summary, activated: false } }) + '\n';
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const moduleNames = [
     'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
+    'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
   ];
   const moduleValues = moduleNames.map(name => [join(p.ownedRoot, 'modules', name), readFileSync(join(sourceRoot, name))]);

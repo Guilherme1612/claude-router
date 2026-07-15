@@ -71,8 +71,8 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 16);
-    for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs']) {
+    assert.equal(manifest.files.length, 18);
+    for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {
       assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', module)), true);
     }
     const status = JSON.parse(readFileSync(result.controllerStatusPath, 'utf8'));
@@ -262,7 +262,10 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     assert.equal(firstStatus.reconciliation.strategy, 'incremental');
     const firstLifecycleHash = firstStatus.reconciliation.lifecycle_hash;
     const firstFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
-    assert.deepEqual(JSON.parse(readFileSync(installed.candidatePath, 'utf8')), firstFull.registry);
+    const inactiveCandidate = JSON.parse(readFileSync(installed.candidatePath, 'utf8'));
+    assert.equal(inactiveCandidate.activated, false);
+    assert.equal(inactiveCandidate.disposition, 'eligible');
+    assert.deepEqual({ schema_version: inactiveCandidate.schema_version, records: inactiveCandidate.records }, firstFull.registry);
     assert.deepEqual({ diagnostics: firstReport.diagnostics, summary: firstReport.summary },
       { diagnostics: firstFull.diagnostics, summary: firstFull.summary });
 
@@ -281,7 +284,10 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     const repairedReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
     assert.equal(JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation.strategy, 'incremental');
     const repairedFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
-    assert.deepEqual(JSON.parse(readFileSync(installed.candidatePath, 'utf8')), repairedFull.registry);
+    const repairedCandidate = JSON.parse(readFileSync(installed.candidatePath, 'utf8'));
+    assert.equal(repairedCandidate.activated, false);
+    assert.equal(repairedCandidate.disposition, 'eligible');
+    assert.deepEqual({ schema_version: repairedCandidate.schema_version, records: repairedCandidate.records }, repairedFull.registry);
     assert.deepEqual({ diagnostics: repairedReport.diagnostics, summary: repairedReport.summary },
       { diagnostics: repairedFull.diagnostics, summary: repairedFull.summary });
   } finally { await cleanup(f); }
