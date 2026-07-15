@@ -410,5 +410,52 @@
       "status": "route",
       "edge": "CAL-07 implementation lookup plus CAL-08 expanded codebase target and CAL-09 miss taxonomy contract"
     }
+  },
+  {
+    "id": 31,
+    "prompt": "map the planning route to its explicit canonical target",
+    "phase14_mapping": true,
+    "mapping_fixture": {
+      "subject_id": "route:plan",
+      "expected_target": "router/planner",
+      "registry": {
+        "records": [
+          { "canonical_identity": "router/planner" },
+          { "canonical_identity": "router/plan-helper" }
+        ]
+      }
+    },
+    "right": {
+      "mode": "/gsd-plan-phase",
+      "skills": [],
+      "agents": [],
+      "tier": "high",
+      "status": "route",
+      "edge": "MAP-01 explicit canonical mapping calibration fixture"
+    }
+  },
+  {
+    "id": 32,
+    "prompt": "leave an ambiguous safe mapping active but unmapped",
+    "phase14_mapping": true,
+    "mapping_fixture": {
+      "subject_id": "route:ambiguous",
+      "expected_target": "router/safe-unmapped",
+      "expected_disposition": "unmapped",
+      "registry": {
+        "records": [
+          { "canonical_identity": "router/safe-unmapped" },
+          { "canonical_identity": "router/alternative" }
+        ]
+      }
+    },
+    "right": {
+      "mode": null,
+      "skills": [],
+      "agents": [],
+      "tier": "low",
+      "status": "pass_through",
+      "edge": "MAP-01 insufficient-confidence active-but-unmapped calibration fixture"
+    }
   }
 ]
