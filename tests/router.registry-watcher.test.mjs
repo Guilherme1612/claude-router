@@ -67,7 +67,7 @@ test('duplicate and filename-less hints coalesce while a continuous flood respec
     await h.scheduler.advance(200);
   }
   assert.equal(h.scans.length, 3, 'flood produces one bounded reconciliation');
-  assert.deepEqual(h.scans[2], ['claude_global']);
+  assert.deepEqual(h.scans[2], ['claude_global', 'codex_home']);
   await h.controller.close();
 });
 
@@ -97,7 +97,7 @@ test('reconcile is single-flight and in-flight hints schedule exactly one sorted
   h.callbacks.get('/virtual/claude')('change', 'c');
   await h.scheduler.advance(250);
   assert.equal(calls, 2);
-  release(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+  release(); await h.controller.flush();
   assert.equal(calls, 3);
   assert.equal(maximum, 1);
   assert.deepEqual(h.scans.at(-1), ['claude_global', 'codex_home']);
