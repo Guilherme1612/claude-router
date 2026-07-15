@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler } from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
-import { REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
+import { mapCandidateRegistry } from '../src/registry/map.mjs';
+import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
 
 function hashForTest(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -251,6 +252,70 @@ test('installed activation paths bootstrap one immutable version and active poin
   } finally {
     rmSync(ownedRoot, { recursive: true, force: true });
   }
+});
+
+test('real canonical ambiguous mapping stops before verification and activation', async () => {
+  const candidate = { schema_version: 1, records: [
+    reconcilerCapability({ name: 'one', canonical_identity: 'router/one', mapping: { explicit_subjects: ['route:conflict'] } }),
+    reconcilerCapability({ name: 'two', canonical_identity: 'router/two', mapping: { explicit_subjects: ['route:conflict'] }, invocation: { runtime: 'claude', command: 'two', args: [] }, provenance: [{ runtime: 'claude', scope: 'global', logical_root: 'claude_global', relative_path: 'skills/two/SKILL.md', source_fingerprint: 'sha:two', adapter: 'claude/1' }], runtime_variants: [{ runtime: 'claude', native_identity: 'skill:two' }] }),
+  ] };
+  const probe = mapCandidateRegistry({ candidate, reconciliation: { disposition: 'eligible' } });
+  assert.equal(probe.summary.disposition, 'ambiguous');
+  const calls = [];
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned' }, {
+    acquireRegistry: () => ({}), refreshIncrementalAcquisition: value => value,
+    assembleRegistry: () => ({ registry: candidate, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{}\n', fingerprint: 'active', authority_status: 'empty' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: probe.candidate_fingerprint, report_fingerprint: 'report', verdicts: [], active_bytes: '{}\n', active_fingerprint: 'active' }),
+    writeJson: async () => {},
+    produceActivationVerification: async () => { calls.push('verify'); return { disposition: 'passing', complete: true }; },
+    activateCandidate: async () => { calls.push('activate'); return { activation_status: 'activated' }; },
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(calls, []);
+  assert.equal(reconcile.lastReconciliation.activation_reason, 'mapping_ambiguous');
+});
+
+test('ambiguous canonical subject fails closed despite optimistic or malformed summary', async () => {
+  let verifyCalls = 0;
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned' }, {
+    acquireRegistry: () => ({}), refreshIncrementalAcquisition: value => value,
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{}\n', fingerprint: 'active', authority_status: 'empty' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{}\n', active_fingerprint: 'active' }),
+    writeJson: async () => {},
+    mapCandidateRegistry: () => ({ schema_version: 1, subjects: [{ subject_id: 'route:x', disposition: 'ambiguous' }], summary: { disposition: 'complete', ambiguous: 0 } }),
+    produceActivationVerification: async () => { verifyCalls += 1; return { disposition: 'passing', complete: true }; },
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.equal(verifyCalls, 0);
+  assert.equal(reconcile.lastReconciliation.activation_reason, 'mapping_ambiguous');
+
+  const verdict = await PRODUCTION_GATE_RUNNERS.mapping_integrity.run({ mapping: { schema_version: 1, subjects: [{ disposition: 'ambiguous' }], summary: { disposition: 'complete', ambiguous: 0 } } });
+  assert.equal(verdict.passed, false);
+});
+
+test('blocked recovery preserves authority and is retried before later activation', async () => {
+  const calls = [];
+  let recoveryAttempt = 0;
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned', active_path: '/owned/active.json' }, {
+    acquireRegistry: () => ({}), refreshIncrementalAcquisition: value => value,
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{"authority":"prior"}\n', fingerprint: 'prior', authority_status: 'active' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{"authority":"prior"}\n', active_fingerprint: 'prior' }),
+    writeJson: async () => {},
+    recoverActiveVersion: async () => { calls.push('recover'); recoveryAttempt += 1; return recoveryAttempt === 1 ? { recovery_status: 'blocked', reason_code: 'unsafe_pointer' } : { recovery_status: 'healthy' }; },
+    mapCandidateRegistry: async () => { calls.push('map'); return { schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 } }; },
+    produceActivationVerification: async () => { calls.push('verify'); return { disposition: 'passing', complete: true }; },
+    activateCandidate: async () => { calls.push('activate'); return { activation_status: 'activated' }; },
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(calls, ['recover']);
+  assert.equal(reconcile.lastReconciliation.active_fingerprint, 'prior');
+  assert.equal(reconcile.lastReconciliation.activation_reason, 'unsafe_pointer');
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(calls, ['recover', 'recover', 'map', 'verify', 'activate']);
+  assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
 });
 
 test('quarantine publishes corrective diagnostics and preserves exact active authority', async () => {
