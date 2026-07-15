@@ -420,7 +420,7 @@
       "expected_target": "router/planner",
       "registry": {
         "records": [
-          { "canonical_identity": "router/planner" },
+          { "canonical_identity": "router/planner", "mapping": { "explicit_subjects": ["route:plan"] } },
           { "canonical_identity": "router/plan-helper" }
         ]
       }
@@ -444,7 +444,7 @@
       "expected_disposition": "unmapped",
       "registry": {
         "records": [
-          { "canonical_identity": "router/safe-unmapped" },
+          { "canonical_identity": "router/safe-unmapped", "mapping": { "subjects": ["route:ambiguous"], "triggers": ["safe-unmapped"] } },
           { "canonical_identity": "router/alternative" }
         ]
       }

@@ -315,7 +315,10 @@ export function createRegistryReconciler(config, dependencies = {}) {
       if (report.disposition === 'eligible' && recoveryReady) {
         const mapping = await mapper({ candidate: built.registry, reconciliation: report, lifecycle: diff, existingMappings: config.mappings || [], policy: config.mapping_policy });
         if (isCanonicalMappingSafe(mapping)) {
-          const verification = await verifier({ candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {} });
+          const verification = await verifier({
+            candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {},
+            equivalence: { previous: baseline, diff, options: acquisitionOptions },
+          });
           if (verification.disposition === 'passing' && verification.complete === true) {
             activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher' });
           } else activation = { activation_status: 'preserved', reason_code: 'verification_non_passing' };

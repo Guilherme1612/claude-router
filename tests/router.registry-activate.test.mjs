@@ -39,6 +39,11 @@ function productionVerification(exact, now = 100) {
   return { ...canonical, verification_fingerprint: hash(canonical) };
 }
 
+function resealVerification(verification) {
+  const { verification_fingerprint: _ignored, ...canonical } = verification;
+  return { ...canonical, verification_fingerprint: hash(canonical) };
+}
+
 test('trusted verifier is complete, bound, fresh, and fails closed', async () => {
   const now = 1_700_000_000_000;
   const verifier = createTestActivationVerifier(Object.fromEntries(REQUIRED_ACTIVATION_GATES.map(id => [id, async () => ({ passed: true, measured: { samples: 1 }, threshold: { required: true } })])));
@@ -81,17 +86,24 @@ test('activation independently rejects substituted or unauthenticated production
   const exact = inputs();
   const base = productionVerification(exact, 1_000);
   const cases = [
-    ['test_only', { ...base, test_only: true }],
+    ['test_only', resealVerification({ ...base, test_only: true })],
     ['candidate', base, { candidate: { ...exact.candidate, generation: 2 } }],
     ['reconciliation', base, { reconciliation: { ...exact.reconciliation, disposition: 'quarantined' } }],
     ['mapping', base, { mapping: { ...exact.mapping, report_fingerprint: 'substituted' } }],
     ['policy', base, { policy: { version: 'substituted' } }],
-    ['evidence', { ...base, gates: base.gates.map((gate, index) => index ? gate : { ...gate, measured: { substituted: true } }) }],
+    ['evidence', resealVerification({ ...base, gates: base.gates.map((gate, index) => index ? gate : { ...gate, measured: { substituted: true } }) })],
     ['verification_fingerprint', { ...base, verification_fingerprint: '0'.repeat(64) }],
-    ['expired', { ...base, expires_at: 999 }],
-    ['incomplete', { ...base, complete: false }],
-    ['unknown_runner', { ...base, gates: base.gates.map((gate, index) => index ? gate : { ...gate, runner_id: 'unknown' }) }],
-    ['non_passing', { ...base, disposition: 'non_passing' }],
+    ['expired', resealVerification({ ...base, expires_at: 999 })],
+    ['incomplete', resealVerification({ ...base, complete: false })],
+    ['unknown_runner', (() => {
+      const gates = base.gates.map((gate, index) => {
+        if (index) return gate;
+        const { evidence_fingerprint: _ignored, ...evidence } = { ...gate, runner_id: 'unknown' };
+        return { ...evidence, evidence_fingerprint: hash(evidence) };
+      });
+      return resealVerification({ ...base, gates });
+    })()],
+    ['non_passing', resealVerification({ ...base, disposition: 'non_passing' })],
   ];
   for (const [name, verification, substitutions = {}] of cases) {
     const root = mkdtempSync(join(tmpdir(), `router-activation-${name}-`));

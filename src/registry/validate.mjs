@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stableStringify } from './schema.mjs';
+import { buildFullRegistry, buildIncrementalRegistry } from './build.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const hash = value => createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value)).digest('hex');
@@ -40,8 +41,26 @@ export function isCanonicalMappingSafe(mapping) {
   return mapping.subjects.every(subject => subject && ['mapped', 'unmapped'].includes(subject.disposition));
 }
 
+const incrementalFullEquivalence = Object.freeze({
+  id: 'incremental_full_equivalence', version: '1', threshold: { equality: 'exact' },
+  async run({ candidate, equivalence } = {}) {
+    try {
+      const incremental = buildIncrementalRegistry(equivalence.previous, equivalence.diff, equivalence.options || {}).registry;
+      const full = buildFullRegistry(equivalence.options || {}).registry;
+      const candidateBytes = stableStringify(candidate);
+      const incrementalBytes = stableStringify(incremental);
+      const fullBytes = stableStringify(full);
+      const passed = candidateBytes === incrementalBytes && candidateBytes === fullBytes;
+      return {
+        passed, reason_code: passed ? 'passed' : 'registry_bytes_mismatch', threshold: { equality: 'exact' },
+        measured: { candidate_fingerprint: hash(candidateBytes), incremental_fingerprint: hash(incrementalBytes), full_fingerprint: hash(fullBytes) },
+      };
+    } catch { return { passed: false, reason_code: 'equivalence_build_failed', threshold: { equality: 'exact' }, measured: {} }; }
+  },
+});
+
 export const PRODUCTION_GATE_RUNNERS = Object.freeze({
-  incremental_full_equivalence: inProcess('incremental_full_equivalence', ({ candidate }) => candidate?.schema_version === 1, { equality: 'exact' }),
+  incremental_full_equivalence: incrementalFullEquivalence,
   reconciliation_safety: inProcess('reconciliation_safety', ({ reconciliation }) => reconciliation?.disposition === 'eligible' && !(reconciliation.verdicts || []).some(v => v.dispatchable === false), { blocking_findings: 0 }),
   mapping_integrity: inProcess('mapping_integrity', ({ mapping }) => isCanonicalMappingSafe(mapping), { ambiguous: 0 }),
   calibration_quality: subprocess('calibration_quality', ['router.calibrate.mjs'], 30_000, { policy: 'repository-owned' }),

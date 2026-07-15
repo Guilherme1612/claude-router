@@ -28,6 +28,7 @@ import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { mapCandidateRegistry } from './src/registry/map.mjs';
 
 const HOME = homedir();
 const ROUTER_DIR = join(HOME, '.claude', 'router');
@@ -55,6 +56,44 @@ function codebaseRightTarget(codebaseCount) {
   if (count === 0) return 0;
   if (count < 7) return count;
   return Math.max(5, Math.ceil(count * 0.7));
+}
+
+export function calibrationPassThreshold({ originalCount, codebaseCount, evolutionCount, phase05Count, mappingCount }) {
+  return originalCount + (codebaseCount > 0 ? 1 : 0) + (evolutionCount > 0 ? 1 : 0) + phase05Count + mappingCount;
+}
+
+function calibrationCapability(record, index) {
+  const canonicalIdentity = String(record.canonical_identity || `router/calibration-${index}`);
+  const name = canonicalIdentity.split('/').pop();
+  return {
+    schema_version: 1, type: 'skill', name, canonical_identity: canonicalIdentity,
+    lifecycle: 'ready', scope: { kind: 'global' }, dispatchable: true,
+    invocation: { runtime: 'claude', command: name, args: [] },
+    dependencies: { state: 'unknown', items: [] },
+    provenance: [{ runtime: 'claude', scope: 'global', logical_root: 'calibration', relative_path: `skills/${name}/SKILL.md`, source_fingerprint: `calibration:${index}:${name}`, adapter: 'calibration/1' }],
+    runtime_variants: [{ runtime: 'claude', native_identity: `skill:${name}` }], conflicts: [],
+    ...(record.mapping ? { mapping: record.mapping } : {}),
+  };
+}
+
+export function evaluatePhase14MappingFixture(task) {
+  try {
+    const fixture = task?.mapping_fixture;
+    if (!task?.phase14_mapping || !fixture || typeof fixture.subject_id !== 'string' || !Array.isArray(fixture.registry?.records)) {
+      return { ok: false, detail: 'invalid_mapping_fixture' };
+    }
+    const candidate = { schema_version: 1, records: fixture.registry.records.map(calibrationCapability) };
+    const mapping = mapCandidateRegistry({ candidate, reconciliation: { disposition: 'eligible' } });
+    const subject = mapping.subjects.find(value => value.subject_id === fixture.subject_id);
+    const expectedDisposition = fixture.expected_disposition || 'mapped';
+    const dispositionOk = subject?.disposition === expectedDisposition;
+    const targetOk = expectedDisposition !== 'mapped' || subject?.target_id === fixture.expected_target;
+    return {
+      ok: dispositionOk && targetOk,
+      detail: dispositionOk && targetOk ? 'mapping match' : `got disposition=${subject?.disposition || 'missing'} target=${subject?.target_id || 'none'} want disposition=${expectedDisposition} target=${fixture.expected_target || 'none'}`,
+      mapping, subject,
+    };
+  } catch (error) { return { ok: false, detail: `mapping_error:${error.message}` }; }
 }
 
 function classifyCalibrationMiss(task, result, evaluation) {
@@ -279,17 +318,18 @@ if (isMain()) {
   // Phase 3 (D-13, D-25): pass threshold = originalCount + 1 (codebase) + 1 (evolution) = N + 2
   // Phase 5: every added COV fixture is a standing route-coverage regression
   // fixture, so the threshold also includes the full Phase-05 subset.
-  const passThreshold = originalCount + (codebaseCount > 0 ? 1 : 0) + (evolutionCount > 0 ? 1 : 0) + phase05Count;
+  const passThreshold = calibrationPassThreshold({ originalCount, codebaseCount, evolutionCount, phase05Count, mappingCount });
 
   console.log(`# Calibration dry-run — thresholds T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
   console.log(`# Manifest: ${manifest.skills ? manifest.skills.length : 0} skills, ${manifest.commands ? manifest.commands.length : 0} commands, ${manifest.agents ? manifest.agents.length : 0} agents`);
-  console.log(`# Fixtures: ${tasks.length} total (${originalCount} Phase-1 originals + ${codebaseCount} Phase-2 codebase + ${evolutionCount} Phase-3 evolution + ${phase05Count} Phase-05 route coverage + ${mappingCount} Phase-14 mapping); pass threshold = ${passThreshold} of ${tasks.length} (originalCount + 1 codebase + 1 evolution + all Phase-05 coverage)`);
+  console.log(`# Fixtures: ${tasks.length} total (${originalCount} Phase-1 originals + ${codebaseCount} Phase-2 codebase + ${evolutionCount} Phase-3 evolution + ${phase05Count} Phase-05 route coverage + ${mappingCount} Phase-14 mapping); pass threshold = ${passThreshold} of ${tasks.length} (originalCount + 1 codebase + 1 evolution + all Phase-05 coverage + all Phase-14 mapping)`);
   console.log('');
 
   let rightCount = 0;
   let originalRightCount = 0;
   let codebaseRightCount = 0;
   let evolutionRightCount = 0;
+  let mappingRightCount = 0;
   let evolutionWeightSum = 0;
   let evolutionWeightN = 0;
   const wrongHigh = [];
@@ -297,7 +337,13 @@ if (isMain()) {
   const evolutionOutcomes = []; // per-fixture outcome_label for the summary
   for (const task of tasks) {
     let result, ok, detail;
-    if (task.evolution === true) {
+    if (task.phase14_mapping === true) {
+      const mappingOutcome = evaluatePhase14MappingFixture(task);
+      ok = mappingOutcome.ok;
+      detail = mappingOutcome.detail;
+      result = { tier: 'phase14_mapping', route: null, guards_fired: [], top3: [], margin: 0, skipReason: null, graph_status: 'not_triggered', graph_symbols: [], elapsed_ms: 0 };
+      if (ok) { rightCount++; mappingRightCount++; }
+    } else if (task.evolution === true) {
       // Phase 3: evolution branch — correlate + aggregate + blend
       const evo = await evolutionRight(task, manifest, modeMap, { schema_version: 2, blend: 0.15, decay_days: 14, weights: {} });
       ok = evo.ok;
@@ -359,6 +405,7 @@ if (isMain()) {
     const mark = ok ? 'OK ' : 'XX ';
     const codebaseTag = task.codebase ? ' [codebase]' : '';
     const evolutionTag = task.evolution ? ' [evolution]' : '';
+    const mappingTag = task.phase14_mapping ? ' [phase14-mapping]' : '';
     // Phase 3: evolution_outcome + evolution_score columns for evolution fixtures
     const evoOutcome = task.evolution
       ? ` evolution_outcome=${(result.detail && result.detail.outcome_actual) || 'unknown'}`
@@ -366,7 +413,7 @@ if (isMain()) {
     const evoScore = task.evolution
       ? ` score=${(result.route && typeof result.route.weight_applied === 'number') ? Number(result.route.weight_applied.toFixed(3)) : 'n/a'}`
       : '';
-    console.log(`${mark}#${task.id}${codebaseTag}${evolutionTag} tier=${result.tier} mode=${modeStr} skills=[${skillsStr}] agents=[${agentsStr}] margin=${result.margin} top3=[${top3Str}] graph=${result.graph_status} syms=${symbolCount} elapsed_ms=${elapsed}${evoOutcome}${evoScore}`);
+    console.log(`${mark}#${task.id}${codebaseTag}${evolutionTag}${mappingTag} tier=${result.tier} mode=${modeStr} skills=[${skillsStr}] agents=[${agentsStr}] margin=${result.margin} top3=[${top3Str}] graph=${result.graph_status} syms=${symbolCount} elapsed_ms=${elapsed}${evoOutcome}${evoScore}`);
     console.log(`     right: mode=${task.right.mode || 'null'} skills=[${(task.right.skills || []).join(',')}] agents=[${(task.right.agents || []).join(',')}] status=${task.right.status} graph_status_expected=${task.graph_status_expected || 'n/a'}`);
     console.log(`     ${detail}`);
     if (taxonomy) {
@@ -385,6 +432,7 @@ if (isMain()) {
     console.log(`=== Average weight_applied: ${avgWeight} ===`);
     console.log(`=== Per-fixture outcomes: [${labels}] ===`);
   }
+  if (mappingCount > 0) console.log(`=== Phase 14 mapping subset: ${mappingRightCount}/${mappingCount} right ===`);
   console.log(`Original 10: ${originalRightCount}/${originalCount} (preserved)`);
   console.log(`Codebase target: ${codebaseRightCount}/${codebaseCount} (target: 5/7 minimum)`);
   console.log(`Codebase 5: ${codebaseRightCount}/${codebaseCount} (preserved / improved)`);
