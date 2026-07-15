@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, renameSync, rmSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildFullRegistry } from '../src/registry/build.mjs';
+import { buildFullRegistry, buildIncrementalRegistry } from '../src/registry/build.mjs';
+import { discoverRoots as discoverClaude } from '../src/adapters/claude.mjs';
+import { discoverRoots as discoverCodex } from '../src/adapters/codex.mjs';
+import { diffFingerprintTrees } from '../src/registry/diff.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 
 function artifact(root, runtime, scope, category, name, data) {
@@ -70,5 +73,94 @@ test('linked variants synthesize complete typed deterministic conflicts', () => 
     assert.equal(new Set(record.conflicts.map(stableStringify)).size, record.conflicts.length);
 
     assert.equal(stableStringify(first), stableStringify(buildFullRegistry(options)));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function acquire(options, overrides = {}) {
+  const claude = (overrides.discoverClaude || discoverClaude)(options);
+  const codex = (overrides.discoverCodex || discoverCodex)(options);
+  return { claude, codex };
+}
+
+function snapshot(acquisition) {
+  return {
+    schema_version: 1,
+    roots: ['claude_global', 'codex_home', 'project:fixture:claude', 'project:fixture:codex'],
+    entries: [...acquisition.claude.observations, ...acquisition.codex.observations],
+    diagnostics: [...acquisition.claude.diagnostics, ...acquisition.codex.diagnostics],
+  };
+}
+
+test('REG-03 incremental return remains byte-identical after every supported mutation', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-incremental-'));
+  try {
+    const options = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'), projectRoot: join(root, 'project'), scopeId: 'fixture' };
+    mkdirSync(options.claudeRoot, { recursive: true });
+    mkdirSync(options.codexRoot, { recursive: true });
+    let previous = acquire(options);
+
+    const check = (label, mutate, overrides = {}) => {
+      mutate();
+      const current = acquire(options, overrides);
+      const diff = diffFingerprintTrees(snapshot(previous), snapshot(current));
+      const incremental = buildIncrementalRegistry(previous, diff, { ...options, ...overrides });
+      const full = buildFullRegistry({ ...options, ...overrides });
+      assert.equal(stableStringify(incremental), stableStringify(full), label);
+      assert.doesNotMatch(stableStringify(incremental), new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${label}: portable bytes`);
+      previous = current;
+    };
+
+    check('add', () => artifact(root, 'claude', 'global', 'skills', 'alpha', {
+      canonical_identity: 'fixture/alpha', invocation: { command: 'alpha', args: [] },
+    }));
+    check('edit', () => artifact(root, 'claude', 'global', 'skills', 'alpha', {
+      canonical_identity: 'fixture/alpha', description: 'edited', invocation: { command: 'alpha', args: [] },
+    }));
+    check('strong rename', () => renameSync(join(root, 'claude/skills/alpha.json'), join(root, 'claude/skills/renamed.json')));
+    check('compound rename/edit', () => {
+      const path = join(root, 'claude/skills/renamed.json');
+      const value = JSON.parse(readFileSync(path, 'utf8'));
+      value.description = 'renamed and edited';
+      writeFileSync(path, JSON.stringify(value));
+      renameSync(path, join(root, 'claude/skills/compound.json'));
+    });
+    check('disable and dependency', () => artifact(root, 'claude', 'global', 'skills', 'compound', {
+      canonical_identity: 'fixture/alpha', invocation: { command: 'alpha', args: [] },
+      dependencies: [{ id: 'binary:missing', available: false }],
+    }));
+    check('declared permission metadata', () => {}, {
+      discoverClaude: () => {
+        const result = discoverClaude(options);
+        return { ...result, observations: result.observations.map(record => record.canonical_identity === 'fixture/alpha'
+          ? { ...record, permissions: { mode: 'read-only', grants: ['read'] } } : record) };
+      },
+    });
+    check('project precedence', () => artifact(root, 'claude', 'project', 'skills', 'compound', {
+      invocation: { command: 'project-alpha', args: [] },
+    }));
+    check('weak rename remains remove plus add', () => {
+      artifact(root, 'codex', 'global', 'skills', 'weak', { invocation: { command: 'weak', args: [] } });
+    });
+    check('weak rename follow-up', () => renameSync(join(root, 'codex/skills/weak.json'), join(root, 'codex/skills/weak-renamed.json')));
+    check('delete', () => unlinkSync(join(root, 'claude/skills/compound.json')));
+    check('malformed', () => writeFileSync(join(root, 'codex/skills/malformed.json'), '{'));
+    check('malformed to valid', () => artifact(root, 'codex', 'global', 'skills', 'malformed', { invocation: { command: 'valid', args: [] } }));
+    check('valid to malformed', () => writeFileSync(join(root, 'codex/skills/malformed.json'), '{broken'));
+
+    const denied = () => {
+      const result = discoverClaude(options);
+      return { ...result, diagnostics: [...result.diagnostics, {
+        code: 'access_denied', runtime: 'claude', logical_root: 'claude_global', relative_path: 'skills/denied.json',
+        reason: 'injected denial', severity: 'build-blocking',
+      }] };
+    };
+    check('access-denial diagnostic', () => {}, { discoverClaude: denied });
+
+    const forward = buildIncrementalRegistry(previous, { events: [], diagnostics: [], hash: 'fixture' }, options);
+    const reversed = buildIncrementalRegistry({
+      claude: { ...previous.claude, observations: [...previous.claude.observations].reverse(), diagnostics: [...previous.claude.diagnostics].reverse() },
+      codex: { ...previous.codex, observations: [...previous.codex.observations].reverse(), diagnostics: [...previous.codex.diagnostics].reverse() },
+    }, { events: [], diagnostics: [], hash: 'fixture' }, options);
+    assert.equal(stableStringify(forward), stableStringify(reversed));
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
