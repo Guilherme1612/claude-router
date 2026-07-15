@@ -184,6 +184,67 @@ function invocation(data, name, type) {
   return { command: data.command || name, args: Array.isArray(data.args) ? data.args : [] };
 }
 
+function portableTarget(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const normalized = value.trim().replaceAll('\\', '/');
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) return null;
+  const parts = normalized.split('/');
+  if (parts.includes('..')) return null;
+  return normalized.replace(/^\.\//, '');
+}
+
+function commandReference(command) {
+  if (typeof command !== 'string' || !command.trim()) return { valid: false, reason: 'unsupported_command_form' };
+  if (!/^[A-Za-z0-9_./:$@+\-]+(?:\s+[A-Za-z0-9_./:$@+\-]+)*$/.test(command.trim())) {
+    return { valid: false, reason: 'unsupported_command_form' };
+  }
+  const tokens = command.trim().split(/\s+/);
+  const target = portableTarget(tokens.at(-1));
+  return target ? { valid: true, target_ref: target, command: tokens[0], args: tokens.slice(1) }
+    : { valid: false, reason: 'path_escape' };
+}
+
+function nestedBindingCommands(value, output = []) {
+  if (Array.isArray(value)) for (const entry of value) nestedBindingCommands(entry, output);
+  else if (value && typeof value === 'object') {
+    if (value.type === 'command' && Object.hasOwn(value, 'command')) output.push(value.command);
+    for (const [key, entry] of Object.entries(value)) if (!['type', 'command'].includes(key)) nestedBindingCommands(entry, output);
+  }
+  return output;
+}
+
+function hookObservation(nativeRecord, nativeInvocation, scope) {
+  if (!['hook', 'binding'].includes(nativeRecord.type)) return null;
+  let references;
+  if (nativeRecord.type === 'binding' && nativeInvocation?.bindings !== undefined) {
+    references = nestedBindingCommands(nativeInvocation.bindings).map(commandReference);
+  } else {
+    const args = Array.isArray(nativeInvocation?.args) ? nativeInvocation.args.map(String) : [];
+    const target = portableTarget(nativeRecord.data.target_ref || args.at(-1) || nativeInvocation?.command);
+    references = target
+      ? [{ valid: true, target_ref: target, command: String(nativeInvocation?.command || ''), args }]
+      : [{ valid: false, reason: 'path_escape' }];
+  }
+  if (!references.length) references = [{ valid: false, reason: 'malformed_binding' }];
+  const valid = references.length === 1 && references[0].valid;
+  return {
+    schema_version: 1,
+    kind: nativeRecord.type === 'hook' ? 'file' : 'binding',
+    runtime: nativeRecord.runtime,
+    scope,
+    logical_root: nativeRecord.logicalRoot,
+    relative_path: nativeRecord.relativePath,
+    source_fingerprint: nativeRecord.sourceFingerprint,
+    event: String(nativeInvocation?.event || nativeRecord.data.event || ''),
+    target_ref: valid ? references[0].target_ref : null,
+    command: valid ? references[0].command : null,
+    args: valid ? references[0].args : [],
+    valid,
+    ...(valid ? {} : { reason: references.find(item => !item.valid)?.reason || 'duplicate_reference' }),
+    ...(references.length > 1 ? { references, reason: 'duplicate_reference' } : {}),
+  };
+}
+
 export function createAdapter({ runtime, adapterVersion, layout, configExpander }) {
   function parseArtifact(path, options = {}) {
     if (!options.root) throw new TypeError('root is required');
@@ -232,10 +293,11 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     if (!nativeRecord?.data) throw new TypeError('normalizeArtifact requires a parsed artifact');
     const scope = nativeRecord.scope || { kind: 'global' };
     const nativeInvocation = nativeRecord.data.native_invocation || invocation(nativeRecord.data, nativeRecord.name, nativeRecord.type);
+    const normalizedHook = hookObservation(nativeRecord, nativeInvocation, scope);
     const declared = Array.isArray(nativeRecord.data.dependencies);
     const items = declared ? nativeRecord.data.dependencies.map((entry) => ({ id: String(entry.id), available: entry.available === true })) : [];
     const command = nativeInvocation.command || nativeRecord.name;
-    const dispatchable = Boolean(command) && items.every((entry) => entry.available);
+    const dispatchable = Boolean(command) && items.every((entry) => entry.available) && (!normalizedHook || normalizedHook.valid);
     const record = { schema_version: 1, type: nativeRecord.type, name: nativeRecord.name,
       description: typeof nativeRecord.data.description === 'string' ? nativeRecord.data.description : null,
       lifecycle: dispatchable ? 'ready' : 'partial', scope, dispatchable,
@@ -243,6 +305,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
       dependencies: { state: declared ? 'declared' : 'unknown', items },
       provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion, ...packageProvenance(nativeRecord.relativePath) }],
       runtime_variants: [{ runtime, native_identity: String(nativeRecord.data.native_identity || nativeRecord.name), native_invocation: nativeInvocation }],
+      ...(normalizedHook ? { hook_observation: normalizedHook } : {}),
       conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
       ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
       ...(nativeRecord.data.shared_origin?.authority && nativeRecord.data.shared_origin?.identity

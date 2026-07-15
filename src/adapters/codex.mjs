@@ -7,6 +7,7 @@ function layout(rel) {
   if (/^plugins\/[^/]+\/plugin\.json$/.test(rel)) return { type: 'plugin', format: 'json' };
   if (/^agents\/[^/]+\.(toml|json)$/.test(rel)) return { type: 'agent', format: rel.endsWith('.toml') ? 'toml' : 'json' };
   if (/^hooks\/[^/]+\.json$/.test(rel)) return { type: 'hook', format: 'json' };
+  if (/^bindings\/[^/]+\.json$/.test(rel)) return { type: 'binding', format: 'json' };
   if (/^skills\/.+\.json$/.test(rel)) return { type: 'skill', format: 'json' };
   if (/^(config|mcp|tools|models|permissions|dependencies)\/.+\.json$/.test(rel)) {
     const map = { config: 'config', mcp: 'mcp', tools: 'tool', models: 'model', permissions: 'permission', dependencies: 'dependency' };
