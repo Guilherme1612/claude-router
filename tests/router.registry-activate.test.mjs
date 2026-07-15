@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -154,6 +154,49 @@ test('cross-process pointer CAS has exactly one winner for an expected sequence'
     assert.equal(loser.pointer_status, 'blocked');
     assert.equal(loser.reason_code, 'stale_pointer_sequence');
     assert.equal(JSON.parse(readFileSync(join(root, 'active.json'), 'utf8')).sequence, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('recovery and rollback reject integrity-valid versions that are not semantic known-good', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-known-good-'));
+  const now = Date.now();
+  try {
+    const goodInputs = inputs();
+    const good = writeImmutableVersion({ ownedRoot: root, ...goodInputs, verification: productionVerification(goodInputs, now), now: 10 });
+    const unsafeInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 2 } };
+    const testOnly = resealVerification({ ...productionVerification(unsafeInputs, now), test_only: true });
+    const unsafe = writeImmutableVersion({ ownedRoot: root, ...unsafeInputs, verification: testOnly, now: 20 });
+    assert.equal(verifyVersion({ ownedRoot: root, versionId: good.version_id, now }).valid, true);
+    assert.equal(verifyVersion({ ownedRoot: root, versionId: unsafe.version_id, now }).valid, false);
+
+    const initial = replaceActivePointer({ ownedRoot: root, destination: good.version_id, expectedSequence: 0, reason: 'bootstrap' });
+    assert.equal(initial.pointer_status, 'replaced');
+    const unsafePreview = previewRollback({ ownedRoot: root, destination: unsafe.version_id, now });
+    assert.equal(unsafePreview.preview_status, 'blocked');
+    assert.equal(unsafePreview.reason_code, 'verification_not_trusted');
+
+    writeFileSync(join(root, 'active.json'), '{bad');
+    const recovered = recoverActiveVersion({ ownedRoot: root, now });
+    assert.equal(recovered.recovery_status, 'recovered');
+    assert.equal(recovered.version_id, good.version_id);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('recovery orders equally dated known-good versions by stable version id, never mutable mtime', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-recovery-order-'));
+  const now = Date.now();
+  try {
+    const leftInputs = inputs();
+    const rightInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 3 } };
+    const left = writeImmutableVersion({ ownedRoot: root, ...leftInputs, verification: productionVerification(leftInputs, now), now: 50 });
+    const right = writeImmutableVersion({ ownedRoot: root, ...rightInputs, verification: productionVerification(rightInputs, now), now: 50 });
+    const expected = [left.version_id, right.version_id].sort()[0];
+    const other = expected === left.version_id ? right.version_id : left.version_id;
+    utimesSync(join(root, 'versions', expected), new Date(1_000), new Date(1_000));
+    utimesSync(join(root, 'versions', other), new Date(2_000), new Date(2_000));
+    const recovered = recoverActiveVersion({ ownedRoot: root, now });
+    assert.equal(recovered.recovery_status, 'recovered');
+    assert.equal(recovered.version_id, expected);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
