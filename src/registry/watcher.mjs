@@ -102,7 +102,14 @@ export function createRegistryWatcher(options) {
     baseline = loaded?.clean_scan_required ? null : loaded?.state || null;
     for (const root of roots) {
       try {
-        const handle = watchFactory(root.path, { recursive: true }, () => markDirty([root.logicalRoot]));
+        const handle = watchFactory(root.path, { recursive: true }, (_event, filename) => {
+          const relative = filename === undefined || filename === null ? null : String(filename).replaceAll('\\', '/');
+          const ignored = relative && (root.ignoredRelativePaths || []).some(prefix => (
+            relative === prefix || relative.startsWith(`${prefix}/`)
+          ));
+          if (!ignored) markDirty([root.logicalRoot]);
+        });
+        handle.on?.('error', report);
         watchers.push(handle);
       } catch (error) { report(error); }
     }
@@ -136,7 +143,7 @@ export function createRegistryWatcher(options) {
 
 async function atomicJson(path, value) {
   await mkdir(dirname(path), { recursive: true });
-  const temporary = `${path}.tmp.${process.pid}`;
+  const temporary = `${path}.tmp.${process.pid}.${randomUUID()}`;
   await writeFile(temporary, `${stableStringify(value)}\n`, 'utf8');
   await rename(temporary, path);
 }
@@ -171,6 +178,13 @@ export async function runRegistryWatcher(options) {
     debounceMs: config.debounce_ms,
     maxLatencyMs: config.max_latency_ms,
     repairMs: config.repair_ms,
+    diff(previous, current) {
+      return {
+        changed: previous?.hash !== current.hash,
+        previous_hash: previous?.hash || null,
+        current_hash: current.hash,
+      };
+    },
     reconcile,
     onError: async error => {
       await atomicJson(config.status_path, {
@@ -211,7 +225,7 @@ function cliArgument(name) {
   return index >= 0 ? process.argv[index + 1] : null;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === 'run') {
+if (process.argv[2] === 'run' && process.argv.includes('--config')) {
   const configPath = cliArgument('--config');
   if (!configPath) throw new Error('run requires --config');
   await runRegistryWatcher({ configPath });

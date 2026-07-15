@@ -64,6 +64,9 @@ async function walk(rootPath, logicalRoot, options, entries, diagnostics, curren
     const absolute = resolve(current, child.name);
     const relativePath = portablePath(relative(rootPath, absolute).replaceAll(sep, '/'));
     if (!relativePath) throw new Error(`invalid portable path beneath ${logicalRoot}`);
+    if ((options.ignoredRelativePaths || []).some(prefix => (
+      relativePath === prefix || relativePath.startsWith(`${prefix}/`)
+    ))) continue;
     let canonical;
     try {
       canonical = await realpath(absolute);
@@ -115,7 +118,9 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     if (containmentRoot && !contained(containmentRoot, canonicalRoot)) {
       throw new Error(`${spec.logicalRoot} is outside configured containment root`);
     }
-    normalizedSpecs.push({ logicalRoot: spec.logicalRoot.trim(), canonicalRoot });
+    const ignoredRelativePaths = (spec.ignoredRelativePaths || []).map(portablePath);
+    if (ignoredRelativePaths.some(value => !value)) throw new TypeError('ignoredRelativePaths must be portable');
+    normalizedSpecs.push({ logicalRoot: spec.logicalRoot.trim(), canonicalRoot, ignoredRelativePaths });
   }
   normalizedSpecs.sort((a, b) => a.logicalRoot.localeCompare(b.logicalRoot));
   if (new Set(normalizedSpecs.map(spec => spec.logicalRoot)).size !== normalizedSpecs.length) {
@@ -123,7 +128,7 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
   }
   const entries = [], diagnostics = [];
   for (const spec of normalizedSpecs) {
-    await walk(spec.canonicalRoot, spec.logicalRoot, { readFile }, entries, diagnostics);
+    await walk(spec.canonicalRoot, spec.logicalRoot, { readFile, ignoredRelativePaths: spec.ignoredRelativePaths }, entries, diagnostics);
   }
   entries.sort((a, b) => `${a.logical_root}:${a.relative_path}:${a.entry_type}`
     .localeCompare(`${b.logical_root}:${b.relative_path}:${b.entry_type}`));

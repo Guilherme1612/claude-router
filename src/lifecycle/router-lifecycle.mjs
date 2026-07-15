@@ -3,6 +3,7 @@ import {
   rmdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
@@ -59,7 +60,70 @@ function paths(options) {
     ownedRoot,
     candidatePath: resolve(options.candidatePath || join(ownedRoot, 'candidate', 'registry.json')),
     reportPath: resolve(options.reportPath || join(ownedRoot, 'candidate', 'report.json')),
+    controllerConfigPath: resolve(options.controllerConfigPath || join(ownedRoot, 'controller', 'config.json')),
+    controllerStatusPath: resolve(options.controllerStatusPath || join(ownedRoot, 'controller', 'status.json')),
+    controllerControlPath: resolve(options.controllerControlPath || join(ownedRoot, 'controller', 'request.json')),
+    scanStatePath: resolve(options.scanStatePath || join(ownedRoot, 'controller', 'scan-state.json')),
   };
+}
+
+function sleep(milliseconds) { return new Promise(resolvePromise => setTimeout(resolvePromise, milliseconds)); }
+
+function processAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch { return false; }
+}
+
+function controllerStatus(p) {
+  try { return readJson(p.controllerStatusPath, null, 'controller status'); } catch { return null; }
+}
+
+function readyController(p, configurationFingerprint, staleMs) {
+  const status = controllerStatus(p);
+  return status?.state === 'ready'
+    && status.configuration_fingerprint === configurationFingerprint
+    && Number.isFinite(status.heartbeat) && Date.now() - status.heartbeat <= staleMs
+    && processAlive(status.pid) ? status : null;
+}
+
+async function waitForController(p, configurationFingerprint, options = {}) {
+  const deadline = Date.now() + (options.readinessTimeoutMs ?? 5_000);
+  const staleMs = options.controllerStaleMs ?? 5_000;
+  do {
+    if (options.child?.exitCode !== null && options.child?.exitCode !== undefined) {
+      throw new Error(`controller exited before readiness with code ${options.child.exitCode}`);
+    }
+    const status = readyController(p, configurationFingerprint, staleMs);
+    if (status && (!options.previousInstanceId || status.instance_id !== options.previousInstanceId)) return status;
+    await sleep(options.readinessPollMs ?? 20);
+  } while (Date.now() <= deadline);
+  const observed = controllerStatus(p);
+  throw new Error(`controller readiness verification failed${observed ? `: ${JSON.stringify(observed)}` : ': no status record'}`);
+}
+
+function launchOwnedController(p, options) {
+  const watcherPath = join(p.ownedRoot, 'modules', 'registry', 'watcher.mjs');
+  const launch = options.launchController || ((binary, args, spawnOptions) => spawn(binary, args, spawnOptions));
+  const child = launch(options.nodeBinary || process.execPath,
+    [watcherPath, 'run', '--config', p.controllerConfigPath], {
+      detached: true, stdio: options.controllerStdio || 'ignore',
+    });
+  child.unref?.();
+  return child;
+}
+
+async function stopController(p, configurationFingerprint, options = {}) {
+  const status = controllerStatus(p);
+  if (!status || status.configuration_fingerprint !== configurationFingerprint || !processAlive(status.pid)) return;
+  atomicWrite(p.controllerControlPath, JSON.stringify({
+    schema_version: 1, action: 'shutdown', instance_id: status.instance_id,
+    configuration_fingerprint: configurationFingerprint,
+  }) + '\n');
+  const deadline = Date.now() + (options.shutdownTimeoutMs ?? 2_000);
+  while (Date.now() <= deadline && processAlive(status.pid)) await sleep(20);
+  if (processAlive(status.pid)) {
+    try { process.kill(status.pid, 'SIGTERM'); } catch { /* process exited */ }
+  }
 }
 
 function validatedSettings(settingsPath) {
@@ -98,7 +162,7 @@ function restoreTransaction(snapshot) {
   }
 }
 
-export function installRouter(options) {
+export async function installRouter(options) {
   const p = paths(options);
   if (!existsSync(p.sourceRouter) || !statSync(p.sourceRouter).isFile()) {
     throw new Error(`router source missing: ${p.sourceRouter}`);
@@ -126,9 +190,38 @@ export function installRouter(options) {
   const candidateValue = stableStringify(built.registry) + '\n';
   const reportValue = stableStringify({ diagnostics: built.diagnostics, summary: built.summary }) + '\n';
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-  const moduleNames = ['registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs', 'adapters/claude.mjs', 'adapters/codex.mjs'];
+  const moduleNames = [
+    'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
+    'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
+    'adapters/claude.mjs', 'adapters/codex.mjs',
+  ];
   const moduleValues = moduleNames.map(name => [join(p.ownedRoot, 'modules', name), readFileSync(join(sourceRoot, name))]);
-  const ownedValues = [...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue]];
+  const controllerConfig = {
+    schema_version: 1,
+    claude_root: p.claudeRoot,
+    codex_root: p.codexRoot,
+    ...(options.projectRoot ? { project_root: resolve(options.projectRoot), scope_id: options.scopeId || 'project' } : {}),
+    roots: [
+      { logicalRoot: 'claude_global', path: p.claudeRoot, ignoredRelativePaths: ['router'] },
+      { logicalRoot: 'codex_home', path: p.codexRoot, ignoredRelativePaths: ['router'] },
+    ],
+    state_path: p.scanStatePath,
+    candidate_path: p.candidatePath,
+    report_path: p.reportPath,
+    status_path: p.controllerStatusPath,
+    control_path: p.controllerControlPath,
+    debounce_ms: options.debounceMs ?? 250,
+    max_latency_ms: options.maxLatencyMs ?? 1_500,
+    repair_ms: options.repairMs ?? 300_000,
+    heartbeat_ms: options.heartbeatMs ?? 1_000,
+    control_poll_ms: options.controlPollMs ?? 100,
+  };
+  const controllerConfigValue = stableStringify(controllerConfig) + '\n';
+  const configurationFingerprint = fingerprint(stableStringify(controllerConfig));
+  const ownedValues = [
+    ...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
+    [p.controllerConfigPath, controllerConfigValue],
+  ];
   for (const [file] of ownedValues) {
     const owned = existingManifest?.files?.some(entry => entry.path === file);
     if (existsSync(file) && !owned) throw new Error(`existing candidate artifact is not owned by this installer: ${file}`);
@@ -136,7 +229,8 @@ export function installRouter(options) {
   if (options.dryRun) return { status: 'dry-run', ready: false, manifestPath: p.manifestPath,
     changes: ownedValues.filter(([file, value]) => !fileMatches(file, fingerprint(value))).map(([file]) => file) };
   const created = [];
-  const transactionFiles = [p.settingsPath, p.routerPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file), p.manifestPath];
+  const transactionFiles = [p.settingsPath, p.routerPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file),
+    p.controllerStatusPath, p.controllerControlPath, p.scanStatePath, p.manifestPath];
   const transactionDirectories = transactionFiles.flatMap(file => {
     const entries = []; let directory = dirname(file);
     while (directory.startsWith(p.claudeRoot) || directory.startsWith(p.codexRoot)) {
@@ -181,12 +275,23 @@ export function installRouter(options) {
         { path: p.routerPath, fingerprint: sourceFingerprint },
         { path: p.codexMarkerPath, fingerprint: markerFingerprint },
         ...ownedValues.map(([file, value]) => ({ path: file, fingerprint: fingerprint(value) })),
+        { path: p.controllerStatusPath, fingerprint: 'mutable', mutable: true },
+        { path: p.controllerControlPath, fingerprint: 'mutable', mutable: true },
+        { path: p.scanStatePath, fingerprint: 'mutable', mutable: true },
       ],
-      directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath), dirname(p.manifestPath)],
+      directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
+        dirname(p.controllerConfigPath), dirname(p.manifestPath)],
       bindings: [{ settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath }],
     };
     atomicWrite(p.manifestPath, JSON.stringify(manifest, null, 2) + '\n');
     if (typeof options.afterMutation === 'function') options.afterMutation();
+    let status = readyController(p, configurationFingerprint, options.controllerStaleMs ?? 5_000);
+    let child = null;
+    if (!status) {
+      child = launchOwnedController(p, options);
+      try { status = await waitForController(p, configurationFingerprint, { ...options, child }); }
+      catch (error) { child.kill?.('SIGTERM'); throw error; }
+    }
     const ready = fileMatches(p.routerPath, sourceFingerprint)
       && fileMatches(p.codexMarkerPath, markerFingerprint)
       && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
@@ -201,9 +306,16 @@ export function installRouter(options) {
       routerPath: p.routerPath,
       candidatePath: p.candidatePath,
       reportPath: p.reportPath,
+      controllerStatusPath: p.controllerStatusPath,
+      controllerInstanceId: status.instance_id,
+      configurationFingerprint,
       changes: created,
     };
   } catch (error) {
+    const status = controllerStatus(p);
+    if (status?.configuration_fingerprint === configurationFingerprint && processAlive(status.pid)) {
+      try { process.kill(status.pid, 'SIGTERM'); } catch { /* process exited */ }
+    }
     restoreTransaction(beforeMutation);
     throw error;
   }
@@ -214,7 +326,7 @@ function removeEmptyDirectory(directory) {
   if (readdirSync(directory).length === 0) rmdirSync(directory);
 }
 
-export function uninstallRouter(options) {
+export async function uninstallRouter(options) {
   const p = paths(options);
   if (!existsSync(p.manifestPath)) {
     return { status: 'already-uninstalled', removed: [], retained: [] };
@@ -238,6 +350,9 @@ export function uninstallRouter(options) {
     }
   }
 
+  const config = readJson(p.controllerConfigPath, null, 'controller config');
+  if (config) await stopController(p, fingerprint(stableStringify(config)), options);
+
   for (const binding of manifest.bindings) {
     const settings = readJson(binding.settings_path, null, 'settings');
     if (!settings?.hooks || !Array.isArray(settings.hooks[binding.event])) continue;
@@ -253,7 +368,10 @@ export function uninstallRouter(options) {
   const retained = [];
   for (const file of manifest.files) {
     if (!existsSync(file.path)) continue;
-    if (!fileMatches(file.path, file.fingerprint)) {
+    const mutableOwned = file.mutable === true
+      && (file.path === p.controllerStatusPath || file.path === p.controllerControlPath || file.path === p.scanStatePath)
+      && (file.path === p.ownedRoot || file.path.startsWith(`${p.ownedRoot}/`));
+    if (!mutableOwned && !fileMatches(file.path, file.fingerprint)) {
       retained.push(file.path);
       continue;
     }
@@ -265,4 +383,24 @@ export function uninstallRouter(options) {
     removeEmptyDirectory(directory);
   }
   return { status: 'uninstalled', removed, retained };
+}
+
+export async function restartController(options) {
+  const p = paths(options);
+  const config = readJson(p.controllerConfigPath, null, 'controller config');
+  if (!config) throw new Error('controller config is missing; install the router first');
+  const configurationFingerprint = fingerprint(stableStringify(config));
+  const current = readyController(p, configurationFingerprint, options.controllerStaleMs ?? 5_000);
+  if (current) {
+    atomicWrite(p.controllerControlPath, JSON.stringify({
+      schema_version: 1, action: 'restart', instance_id: current.instance_id,
+      configuration_fingerprint: configurationFingerprint,
+    }) + '\n');
+  } else {
+    launchOwnedController(p, options);
+  }
+  const status = await waitForController(p, configurationFingerprint, {
+    ...options, previousInstanceId: current?.instance_id,
+  });
+  return { ready: true, instanceId: status.instance_id, pid: status.pid, configurationFingerprint };
 }

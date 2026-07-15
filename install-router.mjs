@@ -7,7 +7,7 @@
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { installRouter, uninstallRouter } from './src/lifecycle/router-lifecycle.mjs';
+import { installRouter, restartController, uninstallRouter } from './src/lifecycle/router-lifecycle.mjs';
 
 const args = process.argv.slice(2);
 const repoRoot = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +31,7 @@ function help() {
 Usage:
   node install-router.mjs              # install
   node install-router.mjs --uninstall  # uninstall owned state
+  node install-router.mjs --restart-controller # restart owned watcher
   node install-router.mjs --help       # show this help
 
 Advanced path overrides:
@@ -66,8 +67,11 @@ try {
     ...(args.includes('--project-root') ? { projectRoot: path.resolve(arg('project-root')) } : {}),
   };
 
-  if (has('uninstall')) {
-    const result = uninstallRouter(options);
+  if (has('restart-controller')) {
+    const result = await restartController(options);
+    console.log(`CONTROLLER RESTART OK — ready instance ${result.instanceId}.`);
+  } else if (has('uninstall')) {
+    const result = await uninstallRouter(options);
     if (result.status === 'already-uninstalled') {
       console.log('ALREADY UNINSTALLED — no router-owned state found.');
     } else {
@@ -79,7 +83,7 @@ try {
       }
     }
   } else {
-    const result = installRouter(options);
+    const result = await installRouter(options);
     if (result.status === 'dry-run') {
       console.log(`DRY RUN OK — ${result.changes.length} candidate change(s), no files written.`);
       process.exit(0);
