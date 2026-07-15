@@ -100,7 +100,7 @@ export function writeImmutableVersion({ ownedRoot, candidate, mapping, reconcili
   } catch (error) { rmSync(staging, { recursive: true, force: true }); throw error; }
 }
 
-export function verifyVersion({ ownedRoot, versionId, expectedFingerprint }) {
+export function verifyVersion({ ownedRoot, versionId, expectedFingerprint, now = Date.now() }) {
   try {
     if (!validId(versionId)) return { valid: false, reason_code: 'invalid_version_id' };
     const p = paths(ownedRoot), dir = contained(p.versions, join(p.versions, versionId));
@@ -112,13 +112,20 @@ export function verifyVersion({ ownedRoot, versionId, expectedFingerprint }) {
     for (const file of manifest.files) { if (!/^[a-z]+\.json$/.test(file.name)) return { valid: false, reason_code: 'unsafe_file' }; const path = join(dir, file.name); if (lstatSync(path).isSymbolicLink()) return { valid: false, reason_code: 'symlink_payload' }; const bytes = readFileSync(path); if (bytes.length !== file.size || hash(bytes) !== file.fingerprint) return { valid: false, reason_code: 'file_mismatch' }; payload[file.name] = bytes.toString(); }
     const bundle = hash(stableStringify(Object.fromEntries(Object.entries(payload).sort())));
     if (bundle !== manifest.bundle_fingerprint || (expectedFingerprint && bundle !== expectedFingerprint)) return { valid: false, reason_code: 'bundle_mismatch' };
-    return { valid: true, reason_code: 'verified', version_id: versionId, bundle_fingerprint: bundle, verification_fingerprint: hash(manifest) };
+    const candidate = JSON.parse(payload['registry.json']);
+    const mapping = JSON.parse(payload['mappings.json']);
+    const evidence = JSON.parse(payload['evidence.json']);
+    const verification = JSON.parse(payload['verification.json']);
+    if (!trusted({ candidate, mapping, reconciliation: evidence.reconciliation, policy: evidence.policy, verification }, now)) {
+      return { valid: false, reason_code: 'verification_not_trusted', version_id: versionId };
+    }
+    return { valid: true, reason_code: 'verified', version_id: versionId, bundle_fingerprint: bundle, verification_fingerprint: hash(manifest), created_at: manifest.created_at };
   } catch { return { valid: false, reason_code: 'malformed_version' }; }
 }
 
-export function replaceActivePointer({ ownedRoot, destination, reason, expectedSequence, io = {} }) {
+export function replaceActivePointer({ ownedRoot, destination, reason, expectedSequence, io = {}, now = Date.now() }) {
   const p = paths(ownedRoot); mkdirSync(p.root, { recursive: true });
-  const verified = verifyVersion({ ownedRoot, versionId: destination }); if (!verified.valid) return { pointer_status: 'blocked', reason_code: verified.reason_code };
+  const verified = verifyVersion({ ownedRoot, versionId: destination, now }); if (!verified.valid) return { pointer_status: 'blocked', reason_code: verified.reason_code };
   const lock = mutationLock(p, io.lock || {});
   if (!lock.acquired) return { pointer_status: 'blocked', reason_code: lock.reason_code };
   let temp;
@@ -129,7 +136,7 @@ export function replaceActivePointer({ ownedRoot, destination, reason, expectedS
     temp = `${p.active}.tmp.${randomUUID()}`;
     durableWrite(temp, json(pointer));
     if ((io.beforeRename || (() => {}))({ destination, pointer }) === false) throw new Error('toctou');
-    const reverified = verifyVersion({ ownedRoot, versionId: destination, expectedFingerprint: verified.bundle_fingerprint }); if (!reverified.valid || reverified.verification_fingerprint !== verified.verification_fingerprint) throw new Error('verification_to_pointer_toctou');
+    const reverified = verifyVersion({ ownedRoot, versionId: destination, expectedFingerprint: verified.bundle_fingerprint, now }); if (!reverified.valid || reverified.verification_fingerprint !== verified.verification_fingerprint) throw new Error('verification_to_pointer_toctou');
     renameSync(temp, p.active);
     try { syncDir(p.root); } catch { return { pointer_status: 'recovery_required', reason_code: 'pointer_durability_uncertain', pointer }; }
     return { pointer_status: 'replaced', pointer };
@@ -148,12 +155,12 @@ export function activateCandidate(options) {
   } catch (error) { return { activation_status: 'blocked', reason_code: error.code === 'EINVAL' ? 'durability_unsupported' : 'durability_failed' }; }
 }
 
-export function recoverActiveVersion({ ownedRoot }) {
+export function recoverActiveVersion({ ownedRoot, now = Date.now() }) {
   const p = paths(ownedRoot), current = readPointer(p.active);
-  if (current && verifyVersion({ ownedRoot, versionId: current.version_id, expectedFingerprint: current.bundle_fingerprint }).valid) return { recovery_status: 'healthy', version_id: current.version_id };
-  const candidates = existsSync(p.versions) ? readdirSync(p.versions).filter(validId).map(id => ({ id, verdict: verifyVersion({ ownedRoot, versionId: id }), time: statSync(join(p.versions, id)).mtimeMs })).filter(v => v.verdict.valid).sort((a, b) => b.time - a.time || a.id.localeCompare(b.id)) : [];
+  if (current && verifyVersion({ ownedRoot, versionId: current.version_id, expectedFingerprint: current.bundle_fingerprint, now }).valid) return { recovery_status: 'healthy', version_id: current.version_id };
+  const candidates = existsSync(p.versions) ? readdirSync(p.versions).filter(validId).map(id => ({ id, verdict: verifyVersion({ ownedRoot, versionId: id, now }) })).filter(v => v.verdict.valid).sort((a, b) => b.verdict.created_at - a.verdict.created_at || a.id.localeCompare(b.id)) : [];
   if (!candidates.length) return { recovery_status: 'blocked', reason_code: 'no_valid_history' };
-  const result = replaceActivePointer({ ownedRoot, destination: candidates[0].id, reason: 'recovery' });
+  const result = replaceActivePointer({ ownedRoot, destination: candidates[0].id, reason: 'recovery', now });
   return result.pointer_status === 'replaced' ? { recovery_status: 'recovered', version_id: candidates[0].id } : { recovery_status: 'recovery_required', reason_code: result.reason_code };
 }
 
@@ -165,7 +172,7 @@ export function pruneVersionHistory({ ownedRoot, policy = DEFAULT_RETENTION_POLI
 }
 
 export function previewRollback({ ownedRoot, destination, now = Date.now() }) {
-  const p = paths(ownedRoot), source = readPointer(p.active), verdict = verifyVersion({ ownedRoot, versionId: destination });
+  const p = paths(ownedRoot), source = readPointer(p.active), verdict = verifyVersion({ ownedRoot, versionId: destination, now });
   if (!source || !verdict.valid) return { preview_status: 'blocked', reason_code: verdict.reason_code || 'missing_active_pointer' };
   const body = { schema_version: 1, source_version_id: source.version_id, destination_version_id: destination, source_sequence: source.sequence, destination_verification_fingerprint: verdict.verification_fingerprint, generated_at: now };
   return { ...body, preview_status: 'ready', preview_fingerprint: hash(body) };
@@ -175,7 +182,7 @@ export function executeRollback({ ownedRoot, preview, confirmation, now = Date.n
   if (preview?.preview_status !== 'ready' || confirmation !== preview.destination_version_id) return { rollback_status: 'blocked', reason_code: 'confirmation_mismatch' };
   const fresh = previewRollback({ ownedRoot, destination: preview.destination_version_id, now: preview.generated_at });
   if (fresh.preview_fingerprint !== preview.preview_fingerprint) return { rollback_status: 'blocked', reason_code: 'stale_preview' };
-  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io });
+  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io, now });
   const event = { schema_version: 1, source: preview.source_version_id, destination: preview.destination_version_id, time: now, outcome: result.pointer_status, reason: String(reason).slice(0, 128) };
   if (result.pointer_status === 'replaced') { appendFileSync(paths(ownedRoot).audit, json(event), { mode: 0o600 }); return { rollback_status: 'rolled_back', event }; }
   return { rollback_status: result.pointer_status === 'recovery_required' ? 'recovery_required' : 'blocked', reason_code: result.reason_code };

@@ -76,7 +76,7 @@ test('immutable activation, recovery and pointer-only rollback preserve history'
     const firstVerification = productionVerification(firstInputs, 100);
     const first = activateCandidate({ ownedRoot: root, ...firstInputs, verification: firstVerification, now: 100, reason: 'bootstrap' });
     assert.equal(first.activation_status, 'activated');
-    assert.equal(verifyVersion({ ownedRoot: root, versionId: first.version_id }).valid, true);
+    assert.equal(verifyVersion({ ownedRoot: root, versionId: first.version_id, now: 100 }).valid, true);
     const firstManifest = readFileSync(join(root, 'versions', first.version_id, 'manifest.json'), 'utf8');
 
     const secondInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 2 } };
@@ -89,7 +89,7 @@ test('immutable activation, recovery and pointer-only rollback preserve history'
     assert.equal(rolled.rollback_status, 'rolled_back');
     assert.equal(JSON.parse(readFileSync(join(root, 'active.json'), 'utf8')).version_id, first.version_id);
     assert.equal(readFileSync(join(root, 'versions', first.version_id, 'manifest.json'), 'utf8'), firstManifest);
-    assert.equal(recoverActiveVersion({ ownedRoot: root }).recovery_status, 'healthy');
+    assert.equal(recoverActiveVersion({ ownedRoot: root, now: 301 }).recovery_status, 'healthy');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -130,7 +130,9 @@ test('activation independently rejects substituted or unauthenticated production
 test('cross-process pointer CAS has exactly one winner for an expected sequence', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-activation-race-'));
   try {
-    const version = writeImmutableVersion({ ownedRoot: root, ...inputs(), verification: productionVerification(inputs(), 100), now: 100 });
+    const raceInputs = inputs();
+    const raceNow = Date.now();
+    const version = writeImmutableVersion({ ownedRoot: root, ...raceInputs, verification: productionVerification(raceInputs, raceNow), now: raceNow });
     const worker = join(root, 'race-worker.mjs');
     const activateUrl = new URL('../src/registry/activate.mjs', import.meta.url).href;
     writeFileSync(worker, `
@@ -205,14 +207,16 @@ test('invalid verification and stale pointer sequence never replace active autho
   try {
     const invalid = activateCandidate({ ownedRoot: root, ...inputs(), verification: { disposition: 'passing' } });
     assert.equal(invalid.activation_status, 'blocked');
-    const version = writeImmutableVersion({ ownedRoot: root, ...inputs(), verification: { disposition: 'passing', trusted: true, complete: true, verification_fingerprint: 'v', candidate_fingerprint: 'c', mapping_fingerprint: 'mapping', policy_fingerprint: 'p', expires_at: 9999999999999, gates: REQUIRED_ACTIVATION_GATES.map(id => ({ id, passed: true })) } });
-    const pointer = replaceActivePointer({ ownedRoot: root, destination: version.version_id, reason: 'test', expectedSequence: 0 });
+    const exact = inputs();
+    const now = Date.now();
+    const version = writeImmutableVersion({ ownedRoot: root, ...exact, verification: productionVerification(exact, now), now });
+    const pointer = replaceActivePointer({ ownedRoot: root, destination: version.version_id, reason: 'test', expectedSequence: 0, now });
     assert.equal(pointer.pointer_status, 'replaced');
     const before = readFileSync(join(root, 'active.json'), 'utf8');
-    const stale = replaceActivePointer({ ownedRoot: root, destination: version.version_id, reason: 'stale', expectedSequence: 0 });
+    const stale = replaceActivePointer({ ownedRoot: root, destination: version.version_id, reason: 'stale', expectedSequence: 0, now });
     assert.equal(stale.pointer_status, 'blocked');
     assert.equal(readFileSync(join(root, 'active.json'), 'utf8'), before);
     writeFileSync(join(root, 'active.json'), '{bad');
-    assert.notEqual(recoverActiveVersion({ ownedRoot: root }).recovery_status, 'healthy');
+    assert.notEqual(recoverActiveVersion({ ownedRoot: root, now }).recovery_status, 'healthy');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
