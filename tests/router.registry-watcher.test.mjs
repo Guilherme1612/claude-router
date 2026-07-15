@@ -81,6 +81,14 @@ test('watch creation failure cannot disable startup or five-minute repair', asyn
   await h.controller.close();
 });
 
+test('startup reconciliation failure rejects readiness instead of publishing a healthy baseline', async () => {
+  const h = harness({ async scan() { throw new Error('initial scan denied'); } });
+  await assert.rejects(h.controller.ready, /initial scan denied/);
+  assert.deepEqual(h.writes, []);
+  assert.deepEqual(h.errors, ['initial scan denied']);
+  await h.controller.close();
+});
+
 test('reconcile is single-flight and in-flight hints schedule exactly one sorted follow-up', async () => {
   let release;
   const blocked = new Promise(resolve => { release = resolve; });

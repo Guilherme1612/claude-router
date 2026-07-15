@@ -126,9 +126,11 @@ export function createRegistryWatcher(options) {
       } catch (error) { report(error); }
     }
     scheduleRepair();
-    markDirty(rootNames, true);
-    if (timer !== null) { clearTimer('work'); await startWork(); }
-  })().catch(error => { report(error); });
+    await reconcileDirty(rootNames);
+  })().catch(error => {
+    report(error);
+    throw error;
+  });
 
   return {
     ready,
