@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
+import { buildFullRegistry } from '../src/registry/build.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = join(REPO_ROOT, 'install-router.mjs');
@@ -255,6 +256,15 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     mkdirSync(dirname(firstSkill), { recursive: true });
     writeFileSync(firstSkill, '---\nname: live-skill\ncommand: /live-skill\n---\n# live\n');
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('live-skill'));
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.strategy === 'incremental');
+    const firstReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
+    const firstStatus = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
+    assert.equal(firstStatus.reconciliation.strategy, 'incremental');
+    const firstLifecycleHash = firstStatus.reconciliation.lifecycle_hash;
+    const firstFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
+    assert.deepEqual(JSON.parse(readFileSync(installed.candidatePath, 'utf8')), firstFull.registry);
+    assert.deepEqual({ diagnostics: firstReport.diagnostics, summary: firstReport.summary },
+      { diagnostics: firstFull.diagnostics, summary: firstFull.summary });
 
     const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
     process.kill(status.pid, 'SIGTERM');
@@ -267,6 +277,13 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     const restarted = await restartController({ ...f.options, repairMs: 200 });
     assert.notEqual(restarted.instanceId, status.instance_id);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('downtime-skill'));
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.lifecycle_hash !== firstLifecycleHash);
+    const repairedReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
+    assert.equal(JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation.strategy, 'incremental');
+    const repairedFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
+    assert.deepEqual(JSON.parse(readFileSync(installed.candidatePath, 'utf8')), repairedFull.registry);
+    assert.deepEqual({ diagnostics: repairedReport.diagnostics, summary: repairedReport.summary },
+      { diagnostics: repairedFull.diagnostics, summary: repairedFull.summary });
   } finally { await cleanup(f); }
 });
 

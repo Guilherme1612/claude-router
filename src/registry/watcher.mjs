@@ -177,6 +177,7 @@ export async function runRegistryWatcher(options) {
   const publish = state => atomicJson(config.status_path, {
     schema_version: 1, state, instance_id: instanceId, pid: process.pid,
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
+    ...(reconcile.lastReconciliation ? { reconciliation: reconcile.lastReconciliation } : {}),
   });
   const reconcile = createRegistryReconciler(config);
   const controller = createRegistryWatcher({
@@ -232,13 +233,15 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const writeJson = dependencies.writeJson || atomicJson;
   let baseline = acquire(acquisitionOptions);
 
-  return async ({ diff }) => {
+  const reconcile = async ({ diff }) => {
     const next = refresh(baseline, diff, acquisitionOptions);
     const built = assemble(next);
     await writeJson(config.candidate_path, built.registry);
     await writeJson(config.report_path, { diagnostics: built.diagnostics, summary: built.summary });
     baseline = next;
+    reconcile.lastReconciliation = { strategy: 'incremental', lifecycle_hash: diff.hash || hash(diff) };
   };
+  return reconcile;
 }
 
 function cliArgument(name) {

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { createRegistryReconciler, createRegistryWatcher } from '../src/registry/watcher.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
+
+function hashForTest(value) {
+  return createHash('sha256').update(stableStringify(value)).digest('hex');
+}
 
 function clock() {
   let now = 0, id = 0;
@@ -155,6 +161,10 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
   assert.equal(refreshCalls[0].previous.generation, 0);
   assert.equal(refreshCalls[1].previous.generation, 0, 'failed publication must retain acquisition baseline');
   assert.deepEqual(writes.slice(-2).map(item => item.path), ['/candidate', '/report']);
+  assert.deepEqual(reconcile.lastReconciliation, {
+    strategy: 'incremental',
+    lifecycle_hash: hashForTest(lifecycle),
+  });
 });
 
 test('close releases watchers and timers and makes callbacks inert', async () => {
