@@ -100,14 +100,26 @@ export function createRegistryWatcher(options) {
   const ready = (async () => {
     const loaded = await readState();
     baseline = loaded?.clean_scan_required ? null : loaded?.state || null;
+    const watchGroups = new Map();
     for (const root of roots) {
+      const watchPath = root.watchPath || root.path;
+      if (!watchGroups.has(watchPath)) watchGroups.set(watchPath, []);
+      watchGroups.get(watchPath).push(root);
+    }
+    for (const [watchPath, watchedRoots] of watchGroups) {
       try {
-        const handle = watchFactory(root.path, { recursive: true }, (_event, filename) => {
+        const handle = watchFactory(watchPath, { recursive: true }, (_event, filename) => {
           const relative = filename === undefined || filename === null ? null : String(filename).replaceAll('\\', '/');
-          const ignored = relative && (root.ignoredRelativePaths || []).some(prefix => (
-            relative === prefix || relative.startsWith(`${prefix}/`)
-          ));
-          if (!ignored) markDirty([root.logicalRoot]);
+          const matched = watchedRoots.filter(root => {
+            if (relative === null) return true;
+            const included = !(root.includeRelativePaths || []).length
+              || root.includeRelativePaths.some(prefix => relative === prefix || relative.startsWith(`${prefix}/`));
+            const ignored = (root.ignoredRelativePaths || []).some(prefix => (
+              relative === prefix || relative.startsWith(`${prefix}/`)
+            ));
+            return included && !ignored;
+          }).map(root => root.logicalRoot);
+          if (matched.length) markDirty(matched);
         });
         handle.on?.('error', report);
         watchers.push(handle);

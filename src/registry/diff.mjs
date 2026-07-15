@@ -15,6 +15,35 @@ function source(record) {
   return record.provenance?.[0] || {};
 }
 
+function lifecycleRecord(record) {
+  if (Array.isArray(record?.provenance)) return record;
+  if (!record?.logical_root || !record?.relative_path || !record?.entry_type) return record;
+  const project = record.logical_root.startsWith('project:');
+  const runtime = record.logical_root === 'codex_home' || record.logical_root.endsWith(':codex') ? 'codex' : 'claude';
+  return {
+    schema_version: 1,
+    type: record.entry_type,
+    name: record.relative_path,
+    canonical_identity: `fingerprint:${record.logical_root}:${record.relative_path}`,
+    lifecycle: 'ready',
+    scope: project ? { kind: 'project' } : { kind: 'global' },
+    dispatchable: true,
+    invocation: { runtime, command: record.relative_path, args: [] },
+    dependencies: { state: 'unknown', items: [] },
+    permissions: { mode: 'read-only', grants: ['read'] },
+    provenance: [{
+      runtime,
+      scope: project ? 'project' : 'global',
+      logical_root: record.logical_root,
+      relative_path: record.relative_path,
+      source_fingerprint: record.content_hash || record.target_hash || record.entry_type,
+      adapter: 'fingerprint-tree/1',
+    }],
+    runtime_variants: [{ runtime, native_identity: record.relative_path, native: {} }],
+    conflicts: [],
+  };
+}
+
 function nativeEvidence(record) {
   const variant = record.runtime_variants?.find(item => item.runtime === record.invocation?.runtime)
     || record.runtime_variants?.[0];
@@ -88,8 +117,8 @@ function sortPlain(values) {
 }
 
 export function diffFingerprintTrees(previous, current) {
-  const oldEntries = Array.isArray(previous?.entries) ? previous.entries : [];
-  const newEntries = Array.isArray(current?.entries) ? current.entries : [];
+  const oldEntries = Array.isArray(previous?.entries) ? previous.entries.map(lifecycleRecord) : [];
+  const newEntries = Array.isArray(current?.entries) ? current.entries.map(lifecycleRecord) : [];
   const diagnostics = [...(current?.diagnostics || [])];
   const uncertain = diagnostics.filter(item => ['access_denied', 'read_error', 'scan_error'].includes(item.code));
   const removalUncertain = record => record.provenance?.some(provenance => uncertain.some(item => {

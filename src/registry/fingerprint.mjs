@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   mkdir, open, readFile as readFileFs, readdir, realpath, rename, rm,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, posix, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { stableStringify } from './schema.mjs';
 
 const SCHEMA_VERSION = 1;
@@ -114,13 +114,25 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     if (spec.logicalRoot.includes('/') || spec.logicalRoot.includes('\\') || isAbsolute(spec.logicalRoot)) {
       throw new TypeError('logicalRoot must be portable');
     }
-    const canonicalRoot = await realpath(resolve(spec.path));
-    if (containmentRoot && !contained(containmentRoot, canonicalRoot)) {
+    const resolvedRoot = resolve(spec.path);
+    let canonicalRoot = null;
+    let rootMissing = false;
+    try {
+      canonicalRoot = await realpath(resolvedRoot);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      const canonicalMissingRoot = join(await realpath(dirname(resolvedRoot)), basename(resolvedRoot));
+      if (containmentRoot && !contained(containmentRoot, canonicalMissingRoot)) {
+        throw new Error(`${spec.logicalRoot} is outside configured containment root`);
+      }
+      rootMissing = true;
+    }
+    if (containmentRoot && !rootMissing && !contained(containmentRoot, canonicalRoot)) {
       throw new Error(`${spec.logicalRoot} is outside configured containment root`);
     }
     const ignoredRelativePaths = (spec.ignoredRelativePaths || []).map(portablePath);
     if (ignoredRelativePaths.some(value => !value)) throw new TypeError('ignoredRelativePaths must be portable');
-    normalizedSpecs.push({ logicalRoot: spec.logicalRoot.trim(), canonicalRoot, ignoredRelativePaths });
+    normalizedSpecs.push({ logicalRoot: spec.logicalRoot.trim(), canonicalRoot, ignoredRelativePaths, rootMissing });
   }
   normalizedSpecs.sort((a, b) => a.logicalRoot.localeCompare(b.logicalRoot));
   if (new Set(normalizedSpecs.map(spec => spec.logicalRoot)).size !== normalizedSpecs.length) {
@@ -128,6 +140,10 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
   }
   const entries = [], diagnostics = [];
   for (const spec of normalizedSpecs) {
+    if (spec.rootMissing) {
+      diagnostics.push({ code: 'root_missing', logical_root: spec.logicalRoot, relative_path: '.', reason: 'ENOENT' });
+      continue;
+    }
     await walk(spec.canonicalRoot, spec.logicalRoot, { readFile, ignoredRelativePaths: spec.ignoredRelativePaths }, entries, diagnostics);
   }
   entries.sort((a, b) => `${a.logical_root}:${a.relative_path}:${a.entry_type}`

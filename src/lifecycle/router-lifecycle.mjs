@@ -204,6 +204,10 @@ export async function installRouter(options) {
     roots: [
       { logicalRoot: 'claude_global', path: p.claudeRoot, ignoredRelativePaths: ['router'] },
       { logicalRoot: 'codex_home', path: p.codexRoot, ignoredRelativePaths: ['router'] },
+      ...(options.projectRoot ? [
+        { logicalRoot: `project:${options.scopeId || 'project'}:claude`, path: join(resolve(options.projectRoot), '.claude'), watchPath: resolve(options.projectRoot), includeRelativePaths: ['.claude'] },
+        { logicalRoot: `project:${options.scopeId || 'project'}:codex`, path: join(resolve(options.projectRoot), '.codex'), watchPath: resolve(options.projectRoot), includeRelativePaths: ['.codex'] },
+      ] : []),
     ],
     state_path: p.scanStatePath,
     candidate_path: p.candidatePath,
