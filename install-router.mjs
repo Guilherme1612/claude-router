@@ -97,6 +97,7 @@ try {
     }
     console.log(`Ownership manifest: ${result.manifestPath}`);
     console.log(`Inactive candidate: ${result.candidatePath}`);
+    console.log(`Registry control: ${result.controlPaths.join(', ')}`);
   }
 } catch (error) {
   console.error(`ROUTER LIFECYCLE FAILED: ${error.message}`);

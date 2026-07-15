@@ -71,7 +71,18 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 21);
+    assert.equal(manifest.files.length, 36);
+    assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
+    assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
+    for (const runtimeRoot of [join(f.options.claudeRoot, 'router'), join(f.options.codexRoot, 'router')]) {
+      const control = join(runtimeRoot, 'modules', 'cli', 'router-control.mjs');
+      assert.equal(existsSync(control), true);
+      const imported = await import(`${new URL(`file://${control}`).href}?fixture=${Date.now()}`);
+      assert.equal(typeof imported.runRouterControl, 'function');
+      for (const module of ['map.mjs', 'validate.mjs', 'activate.mjs', 'watcher.mjs']) {
+        assert.equal(existsSync(join(runtimeRoot, 'modules', 'registry', module)), true);
+      }
+    }
     for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {
       assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', module)), true);
     }

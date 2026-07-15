@@ -50,6 +50,7 @@ function paths(options) {
   const claudeRoot = resolve(options.claudeRoot);
   const codexRoot = resolve(options.codexRoot);
   const ownedRoot = resolve(options.ownedRoot || join(claudeRoot, 'router'));
+  const codexOwnedRoot = resolve(options.codexOwnedRoot || join(codexRoot, 'router'));
   return {
     claudeRoot,
     codexRoot,
@@ -59,6 +60,7 @@ function paths(options) {
     codexMarkerPath: resolve(options.codexMarkerPath || join(codexRoot, 'router', 'installed.json')),
     manifestPath: resolve(options.manifestPath || join(claudeRoot, 'router', 'install-manifest.json')),
     ownedRoot,
+    codexOwnedRoot,
     candidatePath: resolve(options.candidatePath || join(ownedRoot, 'candidate', 'registry.json')),
     reportPath: resolve(options.reportPath || join(ownedRoot, 'candidate', 'report.json')),
     controllerConfigPath: resolve(options.controllerConfigPath || join(ownedRoot, 'controller', 'config.json')),
@@ -207,8 +209,11 @@ export async function installRouter(options) {
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
+    'cli/router-control.mjs',
   ];
-  const moduleValues = moduleNames.map(name => [join(p.ownedRoot, 'modules', name), readFileSync(join(sourceRoot, name))]);
+  const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
+    moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])
+  ));
   const controllerConfig = {
     schema_version: 1,
     claude_root: p.claudeRoot,
@@ -297,7 +302,12 @@ export async function installRouter(options) {
         { path: p.scanStatePath, fingerprint: 'mutable', mutable: true },
       ],
       directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
-        dirname(p.controllerConfigPath), dirname(p.manifestPath)],
+        dirname(p.controllerConfigPath), dirname(p.manifestPath),
+        join(p.ownedRoot, 'modules', 'cli'), join(p.codexOwnedRoot, 'modules', 'cli')],
+      runtime_state_inventory: {
+        immutable: { path: join(p.ownedRoot, 'versions'), owned_by_version_manifests: true },
+        mutable: [p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'), p.controllerStatusPath, p.controllerControlPath, p.scanStatePath],
+      },
       bindings: [{ settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath }],
     };
     atomicWrite(p.manifestPath, JSON.stringify(manifest, null, 2) + '\n');
@@ -326,6 +336,7 @@ export async function installRouter(options) {
       controllerStatusPath: p.controllerStatusPath,
       controllerInstanceId: status.instance_id,
       configurationFingerprint,
+      controlPaths: [join(p.ownedRoot, 'modules', 'cli', 'router-control.mjs'), join(p.codexOwnedRoot, 'modules', 'cli', 'router-control.mjs')],
       changes: created,
     };
   } catch (error) {
