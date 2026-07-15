@@ -105,7 +105,8 @@ async function walk(rootPath, logicalRoot, options, entries, diagnostics, curren
 export async function scanFingerprintTree(rootSpecs, options = {}) {
   if (!Array.isArray(rootSpecs) || rootSpecs.length === 0) throw new TypeError('rootSpecs must be a non-empty array');
   const readFile = options.readFile || readFileFs;
-  const containmentRoot = options.containmentRoot ? await realpath(resolve(options.containmentRoot)) : null;
+  const resolveRealpath = options.realpath || realpath;
+  const containmentRoot = options.containmentRoot ? await resolveRealpath(resolve(options.containmentRoot)) : null;
   const normalizedSpecs = [];
   for (const spec of rootSpecs) {
     if (!spec || typeof spec.logicalRoot !== 'string' || !spec.logicalRoot.trim()) {
@@ -118,10 +119,23 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     let canonicalRoot = null;
     let rootMissing = false;
     try {
-      canonicalRoot = await realpath(resolvedRoot);
+      canonicalRoot = await resolveRealpath(resolvedRoot);
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
-      const canonicalMissingRoot = join(await realpath(dirname(resolvedRoot)), basename(resolvedRoot));
+      const missingSegments = [];
+      let existingAncestor = resolvedRoot;
+      let canonicalAncestor;
+      while (true) {
+        missingSegments.unshift(basename(existingAncestor));
+        existingAncestor = dirname(existingAncestor);
+        try {
+          canonicalAncestor = await resolveRealpath(existingAncestor);
+          break;
+        } catch (ancestorError) {
+          if (ancestorError?.code !== 'ENOENT' || dirname(existingAncestor) === existingAncestor) throw ancestorError;
+        }
+      }
+      const canonicalMissingRoot = resolve(canonicalAncestor, ...missingSegments);
       if (containmentRoot && !contained(containmentRoot, canonicalMissingRoot)) {
         throw new Error(`${spec.logicalRoot} is outside configured containment root`);
       }

@@ -226,6 +226,12 @@ test('missing configured roots produce portable stable empty fingerprint evidenc
     const empty = await scanFingerprintTree(specs, { containmentRoot: root });
     assert.equal(empty.root_hashes.length, 2);
     assert.deepEqual(empty.diagnostics.map(item => item.code), ['root_missing', 'root_missing']);
+    const nested = await scanFingerprintTree([
+      { logicalRoot: 'project:fixture:nested', path: join(root, 'absent', 'inventory', '.claude') },
+    ], { containmentRoot: root });
+    assert.deepEqual(nested.diagnostics, [{
+      code: 'root_missing', logical_root: 'project:fixture:nested', relative_path: '.', reason: 'ENOENT',
+    }]);
     mkdirSync(join(root, '.claude', 'skills'), { recursive: true });
     put(join(root, '.claude', 'skills', 'live.json'), { schema_version: 1, name: 'live' });
     const first = await scanFingerprintTree(specs, { containmentRoot: root });
@@ -237,8 +243,18 @@ test('missing configured roots produce portable stable empty fingerprint evidenc
     }]);
     assert.equal(stableStringify(first).includes(root), false);
     await assert.rejects(
-      scanFingerprintTree([{ logicalRoot: 'escape', path: join(root, '..', 'missing') }], { containmentRoot: root }),
+      scanFingerprintTree([{ logicalRoot: 'escape', path: join(root, '..', 'missing', 'nested') }], { containmentRoot: root }),
       /outside configured containment root/,
+    );
+    await assert.rejects(
+      scanFingerprintTree([{ logicalRoot: 'denied', path: join(root, 'denied') }], {
+        containmentRoot: root,
+        realpath: async path => {
+          if (path === join(root, 'denied')) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          return path;
+        },
+      }),
+      /denied/,
     );
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
