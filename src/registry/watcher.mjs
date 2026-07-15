@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import { readFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanFingerprintTree, loadFingerprintState, saveFingerprintState } from './fingerprint.mjs';
 import { diffFingerprintTrees } from './diff.mjs';
@@ -241,13 +241,29 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const recovery = dependencies.recoverActiveVersion || recoverActiveVersion;
   const writeJson = dependencies.writeJson || atomicJson;
   const readActive = dependencies.readActive || (async () => {
-    if (!config.active_path) {
+    const empty = () => {
       const registry = { schema_version: 1, records: [] };
       const bytes = `${stableStringify(registry)}\n`;
-      return { registry, bytes, fingerprint: createHash('sha256').update(bytes).digest('hex') };
+      return { registry, bytes, fingerprint: createHash('sha256').update(bytes).digest('hex'), authority_status: 'empty' };
+    };
+    if (!config.active_path) {
+      return empty();
     }
-    const bytes = await readFile(config.active_path, 'utf8');
-    return { registry: JSON.parse(bytes), bytes, fingerprint: createHash('sha256').update(bytes).digest('hex') };
+    try {
+      const pointerBytes = await readFile(config.active_path, 'utf8');
+      const pointer = JSON.parse(pointerBytes);
+      let bytes = pointerBytes;
+      if (config.activation_root && typeof pointer.version_id === 'string') {
+        const root = resolve(config.activation_root);
+        const registryPath = resolve(join(root, 'versions', pointer.version_id, 'registry.json'));
+        if (!registryPath.startsWith(`${root}/`)) throw new TypeError('active version escapes activation root');
+        bytes = await readFile(registryPath, 'utf8');
+      }
+      return { registry: JSON.parse(bytes), bytes, fingerprint: createHash('sha256').update(bytes).digest('hex'), authority_status: 'active' };
+    } catch (error) {
+      if (error?.code === 'ENOENT') return empty();
+      throw error;
+    }
   });
   let baseline = acquire(acquisitionOptions);
   let recovered = false;
@@ -282,7 +298,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     await writeJson(config.report_path, reportPublication);
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
     if (config.activation_root) {
-      if (!recovered) {
+      if (!recovered && active.authority_status !== 'empty') {
         const recoveryResult = await recovery({ ownedRoot: config.activation_root });
         recovered = true;
         if (!['healthy', 'recovered', 'blocked'].includes(recoveryResult.recovery_status)) {
