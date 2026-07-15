@@ -8,7 +8,7 @@ const hash = value => createHash('sha256').update(typeof value === 'string' || B
 const json = value => `${stableStringify(value)}\n`;
 export const DEFAULT_RETENTION_POLICY = Object.freeze({ verified_count: 8, verified_age_ms: 30 * 86400000, diagnostic_count: 20, diagnostic_age_ms: 14 * 86400000 });
 
-function paths(ownedRoot) { const root = resolve(ownedRoot); return { root, versions: join(root, 'versions'), active: join(root, 'active.json'), audit: join(root, 'audit.jsonl') }; }
+function paths(ownedRoot) { const root = resolve(ownedRoot); return { root, versions: join(root, 'versions'), active: join(root, 'active.json'), audit: join(root, 'audit.jsonl'), rollbackJournal: join(root, 'rollback-journal') }; }
 function validId(id) { return typeof id === 'string' && /^v1-[a-f0-9]{16}$/.test(id); }
 function contained(root, path) { const target = resolve(path); if (target !== root && !target.startsWith(`${root}/`)) throw new TypeError('path escapes owned root'); return target; }
 function readPointer(p) { try { const value = JSON.parse(readFileSync(p, 'utf8')); return validId(value.version_id) ? value : null; } catch { return null; } }
@@ -54,6 +54,26 @@ function mutationLock(p, options = {}) {
     }
   }
   return { acquired: false, reason_code: 'mutation_lock_timeout' };
+}
+
+function journalWrite(p, record, stage, io = {}) {
+  if (io.failJournalStage === stage) throw new Error(`injected_${stage}_journal_failure`);
+  mkdirSync(p.rollbackJournal, { recursive: true, mode: 0o700 });
+  const destination = join(p.rollbackJournal, `${record.operation_id}.json`);
+  const temporary = `${destination}.tmp.${randomUUID()}`;
+  durableWrite(temporary, json(record));
+  renameSync(temporary, destination);
+  syncDir(p.rollbackJournal); syncDir(p.root);
+  return destination;
+}
+
+function rollbackRecord({ preview, now, reason, operationId, outcome }) {
+  const safeReasons = new Set(['operator', 'rollback', 'manual', 'recovery']);
+  const safeReason = safeReasons.has(reason) ? reason : 'rollback';
+  return {
+    operation_id: operationId, source: preview.source_version_id, destination: preview.destination_version_id,
+    time: now, outcome, reason: safeReason, expected_sequence: preview.source_sequence,
+  };
 }
 
 function trusted(options, now = Date.now()) {
@@ -178,12 +198,40 @@ export function previewRollback({ ownedRoot, destination, now = Date.now() }) {
   return { ...body, preview_status: 'ready', preview_fingerprint: hash(body) };
 }
 
+export function recoverRollbackJournal({ ownedRoot }) {
+  const p = paths(ownedRoot), active = readPointer(p.active), operations = [];
+  if (!existsSync(p.rollbackJournal)) return { recovery_status: 'healthy', operations };
+  for (const name of readdirSync(p.rollbackJournal).filter(name => /^[a-f0-9-]+\.json$/.test(name)).sort()) {
+    const path = join(p.rollbackJournal, name);
+    try {
+      const record = JSON.parse(readFileSync(path, 'utf8'));
+      if (record.outcome !== 'pending') continue;
+      const outcome = active?.version_id === record.destination && active.sequence === record.expected_sequence + 1 ? 'completed' : 'not_committed';
+      const resolved = { ...record, outcome };
+      journalWrite(p, resolved, 'recovery');
+      operations.push(resolved);
+    } catch { return { recovery_status: 'recovery_required', operations, reason_code: 'rollback_journal_invalid' }; }
+  }
+  return { recovery_status: operations.length ? 'recovered' : 'healthy', operations };
+}
+
 export function executeRollback({ ownedRoot, preview, confirmation, now = Date.now(), reason = 'rollback', io }) {
   if (preview?.preview_status !== 'ready' || confirmation !== preview.destination_version_id) return { rollback_status: 'blocked', reason_code: 'confirmation_mismatch' };
   const fresh = previewRollback({ ownedRoot, destination: preview.destination_version_id, now: preview.generated_at });
   if (fresh.preview_fingerprint !== preview.preview_fingerprint) return { rollback_status: 'blocked', reason_code: 'stale_preview' };
+  const p = paths(ownedRoot), operationId = randomUUID();
+  const pending = rollbackRecord({ preview, now, reason, operationId, outcome: 'pending' });
+  try { journalWrite(p, pending, 'pending', io); }
+  catch { return { rollback_status: 'blocked', reason_code: 'journal_not_durable', operation_id: operationId }; }
   const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io, now });
-  const event = { schema_version: 1, source: preview.source_version_id, destination: preview.destination_version_id, time: now, outcome: result.pointer_status, reason: String(reason).slice(0, 128) };
-  if (result.pointer_status === 'replaced') { appendFileSync(paths(ownedRoot).audit, json(event), { mode: 0o600 }); return { rollback_status: 'rolled_back', event }; }
+  if (result.pointer_status === 'replaced') {
+    const completed = { ...pending, outcome: 'completed' };
+    try {
+      journalWrite(p, completed, 'completed', io);
+      try { appendFileSync(p.audit, json(completed), { mode: 0o600 }); } catch { /* operation journal is authoritative */ }
+      return { rollback_status: 'rolled_back', event: completed, operation_id: operationId };
+    } catch { return { rollback_status: 'committed_recovery_required', reason_code: 'journal_completion_not_durable', operation_id: operationId }; }
+  }
+  try { journalWrite(p, { ...pending, outcome: 'not_committed' }, 'completed', io); } catch { /* pending intent remains recoverable */ }
   return { rollback_status: result.pointer_status === 'recovery_required' ? 'recovery_required' : 'blocked', reason_code: result.reason_code };
 }
