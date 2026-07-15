@@ -85,8 +85,9 @@ test('SAF-08: calibration fixtures and stdout preserve every subset-specific rel
     codebase: fixtures.filter((fixture) => fixture.codebase).length,
     evolution: fixtures.filter((fixture) => fixture.evolution).length,
     coverage: fixtures.filter((fixture) => fixture.id >= 19 && fixture.id <= 27).length,
+    mapping: fixtures.filter((fixture) => fixture.phase14_mapping === true).length,
   };
-  assert.deepEqual(counts, { original: 10, codebase: 8, evolution: 3, coverage: 9 });
+  assert.deepEqual(counts, { original: 10, codebase: 8, evolution: 3, coverage: 9, mapping: 2 });
 
   const run = spawnSync(NODE, [CALIBRATE], { encoding: 'utf8' });
   assert.equal(run.status, 0, run.stderr || run.stdout);
@@ -95,7 +96,7 @@ test('SAF-08: calibration fixtures and stdout preserve every subset-specific rel
   assert.ok(codebase, 'calibration output must expose the codebase target line');
   assert.ok(Number(codebase[1]) >= 5 && Number(codebase[2]) >= 7, `codebase target regressed: ${codebase?.[0]}`);
   assert.match(run.stdout, /Evolution 3:\s+\d+\/3 \(Phase 3 new\)/);
-  assert.match(run.stdout, /Combined:\s+\d+ \/ 30 \(threshold: 21\)/);
+  assert.match(run.stdout, /Combined:\s+\d+ \/ 32 \(threshold: 21\)/);
 });
 
 test('SAF-06/SAF-07: live operator CLI release surface returns parseable privacy-safe JSON', () => {

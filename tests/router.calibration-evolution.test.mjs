@@ -26,7 +26,7 @@ test('calibration-tasks.json: total entries include originals, codebase, evoluti
   assert.ok(Array.isArray(tasks), 'tasks must be an array');
   assert.ok(tasks.length >= 25 && tasks.length <= 32, `expected 25-32 entries, got ${tasks.length}`);
   const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   assert.equal(originalCount, 10, '10 Phase-1 originals must be preserved');
@@ -76,7 +76,7 @@ test('calibration-tasks.json: every evolution fixture right.mode (if set) exists
 test('pass threshold: originalCount + 1 codebase + 1 evolution + Phase 05 coverage', () => {
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
   const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   const expectedThreshold = originalCount + 1 + 1 + phase05Count;
