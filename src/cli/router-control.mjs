@@ -14,6 +14,16 @@ function canonical(command, ok, reasonCode, data = {}, warnings = []) {
   return { schema_version: 1, command, ok, reason_code: reasonCode, data, warnings: [...warnings].sort() };
 }
 
+function activeSourceFailure(command, root, active) {
+  if (!active) return { result: canonical(command, false, 'invalid_active_pointer', { next_action: 'run_registry_recovery' }), exitCode: EXIT.invalid };
+  const verdict = verifyVersion({ ownedRoot: root, versionId: active.version_id });
+  if (verdict.valid) return null;
+  return {
+    result: canonical(command, false, 'invalid_active_version', { source_verdict: verdict, next_action: 'run_registry_recovery' }, ['active authority is unsafe; recover before inspection or mutation']),
+    exitCode: EXIT.unsafe,
+  };
+}
+
 function pointer(root) {
   try {
     const value = JSON.parse(readFileSync(join(root, 'active.json'), 'utf8'));
@@ -139,9 +149,8 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   const active = pointer(root);
   if (command === 'status') {
     if (positional.length !== 1) return { result: canonical('status', false, 'invalid_arguments'), exitCode: EXIT.usage };
-    if (!active) return { result: canonical('status', false, 'invalid_active_pointer'), exitCode: EXIT.invalid };
+    const unsafe = activeSourceFailure('status', root, active); if (unsafe) return unsafe;
     const version = readVersion(root, active.version_id);
-    if (!version.verdict.valid) return { result: canonical('status', false, version.verdict.reason_code), exitCode: EXIT.invalid };
     return { result: canonical('status', true, 'healthy', { active: { ...projection(active.version_id, version), sequence: active.sequence }, versions: versionIds(root) }), exitCode: 0 };
   }
   if (command === 'registry' && positional[1] === 'verify') {
@@ -153,6 +162,7 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   }
   if (command === 'diff') {
     if (![1, 3].includes(positional.length)) return { result: canonical('diff', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    if (positional.length === 1) { const unsafe = activeSourceFailure('diff', root, active); if (unsafe) return unsafe; }
     const ids = versionIds(root), sourceId = positional[1] || active?.version_id, destinationId = positional[2] || ids.find(id => id !== sourceId) || sourceId;
     if (!sourceId || !destinationId) return { result: canonical('diff', false, 'insufficient_history'), exitCode: EXIT.invalid };
     const data = diffVersions(root, sourceId, destinationId);
@@ -160,7 +170,7 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   }
   if (command === 'explain') {
     if (positional.length > 2) return { result: canonical('explain', false, 'invalid_arguments'), exitCode: EXIT.usage };
-    if (!active) return { result: canonical('explain', false, 'invalid_active_pointer'), exitCode: EXIT.invalid };
+    const unsafe = activeSourceFailure('explain', root, active); if (unsafe) return unsafe;
     const version = readVersion(root, active.version_id);
     if (!version.verdict.valid) return { result: canonical('explain', false, version.verdict.reason_code), exitCode: EXIT.invalid };
     const rows = version.mapping.subjects || version.mapping.results || [];
@@ -171,6 +181,7 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   }
   if (command === 'rollback') {
     if (positional.length !== 2 || !VERSION_ID.test(positional[1])) return { result: canonical('rollback', false, 'invalid_version_id'), exitCode: EXIT.usage };
+    const unsafe = activeSourceFailure('rollback', root, active); if (unsafe) return unsafe;
     const destination = positional[1], preview = previewRollback({ ownedRoot: root, destination });
     if (preview.preview_status !== 'ready') return { result: canonical('rollback', false, preview.reason_code, { preview }), exitCode: EXIT.unsafe };
     const diff = diffVersions(root, preview.source_version_id, destination);
