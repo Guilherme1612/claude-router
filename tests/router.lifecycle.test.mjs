@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { installRouter, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
+import { installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = join(REPO_ROOT, 'install-router.mjs');
@@ -32,6 +32,7 @@ function fixture({ withSettings = true } = {}) {
 }
 
 function cleanup(f) {
+  try { uninstallRouter(f.options); } catch { /* fixture may be intentionally corrupt */ }
   rmSync(f.root, { recursive: true, force: true });
 }
 
@@ -60,7 +61,14 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 9);
+    assert.equal(manifest.files.length, 15);
+    for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs']) {
+      assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', module)), true);
+    }
+    const status = JSON.parse(readFileSync(result.controllerStatusPath, 'utf8'));
+    assert.equal(status.state, 'ready');
+    assert.equal(status.configuration_fingerprint, result.configurationFingerprint);
+    assert.equal(Number.isInteger(status.pid), true);
     assert.equal(existsSync(result.candidatePath), true);
     assert.equal(JSON.parse(readFileSync(result.reportPath, 'utf8')).summary.activated, false);
   } finally { cleanup(f); }
@@ -219,6 +227,35 @@ test('CLI provides symmetric install and uninstall lifecycle', () => {
   } finally { cleanup(f); }
 });
 
+test('owned controller restarts cooperatively with a new ready instance', () => {
+  const f = fixture();
+  try {
+    const installed = installRouter(f.options);
+    const restarted = restartController(f.options);
+    assert.notEqual(restarted.instanceId, installed.controllerInstanceId);
+    assert.equal(restarted.ready, true);
+    assert.equal(JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).instance_id, restarted.instanceId);
+  } finally { cleanup(f); }
+});
+
+test('controller launch failure rolls back exact bytes and leaves no child', () => {
+  const f = fixture();
+  try {
+    const before = snapshot(f.root);
+    assert.throws(() => installRouter({
+      ...f.options,
+      launchController() { return { pid: 999999, kill() {} }; },
+      readinessTimeoutMs: 10,
+    }), /controller readiness/);
+    assert.deepEqual(snapshot(f.root), before);
+  } finally { cleanup(f); }
+});
+
+test('prompt hook source has no watcher, scan, or registry build work', () => {
+  const source = readFileSync(join(REPO_ROOT, 'tests/router.mjs.snapshot'), 'utf8');
+  assert.doesNotMatch(source, /fs\.watch|scanFingerprintTree|buildFullRegistry|createRegistryWatcher/);
+});
+
 test('CLI help leads with one-command install and uninstall', () => {
   const result = spawnSync(process.execPath, [INSTALLER, '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0);
@@ -227,7 +264,7 @@ test('CLI help leads with one-command install and uninstall', () => {
 });
 
 test('production lifecycle stays standard-library-only and offline', () => {
-  for (const relative of ['install-router.mjs', 'src/lifecycle/router-lifecycle.mjs']) {
+  for (const relative of ['install-router.mjs', 'src/lifecycle/router-lifecycle.mjs', 'src/registry/watcher.mjs']) {
     const source = readFileSync(join(REPO_ROOT, relative), 'utf8');
     const imports = [...source.matchAll(/from\s+['"]([^'"]+)['"]/g)].map((match) => match[1]);
     assert.ok(imports.every((specifier) => specifier.startsWith('node:') || specifier.startsWith('.')),
