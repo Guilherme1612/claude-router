@@ -62,13 +62,21 @@ function mappingRows(mapping) {
   })).sort((a, b) => a.subject_id.localeCompare(b.subject_id));
 }
 
+function boundedResult(values) {
+  const ordered = values.slice(0, MAX_DIFF);
+  return {
+    values: ordered,
+    meta: { total: values.length, returned: ordered.length, truncated: values.length > MAX_DIFF, limit: MAX_DIFF, next_offset: values.length > MAX_DIFF ? MAX_DIFF : null },
+  };
+}
+
 function diffVersions(root, sourceId, destinationId) {
   const source = readVersion(root, sourceId), destination = readVersion(root, destinationId);
   if (!source.verdict.valid || !destination.verdict.valid) return { ok: false, reason_code: !source.verdict.valid ? source.verdict.reason_code : destination.verdict.reason_code };
   const sourceRecords = new Map((source.registry.records || []).map(record => [record.id, record]));
   const destinationRecords = new Map((destination.registry.records || []).map(record => [record.id, record]));
-  const recordIds = [...new Set([...sourceRecords.keys(), ...destinationRecords.keys()])].sort().slice(0, MAX_DIFF);
-  const recordChanges = recordIds.flatMap(id => {
+  const recordIds = [...new Set([...sourceRecords.keys(), ...destinationRecords.keys()])].sort();
+  const allRecordChanges = recordIds.flatMap(id => {
     const before = sourceRecords.get(id), after = destinationRecords.get(id);
     if (!before) return [{ id, change: 'added' }];
     if (!after) return [{ id, change: 'removed' }];
@@ -76,12 +84,17 @@ function diffVersions(root, sourceId, destinationId) {
   });
   const sourceMappings = new Map(mappingRows(source.mapping).map(row => [row.subject_id, row]));
   const destinationMappings = new Map(mappingRows(destination.mapping).map(row => [row.subject_id, row]));
-  const mappingChanges = [...new Set([...sourceMappings.keys(), ...destinationMappings.keys()])].sort().slice(0, MAX_DIFF).flatMap(subjectId => {
+  const allMappingChanges = [...new Set([...sourceMappings.keys(), ...destinationMappings.keys()])].sort().flatMap(subjectId => {
     const before = sourceMappings.get(subjectId), after = destinationMappings.get(subjectId);
     if (stableStringify(before) === stableStringify(after)) return [];
     return [{ subject_id: subjectId, from: before?.target_id || null, to: after?.target_id || null }];
   });
-  return { ok: true, source: projection(sourceId, source), destination: projection(destinationId, destination), record_changes: recordChanges, mapping_changes: mappingChanges };
+  const records = boundedResult(allRecordChanges), mappings = boundedResult(allMappingChanges);
+  return {
+    ok: true, source: projection(sourceId, source), destination: projection(destinationId, destination),
+    record_changes: records.values, record_changes_meta: records.meta,
+    mapping_changes: mappings.values, mapping_changes_meta: mappings.meta,
+  };
 }
 
 function parse(argv) {
@@ -165,7 +178,9 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
     const detail = {
       preview: { ...preview, source: projection(preview.source_version_id, source), destination: projection(destination, target) },
       record_changes: diff.record_changes,
+      record_changes_meta: diff.record_changes_meta,
       mapping_changes: diff.mapping_changes,
+      mapping_changes_meta: diff.mapping_changes_meta,
       verification: target.verdict,
       mutation: { type: 'active_pointer_replacement_only', path: 'active.json', expected_sequence: preview.source_sequence, next_sequence: preview.source_sequence + 1 },
     };
