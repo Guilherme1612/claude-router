@@ -1,8 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler } from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
+import { REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
 
 function hashForTest(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -218,6 +222,35 @@ test('eligible watcher pipeline maps then verifies then activates, including saf
   await reconcile({ diff: { events: [], diagnostics: [] } });
   assert.deepEqual(calls, ['map', 'verify', 'activate']);
   assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
+});
+
+test('installed activation paths bootstrap one immutable version and active pointer', async () => {
+  const ownedRoot = mkdtempSync(join(tmpdir(), 'router-watcher-activation-'));
+  const candidate = { schema_version: 1, records: [reconcilerCapability()] };
+  const now = Date.now();
+  const verification = {
+    schema_version: 1, trusted: true, complete: true, disposition: 'passing', expires_at: now + 60_000,
+    gates: REQUIRED_ACTIVATION_GATES.map(id => ({ id, passed: true })),
+  };
+  try {
+    const reconcile = createTestRegistryReconciler({
+      candidate_path: join(ownedRoot, 'candidate.json'), report_path: join(ownedRoot, 'report.json'),
+      activation_root: ownedRoot, active_path: join(ownedRoot, 'active.json'),
+    }, {
+      acquireRegistry: () => ({ generation: 0 }),
+      refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+      assembleRegistry: () => ({ registry: candidate, diagnostics: [], summary: {} }),
+      reconcileCandidate: options => ({ disposition: 'eligible', candidate_fingerprint: hashForTest(candidate), report_fingerprint: 'report', verdicts: [], active_bytes: options.active.bytes, active_fingerprint: options.active.fingerprint }),
+      mapCandidateRegistry: () => ({ schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' }),
+      produceActivationVerification: () => verification,
+    });
+    await reconcile({ diff: { events: [], diagnostics: [] } });
+    assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
+    assert.equal(existsSync(join(ownedRoot, 'active.json')), true);
+    assert.equal(existsSync(join(ownedRoot, 'versions')), true);
+  } finally {
+    rmSync(ownedRoot, { recursive: true, force: true });
+  }
 });
 
 test('quarantine publishes corrective diagnostics and preserves exact active authority', async () => {

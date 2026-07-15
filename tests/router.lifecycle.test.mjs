@@ -74,6 +74,10 @@ test('one command installs router, binding, Codex marker, and complete ownership
     assert.equal(manifest.files.length, 36);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
+    const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
+    const activationRoot = join(f.options.claudeRoot, 'router');
+    assert.equal(controllerConfig.activation_root, activationRoot);
+    assert.equal(controllerConfig.active_path, join(activationRoot, 'active.json'));
     for (const runtimeRoot of [join(f.options.claudeRoot, 'router'), join(f.options.codexRoot, 'router')]) {
       const control = join(runtimeRoot, 'modules', 'cli', 'router-control.mjs');
       assert.equal(existsSync(control), true);
