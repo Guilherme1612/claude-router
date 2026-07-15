@@ -127,6 +127,13 @@ test('D-03 weak similarity is remove-plus-add with sorted non-authoritative diag
   assert.equal(result.diagnostics[0].code, 'possible_match');
   assert.equal(result.diagnostics[0].authoritative, false);
   assert.deepEqual(result.diagnostics, [...result.diagnostics].sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))));
+
+  const weakScope = diffFingerprintTrees(
+    tree([observation()]),
+    tree([observation({ scope: { kind: 'project', repository: 'repo:router', worktree: 'main' } })]),
+  );
+  assert.deepEqual(eventTypes(weakScope), ['removed', 'added']);
+  assert.equal(weakScope.diagnostics[0].authoritative, false);
 });
 
 test('D-04 emits one event with fixed precedence and ordered facets for compound changes', () => {
@@ -178,6 +185,7 @@ test('portable fingerprint scan excludes absolute roots and filesystem metadata'
       assert.equal(bytes.toLowerCase().includes(`\"${forbidden}`), false, forbidden);
     }
     assert.deepEqual(first.entries.map((entry) => entry.relative_path), ['skills/a.json', 'skills/b.json']);
+    assert.deepEqual(first.subtree_hashes.map((entry) => entry.relative_path), ['.', 'skills']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -197,7 +205,12 @@ test('fingerprint scanner rejects root escapes and reports access denial without
     });
     assert.deepEqual(denied.entries, []);
     assert.equal(denied.diagnostics[0].code, 'access_denied');
-    const result = diffFingerprintTrees(tree([observation()]), denied);
+    const deniedObservation = observation({
+      logical_root: 'fixture',
+      relative_path: 'safe.json',
+      provenance: provenance('fixture', 'safe.json'),
+    });
+    const result = diffFingerprintTrees(tree([deniedObservation]), denied);
     assert.equal(result.events.some((event) => event.primary === 'removed'), false);
     assert.equal(result.events.some((event) => event.primary === 'permission_changed'), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
@@ -218,6 +231,7 @@ test('state cache round-trips atomically and invalid states request a clean scan
       JSON.stringify({ ...snapshot, roots: ['other'] }),
       JSON.stringify({ ...snapshot, entries: [{ ...snapshot.entries[0], relative_path: '../escape' }] }),
       JSON.stringify({ ...snapshot, entries: [{ ...snapshot.entries[0], relative_path: '/absolute' }] }),
+      JSON.stringify({ ...snapshot, root_hashes: [{ logical_root: 'fixture', hash: 'tampered' }] }),
     ];
     for (const value of invalidCases) {
       writeFileSync(statePath, value);
