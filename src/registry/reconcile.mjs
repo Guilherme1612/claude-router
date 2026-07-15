@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { stableCapabilityId } from './identity.mjs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
+import { reconcileHookInventory } from './hook-reconcile.mjs';
 
 function fingerprint(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value), 'utf8').digest('hex');
@@ -192,7 +193,11 @@ export function reconcileCandidate(options = {}) {
       if (!claims.has(alias.id)) claims.set(alias.id, new Set());
       claims.get(alias.id).add(alias.target_id);
     }
-    const verdicts = wholeCandidateVerdicts(candidate, options);
+    const hookInventory = options.hookInventory || candidate.records
+      .map(record => record.hook_observation)
+      .filter(Boolean);
+    const hookResult = reconcileHookInventory(hookInventory);
+    const verdicts = [...wholeCandidateVerdicts(candidate, options), ...hookResult.verdicts];
     for (const [id, targets] of [...claims].sort(([left], [right]) => left.localeCompare(right))) {
       if (targets.size < 2) continue;
       verdicts.push(verdict({
