@@ -71,7 +71,7 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 18);
+    assert.equal(manifest.files.length, 21);
     for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {
       assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', module)), true);
     }

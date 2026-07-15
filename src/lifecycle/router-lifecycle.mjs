@@ -204,6 +204,7 @@ export async function installRouter(options) {
   const moduleNames = [
     'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
+    'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
   ];
