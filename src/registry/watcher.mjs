@@ -10,7 +10,7 @@ import { diffFingerprintTrees } from './diff.mjs';
 import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from './build.mjs';
 import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
 import { mapCandidateRegistry } from './map.mjs';
-import { produceActivationVerification } from './validate.mjs';
+import { isCanonicalMappingSafe, produceActivationVerification } from './validate.mjs';
 import { activateCandidate, recoverActiveVersion } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 
@@ -298,17 +298,23 @@ export function createRegistryReconciler(config, dependencies = {}) {
     await writeJson(config.report_path, reportPublication);
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
     if (config.activation_root) {
+      let recoveryReady = recovered || active.authority_status === 'empty';
       if (!recovered && active.authority_status !== 'empty') {
         const recoveryResult = await recovery({ ownedRoot: config.activation_root });
-        recovered = true;
-        if (!['healthy', 'recovered', 'blocked'].includes(recoveryResult.recovery_status)) {
+        if (['healthy', 'recovered'].includes(recoveryResult.recovery_status)) {
+          recovered = true;
+          recoveryReady = true;
+        } else if (recoveryResult.recovery_status === 'blocked') {
+          activation = { activation_status: 'preserved', reason_code: recoveryResult.reason_code || 'recovery_blocked' };
+          recoveryReady = false;
+        } else {
           activation = { activation_status: 'recovery_required', reason_code: recoveryResult.reason_code };
+          recoveryReady = false;
         }
       }
-      if (report.disposition === 'eligible' && activation.activation_status !== 'recovery_required') {
+      if (report.disposition === 'eligible' && recoveryReady) {
         const mapping = await mapper({ candidate: built.registry, reconciliation: report, lifecycle: diff, existingMappings: config.mappings || [], policy: config.mapping_policy });
-        const ambiguous = mapping.disposition === 'ambiguous' || mapping.results?.some(item => item.disposition === 'ambiguous');
-        if (!ambiguous) {
+        if (isCanonicalMappingSafe(mapping)) {
           const verification = await verifier({ candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {} });
           if (verification.disposition === 'passing' && verification.complete === true) {
             activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher' });

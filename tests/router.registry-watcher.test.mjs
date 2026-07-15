@@ -216,7 +216,7 @@ test('eligible watcher pipeline maps then verifies then activates, including saf
     reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{}\n', active_fingerprint: 'active' }),
     writeJson: async () => {},
     recoverActiveVersion: async () => ({ recovery_status: 'healthy' }),
-    mapCandidateRegistry: async () => { calls.push('map'); return { disposition: 'complete', results: [{ disposition: 'unmapped' }], report_fingerprint: 'map' }; },
+    mapCandidateRegistry: async () => { calls.push('map'); return { schema_version: 1, subjects: [{ disposition: 'unmapped' }], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' }; },
     produceActivationVerification: async () => { calls.push('verify'); return { disposition: 'passing', complete: true }; },
     activateCandidate: async () => { calls.push('activate'); return { activation_status: 'activated' }; },
   });

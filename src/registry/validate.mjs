@@ -34,10 +34,16 @@ const inProcess = (id, validate, threshold) => Object.freeze({ id, version: '1',
   catch { return { passed: false, reason_code: 'malformed_input', measured: {}, threshold }; }
 } });
 
+export function isCanonicalMappingSafe(mapping) {
+  if (!mapping || mapping.schema_version !== 1 || !Array.isArray(mapping.subjects)) return false;
+  if (!mapping.summary || mapping.summary.disposition !== 'complete' || mapping.summary.ambiguous !== 0) return false;
+  return mapping.subjects.every(subject => subject && ['mapped', 'unmapped'].includes(subject.disposition));
+}
+
 export const PRODUCTION_GATE_RUNNERS = Object.freeze({
   incremental_full_equivalence: inProcess('incremental_full_equivalence', ({ candidate }) => candidate?.schema_version === 1, { equality: 'exact' }),
   reconciliation_safety: inProcess('reconciliation_safety', ({ reconciliation }) => reconciliation?.disposition === 'eligible' && !(reconciliation.verdicts || []).some(v => v.dispatchable === false), { blocking_findings: 0 }),
-  mapping_integrity: inProcess('mapping_integrity', ({ mapping }) => mapping && !['ambiguous', 'invalid'].includes(mapping.disposition) && !(mapping.results || []).some(v => v.disposition === 'ambiguous'), { ambiguous: 0 }),
+  mapping_integrity: inProcess('mapping_integrity', ({ mapping }) => isCanonicalMappingSafe(mapping), { ambiguous: 0 }),
   calibration_quality: subprocess('calibration_quality', ['router.calibrate.mjs'], 30_000, { policy: 'repository-owned' }),
   regression_suite: subprocess('regression_suite', ['--test', 'tests/router.registry-schema.test.mjs', 'tests/router.adapters.test.mjs', 'tests/router.registry-diff.test.mjs', 'tests/router.registry-reconcile.test.mjs', 'tests/router.route-targets.test.mjs', 'tests/router.registry-map.test.mjs'], 120_000, { failures: 0 }),
   privacy: subprocess('privacy', ['--test', 'tests/router.privacy.test.mjs'], 120_000, { forbidden_evidence: 0 }),
