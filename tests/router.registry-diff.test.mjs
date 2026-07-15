@@ -216,6 +216,33 @@ test('fingerprint scanner rejects root escapes and reports access denial without
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('missing configured roots produce portable stable empty fingerprint evidence', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-missing-roots-'));
+  try {
+    const specs = [
+      { logicalRoot: 'project:fixture:claude', path: join(root, '.claude') },
+      { logicalRoot: 'project:fixture:codex', path: join(root, '.codex') },
+    ];
+    const empty = await scanFingerprintTree(specs, { containmentRoot: root });
+    assert.equal(empty.root_hashes.length, 2);
+    assert.deepEqual(empty.diagnostics.map(item => item.code), ['root_missing', 'root_missing']);
+    mkdirSync(join(root, '.claude', 'skills'), { recursive: true });
+    put(join(root, '.claude', 'skills', 'live.json'), { schema_version: 1, name: 'live' });
+    const first = await scanFingerprintTree(specs, { containmentRoot: root });
+    const second = await scanFingerprintTree(specs, { containmentRoot: root });
+    assert.equal(first.hash, second.hash);
+    assert.equal(first.entries.length, 1);
+    assert.deepEqual(first.diagnostics, [{
+      code: 'root_missing', logical_root: 'project:fixture:codex', relative_path: '.', reason: 'ENOENT',
+    }]);
+    assert.equal(stableStringify(first).includes(root), false);
+    await assert.rejects(
+      scanFingerprintTree([{ logicalRoot: 'escape', path: join(root, '..', 'missing') }], { containmentRoot: root }),
+      /outside configured containment root/,
+    );
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('state cache round-trips atomically and invalid states request a clean scan', async () => {
   const root = mkdtempSync(join(tmpdir(), 'registry-fingerprint-state-'));
   const statePath = join(root, 'cache/state.json');

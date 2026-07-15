@@ -160,3 +160,32 @@ test('close releases watchers and timers and makes callbacks inert', async () =>
   await h.scheduler.advance(600_000);
   assert.equal(h.scans.length, 1);
 });
+
+test('ancestor watch routes project prefixes and filename-less hints without unrelated noise', async () => {
+  const scheduler = clock();
+  let callback;
+  const reconciled = [];
+  const controller = createRegistryWatcher({
+    roots: [
+      { logicalRoot: 'project:fixture:claude', path: '/project/.claude', watchPath: '/project', includeRelativePaths: ['.claude'] },
+      { logicalRoot: 'project:fixture:codex', path: '/project/.codex', watchPath: '/project', includeRelativePaths: ['.codex'] },
+    ],
+    scheduler, debounceMs: 1, repairMs: 10_000,
+    watchFactory(path, _options, handler) { assert.equal(path, '/project'); callback = handler; return { close() {} }; },
+    readState: async () => ({ clean_scan_required: true }),
+    scan: async () => ({ schema_version: 1, roots: [], entries: [], diagnostics: [], hash: 'scan' }),
+    diff: () => ({ events: [], diagnostics: [] }),
+    reconcile: async context => { reconciled.push(context.roots); },
+    writeState: async () => {},
+  });
+  await controller.ready;
+  reconciled.length = 0;
+  callback('change', 'README.md'); await scheduler.advance(1); assert.deepEqual(reconciled, []);
+  callback('change', '.claude/skills/a/SKILL.md'); await scheduler.advance(1);
+  assert.deepEqual(reconciled.pop(), ['project:fixture:claude']);
+  callback('change', '.codex'); await scheduler.advance(1);
+  assert.deepEqual(reconciled.pop(), ['project:fixture:codex']);
+  callback('rename'); await scheduler.advance(1);
+  assert.deepEqual(reconciled.pop(), ['project:fixture:claude', 'project:fixture:codex']);
+  await controller.close();
+});

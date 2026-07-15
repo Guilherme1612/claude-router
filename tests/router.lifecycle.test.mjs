@@ -270,6 +270,30 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
   } finally { await cleanup(f); }
 });
 
+test('installed project ancestor watches initially absent Claude and Codex inventories', async () => {
+  const f = fixture();
+  const projectRoot = join(f.root, 'project');
+  mkdirSync(projectRoot, { recursive: true });
+  const options = { ...f.options, projectRoot, scopeId: 'fixture', repairMs: 10_000 };
+  try {
+    const installed = await installRouter(options);
+    const config = JSON.parse(readFileSync(join(f.options.claudeRoot, 'router', 'controller', 'config.json'), 'utf8'));
+    assert.equal(config.repair_ms, 10_000);
+    assert.deepEqual(config.roots.filter(root => root.logicalRoot.startsWith('project:')), [
+      { logicalRoot: 'project:fixture:claude', path: join(projectRoot, '.claude'), watchPath: projectRoot, includeRelativePaths: ['.claude'] },
+      { logicalRoot: 'project:fixture:codex', path: join(projectRoot, '.codex'), watchPath: projectRoot, includeRelativePaths: ['.codex'] },
+    ]);
+    const claudeSkill = join(projectRoot, '.claude', 'skills', 'project-live', 'SKILL.md');
+    mkdirSync(dirname(claudeSkill), { recursive: true });
+    writeFileSync(claudeSkill, '---\nname: project-live\ncommand: /project-live\n---\n# project live\n');
+    await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-live'));
+    const codexSkill = join(projectRoot, '.codex', 'skills', 'project-codex', 'SKILL.md');
+    mkdirSync(dirname(codexSkill), { recursive: true });
+    writeFileSync(codexSkill, '---\nname: project-codex\ncommand: $project-codex\n---\n# project codex\n');
+    await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-codex'));
+  } finally { await cleanup({ ...f, options }); }
+});
+
 test('controller launch failure rolls back exact bytes and leaves no child', async () => {
   const f = fixture();
   try {
