@@ -5,6 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { spawn } from 'node:child_process';
 import {
   PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES, createTestActivationVerifier, produceActivationVerification,
 } from '../src/registry/validate.mjs';
@@ -42,6 +43,16 @@ function productionVerification(exact, now = 100) {
 function resealVerification(verification) {
   const { verification_fingerprint: _ignored, ...canonical } = verification;
   return { ...canonical, verification_fingerprint: hash(canonical) };
+}
+
+function childResult(child) {
+  return new Promise((resolve, reject) => {
+    let stdout = '', stderr = '';
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve(JSON.parse(stdout)) : reject(new Error(stderr || `child exit ${code}`)));
+  });
 }
 
 test('trusted verifier is complete, bound, fresh, and fails closed', async () => {
@@ -114,6 +125,36 @@ test('activation independently rejects substituted or unauthenticated production
       assert.equal(existsSync(join(root, 'active.json')), false, name);
     } finally { await rm(root, { recursive: true, force: true }); }
   }
+});
+
+test('cross-process pointer CAS has exactly one winner for an expected sequence', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-activation-race-'));
+  try {
+    const version = writeImmutableVersion({ ownedRoot: root, ...inputs(), verification: productionVerification(inputs(), 100), now: 100 });
+    const worker = join(root, 'race-worker.mjs');
+    const activateUrl = new URL('../src/registry/activate.mjs', import.meta.url).href;
+    writeFileSync(worker, `
+      import { existsSync, writeFileSync } from 'node:fs';
+      import { replaceActivePointer } from ${JSON.stringify(activateUrl)};
+      const [root, destination, marker, peer] = process.argv.slice(2);
+      const result = replaceActivePointer({ ownedRoot: root, destination, expectedSequence: 0, reason: marker, io: {
+        beforeRename() {
+          writeFileSync(marker, 'ready');
+          const deadline = Date.now() + 250;
+          while (!existsSync(peer) && Date.now() < deadline) {}
+        },
+      }});
+      process.stdout.write(JSON.stringify(result));
+    `);
+    const markerA = join(root, 'writer-a.ready'), markerB = join(root, 'writer-b.ready');
+    const spawnWorker = (marker, peer) => spawn(process.execPath, [worker, root, version.version_id, marker, peer], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const results = await Promise.all([childResult(spawnWorker(markerA, markerB)), childResult(spawnWorker(markerB, markerA))]);
+    assert.equal(results.filter(result => result.pointer_status === 'replaced').length, 1);
+    const loser = results.find(result => result.pointer_status !== 'replaced');
+    assert.equal(loser.pointer_status, 'blocked');
+    assert.equal(loser.reason_code, 'stale_pointer_sequence');
+    assert.equal(JSON.parse(readFileSync(join(root, 'active.json'), 'utf8')).sequence, 1);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test('invalid verification and stale pointer sequence never replace active authority', async () => {
