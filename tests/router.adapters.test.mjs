@@ -64,6 +64,7 @@ test('Claude native discovery covers global, plugin, agents-store, project, hook
     assert.ok(result.observations.some((entry) => entry.scope.kind === 'project'));
     assert.equal(result.observations.find((entry) => entry.name === 'reviewer').dispatchable, false);
     assert.equal(result.observations.find((entry) => entry.name === 'ship').invocation.command, '/ship');
+    assert.ok(result.observations.filter(entry => ['hook', 'binding'].includes(entry.type)).every(entry => entry.hook_observation));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'malformed_artifact'));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'unsupported_schema'));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'path_escape'));
@@ -80,6 +81,7 @@ test('Codex native discovery covers skills, plugins, agents, hooks, configuratio
     ]));
     assert.ok(result.observations.some((entry) => entry.scope.kind === 'project'));
     assert.equal(result.observations.find((entry) => entry.name === 'plan').invocation.command, '$plan');
+    assert.ok(result.observations.filter(entry => ['hook', 'binding'].includes(entry.type)).every(entry => entry.hook_observation));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'malformed_artifact'));
     assert.ok(result.diagnostics.some((entry) => entry.code === 'unsupported_schema'));
     assertPortable(result, f.root);
