@@ -138,3 +138,70 @@ test('alias-set evaluation is atomic under permutation and injected commit failu
     assert.equal(result.active_fingerprint, active.fingerprint);
   }
 });
+
+test('whole-candidate dependency, permission, scope, collision, and ambiguity matrix fails closed', () => {
+  const matrix = [
+    {
+      code: 'dependency_unavailable',
+      records: [capability({ dependencies: { state: 'declared', items: [{ id: 'binary:missing', available: false }] }, dispatchable: false })],
+    },
+    {
+      code: 'permission_missing',
+      records: [capability({ permissions: { required: ['filesystem:read'], grants: [] } })],
+    },
+    {
+      code: 'permission_denied',
+      records: [capability({ permissions: { required: ['network'], grants: [], denied: ['network'] } })],
+    },
+    {
+      code: 'scope_inapplicable',
+      records: [capability({ scope: { kind: 'project', repository: 'repo:other', worktree: 'main' } })],
+      scope: { kind: 'project', repository: 'repo:router', worktree: 'main' },
+    },
+    {
+      code: 'canonical_identity_collision',
+      records: [capability({ name: 'one', canonical_identity: 'router/collision' }), capability({ name: 'two', canonical_identity: 'router/collision' })],
+    },
+    {
+      code: 'native_identity_collision',
+      records: [capability({ name: 'one', canonical_identity: 'router/one', runtime_variants: [{ runtime: 'claude', native_identity: 'skill:shared' }] }), capability({ name: 'two', canonical_identity: 'router/two', runtime_variants: [{ runtime: 'claude', native_identity: 'skill:shared' }] })],
+    },
+    {
+      code: 'mapping_ambiguous',
+      records: [capability({ name: 'one' }), capability({ name: 'two' })],
+      mappings: [{ subject_id: 'route:planner', target_ids: ['router/one', 'router/two'] }],
+    },
+  ];
+  for (const row of matrix) {
+    const result = reconcileCandidate({ candidate: candidate(row.records), scope: row.scope, mappings: row.mappings });
+    assert.equal(result.disposition, 'quarantined', row.code);
+    const finding = result.verdicts.find(value => value.code === row.code);
+    assert.ok(finding, row.code);
+    assert.equal(finding.dispatchable, false);
+    assert.ok(finding.corrective_action);
+  }
+});
+
+test('undeclared ambient permission cannot satisfy requirements and rejected project scope never falls back globally', () => {
+  const project = capability({
+    canonical_identity: 'router/project', name: 'tool',
+    scope: { kind: 'project', repository: 'repo:other', worktree: 'main' },
+    permissions: { required: ['network'] },
+  });
+  const global = capability({ canonical_identity: 'router/global', name: 'tool', runtime: 'codex', invocation: { runtime: 'codex', command: 'tool', args: [] }, runtime_variants: [{ runtime: 'codex', native_identity: 'skill:tool' }] });
+  const result = reconcileCandidate({ candidate: candidate([project, global]), scope: { kind: 'project', repository: 'repo:router', worktree: 'main' } });
+  assert.ok(result.verdicts.some(value => value.code === 'permission_missing' && value.subject.id === 'router/project@project:repo%3Aother:main'));
+  assert.ok(result.verdicts.some(value => value.code === 'scope_inapplicable' && value.subject.id === 'router/project@project:repo%3Aother:main'));
+  assert.equal(result.verdicts.some(value => value.subject.id === 'router/global'), false);
+});
+
+test('whole-candidate report bytes are identical for equivalent full and incremental permutations', () => {
+  const records = [
+    capability({ name: 'alpha', dependencies: { state: 'declared', items: [{ id: 'binary:missing', available: false }] }, dispatchable: false }),
+    capability({ name: 'beta', permissions: { required: ['network'], denied: ['network'], grants: [] } }),
+  ];
+  const lifecycle = { events: [], diagnostics: [{ code: 'portable-diagnostic', logical_root: 'fixture', relative_path: '.' }] };
+  const outputs = permutations(records).map(permuted => reconcileCandidate({ candidate: candidate(permuted), lifecycle }));
+  assert.equal(stableStringify(outputs[0]), stableStringify(outputs[1]));
+  assert.equal(outputs[0].report_fingerprint, outputs[1].report_fingerprint);
+});
