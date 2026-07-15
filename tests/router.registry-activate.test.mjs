@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
-  REQUIRED_ACTIVATION_GATES, createTestActivationVerifier, produceActivationVerification,
+  PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES, createTestActivationVerifier, produceActivationVerification,
 } from '../src/registry/validate.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 import {
   activateCandidate, executeRollback, previewRollback, recoverActiveVersion,
   replaceActivePointer, verifyVersion, writeImmutableVersion,
@@ -15,8 +17,26 @@ import {
 function inputs() {
   const candidate = { schema_version: 1, records: [] };
   const reconciliation = { disposition: 'eligible', candidate_fingerprint: null, verdicts: [] };
-  const mapping = { schema_version: 1, disposition: 'complete', results: [], report_fingerprint: 'mapping' };
+  const mapping = { schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'mapping' };
   return { candidate, reconciliation, mapping, policy: { version: 'fixture' } };
+}
+
+const hash = value => createHash('sha256').update(stableStringify(value)).digest('hex');
+
+function productionVerification(exact, now = 100) {
+  const gates = REQUIRED_ACTIVATION_GATES.map(id => {
+    const runner = PRODUCTION_GATE_RUNNERS[id];
+    const gate = { id, runner_id: runner.id, runner_version: runner.version, passed: true, reason_code: 'passed', threshold: runner.threshold, measured: {} };
+    return { ...gate, evidence_fingerprint: hash(gate) };
+  });
+  const canonical = {
+    schema_version: 1, verification_policy_version: 'activation-verification-v1', trusted: true, complete: true,
+    generated_at: now, expires_at: now + 300_000, required_gate_ids: [...REQUIRED_ACTIVATION_GATES],
+    candidate_fingerprint: hash(exact.candidate), reconciliation_fingerprint: hash(exact.reconciliation),
+    mapping_fingerprint: hash(exact.mapping), policy_fingerprint: hash(exact.policy),
+    gates, disposition: 'passing', test_only: false,
+  };
+  return { ...canonical, verification_fingerprint: hash(canonical) };
 }
 
 test('trusted verifier is complete, bound, fresh, and fails closed', async () => {
@@ -36,16 +56,15 @@ test('trusted verifier is complete, bound, fresh, and fails closed', async () =>
 test('immutable activation, recovery and pointer-only rollback preserve history', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-activation-'));
   try {
-    const verifier = createTestActivationVerifier(Object.fromEntries(REQUIRED_ACTIVATION_GATES.map(id => [id, async () => ({ passed: true })])));
     const firstInputs = inputs();
-    const firstVerification = await verifier({ ...firstInputs, now: 100 });
+    const firstVerification = productionVerification(firstInputs, 100);
     const first = activateCandidate({ ownedRoot: root, ...firstInputs, verification: firstVerification, now: 100, reason: 'bootstrap' });
     assert.equal(first.activation_status, 'activated');
     assert.equal(verifyVersion({ ownedRoot: root, versionId: first.version_id }).valid, true);
     const firstManifest = readFileSync(join(root, 'versions', first.version_id, 'manifest.json'), 'utf8');
 
     const secondInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 2 } };
-    const secondVerification = await verifier({ ...secondInputs, now: 200 });
+    const secondVerification = productionVerification(secondInputs, 200);
     const second = activateCandidate({ ownedRoot: root, ...secondInputs, verification: secondVerification, now: 200, reason: 'update' });
     assert.equal(second.activation_status, 'activated');
     const preview = previewRollback({ ownedRoot: root, destination: first.version_id, now: 300 });
@@ -56,6 +75,33 @@ test('immutable activation, recovery and pointer-only rollback preserve history'
     assert.equal(readFileSync(join(root, 'versions', first.version_id, 'manifest.json'), 'utf8'), firstManifest);
     assert.equal(recoverActiveVersion({ ownedRoot: root }).recovery_status, 'healthy');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('activation independently rejects substituted or unauthenticated production evidence before version creation', async () => {
+  const exact = inputs();
+  const base = productionVerification(exact, 1_000);
+  const cases = [
+    ['test_only', { ...base, test_only: true }],
+    ['candidate', base, { candidate: { ...exact.candidate, generation: 2 } }],
+    ['reconciliation', base, { reconciliation: { ...exact.reconciliation, disposition: 'quarantined' } }],
+    ['mapping', base, { mapping: { ...exact.mapping, report_fingerprint: 'substituted' } }],
+    ['policy', base, { policy: { version: 'substituted' } }],
+    ['evidence', { ...base, gates: base.gates.map((gate, index) => index ? gate : { ...gate, measured: { substituted: true } }) }],
+    ['verification_fingerprint', { ...base, verification_fingerprint: '0'.repeat(64) }],
+    ['expired', { ...base, expires_at: 999 }],
+    ['incomplete', { ...base, complete: false }],
+    ['unknown_runner', { ...base, gates: base.gates.map((gate, index) => index ? gate : { ...gate, runner_id: 'unknown' }) }],
+    ['non_passing', { ...base, disposition: 'non_passing' }],
+  ];
+  for (const [name, verification, substitutions = {}] of cases) {
+    const root = mkdtempSync(join(tmpdir(), `router-activation-${name}-`));
+    try {
+      const result = activateCandidate({ ownedRoot: root, ...exact, ...substitutions, verification, now: 1_000 });
+      assert.equal(result.activation_status, 'blocked', name);
+      assert.equal(existsSync(join(root, 'versions')), false, name);
+      assert.equal(existsSync(join(root, 'active.json')), false, name);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  }
 });
 
 test('invalid verification and stale pointer sequence never replace active authority', async () => {
