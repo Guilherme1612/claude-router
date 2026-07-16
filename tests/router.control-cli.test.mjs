@@ -10,9 +10,62 @@ import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/regis
 import { activateCandidate, writeImmutableVersion } from '../src/registry/activate.mjs';
 import { runRouterControl } from '../src/cli/router-control.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
+import { saveCapsule } from '../src/context/capsule.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
 const hash = value => createHash('sha256').update(stableStringify(value)).digest('hex');
+
+function contextCapsule(overrides = {}) {
+  return {
+    schema_version: 1,
+    scope: { workspace_id: 'router-build', project_id: 'router' },
+    goal: { id: 'phase-15', summary: 'Context recovery' },
+    position: { workflow: 'gsd-execute-phase', phase: '15', plan: '03', task: '2' },
+    status: 'active',
+    artifacts: [{ ref: 'docs/design.md', type: 'design', status: 'current', witness: { kind: 'version', value: '1' }, priority: 1 }],
+    blockers: [], freshness: { captured_at: 1, generation: 'phase-15' },
+    provenance: { source: 'workflow-state', version: '1' },
+    ...overrides,
+  };
+}
+
+test('context CLI status and resolve are JSON-first and do not require registry authority', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-context-cli-'));
+  try {
+    const missing = runRouterControl({ argv: ['context', 'status', '--format', 'json', '--owned-root', root] });
+    assert.equal(missing.exitCode, 3);
+    assert.equal(missing.result.reason_code, 'capsule_missing');
+    assert.doesNotMatch(JSON.stringify(missing), new RegExp(root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: contextCapsule() }).status, 'saved');
+    const resolved = runRouterControl({ argv: ['context', 'resolve', '--format', 'json', '--owned-root', root, '--instruction-json', JSON.stringify({ kind: 'referential', phrase: 'continue' })] });
+    assert.equal(resolved.exitCode, 0);
+    assert.equal(resolved.result.data.resolution.outcome, 'resume');
+    assert.equal(resolved.result.data.resolution.action, 'continue_workflow');
+
+    const why = runRouterControl({ argv: ['context', 'why-next', '--format', 'json', '--owned-root', root, '--instruction-json', JSON.stringify({ kind: 'referential', phrase: 'use the design' })] });
+    assert.equal(why.result.data.resolution.reason_code, 'unique_use_linked_design');
+    assert.deepEqual(Object.keys(why.result.data.resolution).sort(), ['action', 'artifact_ref', 'dispatch_eligible', 'outcome', 'reason_code', 'source_precedence']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('context CLI refresh saves only uniquely authoritative state and ambiguity never mutates', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-context-refresh-'));
+  try {
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: contextCapsule() }).status, 'saved');
+    const before = readFileSync(join(root, 'context-capsule.json'), 'utf8');
+    const ambiguous = runRouterControl({ argv: ['context', 'resolve', '--owned-root', root, '--instruction-json', JSON.stringify({ kind: 'explicit', complete: false, phase: '16' })] });
+    assert.equal(ambiguous.exitCode, 3);
+    assert.equal(readFileSync(join(root, 'context-capsule.json'), 'utf8'), before);
+
+    const refreshed = runRouterControl({ argv: ['context', 'refresh', '--owned-root', root, '--instruction-json', JSON.stringify({ kind: 'referential', phrase: 'continue' }), '--refresh-json', JSON.stringify({ workflow: 'gsd-execute-phase', phase: '15', plan: '03', task: '3', status: 'active', action: 'continue_workflow' })] });
+    assert.equal(refreshed.exitCode, 0);
+    assert.equal(refreshed.result.data.resolution.outcome, 'refresh');
+    const after = JSON.parse(readFileSync(join(root, 'context-capsule.json'), 'utf8'));
+    assert.equal(after.position.task, '3');
+    assert.doesNotMatch(JSON.stringify(after), /raw_prompt|instruction_json/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
 
 function productionVerification(exact, now) {
   const gates = REQUIRED_ACTIVATION_GATES.map(id => {

@@ -4,6 +4,8 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { executeRollback, previewRollback, verifyVersion } from '../registry/activate.mjs';
 import { stableStringify } from '../registry/schema.mjs';
+import { loadCapsule, saveCapsule } from '../context/capsule.mjs';
+import { resolveContextAction } from '../context/resolve.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -112,10 +114,10 @@ function parse(argv) {
   const positional = [];
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
-    if (value.length > MAX_VALUE) throw new TypeError('argument_too_long');
-    if (value === '--format' || value === '--owned-root' || value === '--confirm') {
+    if (value.length > 4096) throw new TypeError('argument_too_long');
+    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json') {
       const next = args[++index];
-      if (!next || next.length > MAX_VALUE) throw new TypeError('missing_option_value');
+      if (!next || next.length > 4096) throw new TypeError('missing_option_value');
       options[value.slice(2).replace('-', '_')] = next;
     } else if (value === '--execute') options.execute = true;
     else if (value === '--help' || value === '-h') options.help = true;
@@ -136,7 +138,66 @@ function textResult(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|registry verify|rollback> [versions or subject] [--format text|json] [--owned-root path] [--execute --confirm version]\n';
+  return 'Usage: router-control <status|diff|explain|registry verify|rollback|context status|refresh|resolve|why-next> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
+}
+
+function parseJsonOption(value, fallback) {
+  if (value === undefined) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch { return null; }
+}
+
+function refreshedValue(capsule, refresh) {
+  return {
+    ...capsule,
+    position: { ...capsule.position, ...refresh.position },
+    status: refresh.status || capsule.status,
+    freshness: { captured_at: Date.now(), generation: `refresh-${refresh.position?.phase || capsule.position.phase}` },
+    provenance: { source: 'authoritative-refresh', version: '1' },
+  };
+}
+
+function overrideValue(capsule, action, supersession) {
+  return {
+    schema_version: capsule.schema_version,
+    scope: capsule.scope,
+    goal: { id: action.goal_id, summary: action.goal_id },
+    position: {
+      workflow: action.workflow || 'explicit', phase: action.phase || 'none',
+      plan: action.plan || 'none', task: action.task || action.action || 'next',
+    },
+    status: 'active', artifacts: action.artifact_ref ? [{
+      ref: action.artifact_ref, type: 'artifact', status: 'next', witness: { kind: 'version', value: 'explicit' }, priority: 1,
+    }] : [], blockers: [], freshness: { captured_at: Date.now(), generation: `override-${action.phase || 'explicit'}` },
+    provenance: { source: 'explicit-instruction', version: '1' },
+    ...(supersession ? { supersession: { workflow_identity: supersession.workflow_identity, reason: supersession.reason } } : {}),
+  };
+}
+
+function runContextCommand({ subcommand, root, options }) {
+  if (!['status', 'refresh', 'resolve', 'why-next'].includes(subcommand)) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  const loaded = loadCapsule({ ownedRoot: root });
+  if (subcommand === 'status') {
+    const ok = loaded.status === 'active' || loaded.status === 'recovered_lkg';
+    return { result: canonical('context status', ok, loaded.reason_code, { status: loaded.status, ...(loaded.capsule ? { capsule: loaded.capsule } : {}) }), exitCode: ok ? 0 : EXIT.invalid };
+  }
+  if (!loaded.capsule) return { result: canonical(`context ${subcommand}`, false, loaded.reason_code, { status: loaded.status }), exitCode: EXIT.invalid };
+  const instruction = parseJsonOption(options.instruction_json, { kind: 'none' });
+  if (!instruction) return { result: canonical(`context ${subcommand}`, false, 'invalid_instruction_json'), exitCode: EXIT.usage };
+  const refresh = parseJsonOption(options.refresh_json, null);
+  if (options.refresh_json !== undefined && !refresh) return { result: canonical(`context ${subcommand}`, false, 'invalid_refresh_json'), exitCode: EXIT.usage };
+  const resolution = resolveContextAction({
+    instruction, capsule: loaded.capsule,
+    ...(subcommand === 'refresh' ? { freshness: 'stale', authoritative: refresh ? { status: 'dispatchable', value: refresh } : { status: 'unresolved' } } : {}),
+  });
+  let save = null;
+  if (subcommand !== 'why-next' && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot: root, capsule: refreshedValue(loaded.capsule, resolution.refresh) });
+  if (subcommand !== 'why-next' && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot: root, capsule: overrideValue(loaded.capsule, resolution.action, resolution.supersession) });
+  if (save?.status === 'blocked') return { result: canonical(`context ${subcommand}`, false, save.reason_code, { resolution }), exitCode: EXIT.mutation };
+  const ok = resolution.dispatch_eligible || resolution.outcome === 'none';
+  return { result: canonical(`context ${subcommand}`, ok, resolution.reason_code, { resolution, ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}) }), exitCode: ok ? 0 : EXIT.invalid };
 }
 
 export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, dependencies = {} } = {}) {
@@ -146,6 +207,10 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   if (options.help) return { result: canonical('help', true, 'help', { usage: usage().trim() }), exitCode: EXIT.success };
   const root = resolve(options.owned_root || defaultOwnedRoot || join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
   const command = positional[0];
+  if (command === 'context') {
+    if (positional.length !== 2) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    return runContextCommand({ subcommand: positional[1], root, options });
+  }
   const active = pointer(root);
   if (command === 'status') {
     if (positional.length !== 1) return { result: canonical('status', false, 'invalid_arguments'), exitCode: EXIT.usage };
