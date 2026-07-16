@@ -85,6 +85,7 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
   if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return { handled: false, reason_code: 'context_roots_missing' };
   const loaded = loadCapsule({ ownedRoot });
   const capsule = loaded.capsule;
+  if (!capsule && instruction.kind === 'explicit') return { handled: false, reason_code: loaded.reason_code };
   const resolution = resolveContextAction({
     instruction, capsule,
     ...(forceStale && capsule ? { freshness: 'stale', authoritative: authoritative || authoritativeEvidence(capsule, projectRoot) } : {}),

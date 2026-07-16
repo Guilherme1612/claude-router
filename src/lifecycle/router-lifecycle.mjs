@@ -210,6 +210,8 @@ export async function installRouter(options) {
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     'cli/router-control.mjs',
+    'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
+    'context/prompt-route.mjs',
   ];
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])

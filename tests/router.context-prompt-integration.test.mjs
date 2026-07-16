@@ -79,3 +79,12 @@ test('real UserPromptSubmit hook resolves before normal routing and failures rem
     assert.doesNotMatch(forced.stderr, /PRIVATE|CANARY|missing\.mjs/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('explicit-looking prompts pass through when there is no active capsule', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-no-context-'));
+  try {
+    const routed = routeContextPrompt({ prompt: 'review phase 15 security', ownedRoot: root, projectRoot: root });
+    assert.equal(routed.handled, false);
+    assert.equal(routed.reason_code, 'capsule_missing');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
