@@ -98,3 +98,87 @@ export function nextValidTransitions(evidence, policy = WORKFLOW_TRANSITIONS) {
     policy_version: TRANSITION_POLICY_VERSION,
   };
 }
+
+function selectionBlocked(reason_code) {
+  return { status: 'blocked', dispatch_eligible: false, reason_code };
+}
+
+function semanticCandidates(values) {
+  const unique = new Map();
+  for (const value of Array.isArray(values) ? values : []) {
+    if (!value || typeof value !== 'object') continue;
+    const fields = ['transition_id', 'workflow_id', 'family', 'from', 'to'];
+    if (!fields.every(field => validString(value[field]))) continue;
+    const candidate = Object.fromEntries(fields.map(field => [field, value[field]]));
+    const semanticKey = JSON.stringify({
+      workflow_id: candidate.workflow_id,
+      family: candidate.family,
+      from: candidate.from,
+      to: candidate.to,
+    });
+    const existing = unique.get(semanticKey);
+    if (!existing || candidate.transition_id.localeCompare(existing.transition_id) < 0) {
+      unique.set(semanticKey, candidate);
+    }
+  }
+  return [...unique.values()].sort((a, b) => a.transition_id.localeCompare(b.transition_id));
+}
+
+function actionLabel(candidate) {
+  return candidate.to.replaceAll('_', ' ');
+}
+
+function clarification(candidates, reason_code) {
+  const labels = [...new Set(candidates.map(actionLabel))];
+  const question = labels.length === 2
+    ? `Should I ${labels[0]} or ${labels[1]} next?`
+    : 'Which valid workflow should run next?';
+  return { status: 'clarification_required', dispatch_eligible: false, reason_code, question };
+}
+
+/**
+ * Resolve exactly one already-gated workflow token. Explicit intent may narrow
+ * valid candidates, but it cannot manufacture or re-enable a transition.
+ */
+export function selectWorkflow(transitionResult, explicitIntent) {
+  if (!transitionResult || typeof transitionResult !== 'object') {
+    return selectionBlocked('invalid_transition_outcome');
+  }
+  if (transitionResult.status !== 'candidates_available') {
+    return selectionBlocked(validString(transitionResult.reason_code)
+      ? transitionResult.reason_code
+      : 'invalid_transition_outcome');
+  }
+
+  const candidates = semanticCandidates(transitionResult.candidates);
+  if (candidates.length === 0) return selectionBlocked('no_valid_transition');
+
+  const hasExplicit = explicitIntent?.present === true;
+  if (hasExplicit) {
+    const transitionId = explicitIntent.transition_id;
+    const workflowId = explicitIntent.workflow_id;
+    if (explicitIntent.complete !== true || (!validString(transitionId) && !validString(workflowId))) {
+      return clarification(candidates, 'explicit_transition_incomplete');
+    }
+    const matching = candidates.filter(candidate => (
+      validString(transitionId)
+        ? candidate.transition_id === transitionId
+        : candidate.workflow_id === workflowId
+    ));
+    if (matching.length !== 1) return selectionBlocked('explicit_transition_invalid');
+    return {
+      status: 'selected',
+      dispatch_eligible: true,
+      reason_code: 'explicit_valid_transition',
+      selection: matching[0],
+    };
+  }
+
+  if (candidates.length !== 1) return clarification(candidates, 'material_transition_tie');
+  return {
+    status: 'selected',
+    dispatch_eligible: true,
+    reason_code: 'unique_valid_transition',
+    selection: candidates[0],
+  };
+}
