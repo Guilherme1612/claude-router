@@ -123,6 +123,22 @@ test('minimal refresh evidence applies deterministic precedence and blocks criti
   assert.equal(assembleRefreshEvidence({ authoritative: { phase: '15' }, live: { phase: '16' } }).reason_code, 'identity_conflict');
 });
 
+test('authoritative critical diagnostics remain non-dispatchable and identify one focused field', () => {
+  const result = assembleRefreshEvidence({
+    capsule: { workflow: 'old', phase: '14', plan: '01' },
+    authoritative: { workflow: 'gsd-execute-phase', phase: '15', plan: '02' },
+    diagnostics: [
+      { status: 'unresolved', reason_code: 'identity_conflict', field: 'plan', private: 'SECRET_CANARY' },
+      { status: 'degraded', reason_code: 'optional_source_missing' },
+    ],
+  });
+  assert.deepEqual(result, {
+    status: 'unresolved', reason_code: 'identity_conflict', conflict_field: 'plan',
+    diagnostics: [{ status: 'unresolved', reason_code: 'identity_conflict' }, { status: 'degraded', reason_code: 'optional_source_missing' }],
+  });
+  assert.doesNotMatch(JSON.stringify(result), /SECRET_CANARY/);
+});
+
 function awaitImportFs() {
   // CommonJS-free synchronous indirection keeps instrumentation injectable.
   return { lstatSync: globalThis.__sourceFsLstat, readFileSync: globalThis.__sourceFsRead };
