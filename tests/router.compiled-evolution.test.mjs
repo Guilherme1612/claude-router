@@ -154,6 +154,28 @@ test('D-13 fixed corpus adapter routes every fixture through hermetic compiled s
   }
 });
 
+test('D-13/D-15 quality and UTF-8 budgets use observed router output, never fixture expected values', t => {
+  const { route, captures } = buildRealCalibrationRoute(t);
+  const representative = CALIBRATION_CORPUS.find(fixture => fixture.fixture_class === 'minimal_prompt');
+  const observed = route(representative);
+  const sentinel = route({ ...representative, expected: { outcome: 'sentinel', dispatch_eligible: false } });
+  assert.deepEqual(sentinel, observed);
+  assert.notStrictEqual(sentinel, representative.expected);
+
+  const versions = { candidate: 'candidate-e2e', compiled_index: COMPILED_VERSION, policy: 'policy-v1', corpus: 'router-calibration-v1' };
+  const evaluation = evaluateCalibrationCorpus({ corpus: CALIBRATION_CORPUS, route, versions });
+  assert.equal(evaluation.quality.pass, true);
+  assert.equal(evaluation.context_budget.pass, true);
+  for (const result of evaluation.fixtures) {
+    const emitted = captures.get(result.id).additional_context;
+    assert.equal(result.measured_context_bytes, Buffer.byteLength(emitted, 'utf8'));
+    assert.ok(result.measured_context_bytes <= result.maximum_context_bytes);
+  }
+  const stale = captures.get('stale-context-v1').additional_context;
+  assert.match(stale, /é/);
+  assert.ok(Buffer.byteLength(stale, 'utf8') > stale.length);
+});
+
 test('D-13 through D-16 fixed corpus passes independent semantic budget and REL-01 gates', t => {
   const versions = { candidate: 'candidate-e2e', compiled_index: 'compiled-v1', policy: 'policy-v1', corpus: 'router-calibration-v1' };
   const { route } = buildRealCalibrationRoute(t);
@@ -166,6 +188,8 @@ test('D-13 through D-16 fixed corpus passes independent semantic budget and REL-
   assert.equal(result.quality.pass, true);
   assert.equal(result.context_budget.pass, true);
   assert.equal(result.latency.pass, true);
+  assert.deepEqual(evaluation.versions, versions);
+  assert.ok(evaluation.fixtures.every(fixture => fixture.pass && fixture.context_budget_pass));
 });
 
 test('D-16 neutral speed alone cannot move active authority', () => {
