@@ -7,6 +7,7 @@ import {
   nextValidTransitions,
   selectWorkflow,
 } from '../src/orchestrator/transitions.mjs';
+import { selectCapabilities } from '../src/orchestrator/select.mjs';
 
 function evidence(overrides = {}) {
   return {
@@ -15,6 +16,28 @@ function evidence(overrides = {}) {
     position: { family: 'gsd', state: 'planned' },
     gates: { plan_approved: true },
     dependencies_safe: true,
+    ...overrides,
+  };
+}
+
+function selectedWorkflow(overrides = {}) {
+  return {
+    status: 'selected',
+    dispatch_eligible: true,
+    reason_code: 'unique_valid_transition',
+    selection: {
+      transition_id: 'gsd.execute', workflow_id: 'gsd-execute-phase',
+      family: 'gsd', from: 'planned', to: 'execute',
+    },
+    ...overrides,
+  };
+}
+
+function workflowDeclaration(overrides = {}) {
+  return {
+    workflow_id: 'gsd-execute-phase',
+    owners: ['router/executor', 'router/execute-command'],
+    compatible: ['router/executor', 'router/execute-command'],
     ...overrides,
   };
 }
@@ -160,4 +183,62 @@ test('invalid explicit selection blocks and selection is permutation-stable with
   assert.deepEqual(invalid, {
     status: 'blocked', dispatch_eligible: false, reason_code: 'explicit_transition_invalid',
   });
+});
+
+test('capability selection rejects before registry access unless one workflow token is dispatch eligible', () => {
+  const invalid = [
+    null,
+    { status: 'blocked', dispatch_eligible: false, reason_code: 'required_gate_missing' },
+    { status: 'clarification_required', dispatch_eligible: false, reason_code: 'material_transition_tie' },
+    selectedWorkflow({ dispatch_eligible: false }),
+    selectedWorkflow({ selection: { transition_id: 'gsd.execute', workflow_id: 'gsd-execute-phase' } }),
+  ];
+  for (const workflow of invalid) {
+    let accesses = 0;
+    const result = selectCapabilities({
+      workflow,
+      workflowDeclarations: [workflowDeclaration()],
+      getRegistry() { accesses += 1; throw new Error('registry must not be read'); },
+    });
+    assert.equal(result.dispatch_eligible, false);
+    assert.equal(accesses, 0);
+  }
+});
+
+test('declared ownership alone seeds roots and explicit capability only narrows compatibly', () => {
+  const records = [
+    { id: 'router/executor', type: 'agent' },
+    { id: 'router/execute-command', type: 'command' },
+    { id: 'router/github-mcp', type: 'mcp' },
+  ];
+  const base = {
+    workflow: selectedWorkflow(), workflowDeclarations: [workflowDeclaration()],
+    getRegistry: () => ({ records }), prompt: 'please use github mcp tool',
+  };
+  const automatic = selectCapabilities(base);
+  assert.deepEqual(automatic.roots, ['router/execute-command', 'router/executor']);
+  assert.doesNotMatch(JSON.stringify(automatic), /github-mcp/);
+
+  const narrowed = selectCapabilities({ ...base, explicitCapability: 'router/executor' });
+  assert.deepEqual(narrowed.roots, ['router/executor']);
+  assert.equal(narrowed.workflow_id, 'gsd-execute-phase');
+
+  const incompatible = selectCapabilities({ ...base, explicitCapability: 'router/github-mcp' });
+  assert.deepEqual(incompatible, {
+    status: 'blocked', dispatch_eligible: false, reason_code: 'explicit_capability_incompatible',
+    workflow_id: 'gsd-execute-phase', capability_id: 'router/github-mcp',
+  });
+});
+
+test('capability ownership selection is byte-stable across declaration and registry permutations', () => {
+  const declarations = [
+    workflowDeclaration(),
+    workflowDeclaration({ workflow_id: 'gsd-plan-phase', owners: ['router/planner'], compatible: ['router/planner'] }),
+  ];
+  const records = [{ id: 'router/executor', type: 'agent' }, { id: 'router/execute-command', type: 'command' }];
+  const run = (workflowDeclarations, registryRecords) => selectCapabilities({
+    workflow: selectedWorkflow(), workflowDeclarations,
+    getRegistry: () => ({ records: registryRecords }),
+  });
+  assert.equal(JSON.stringify(run(declarations, records)), JSON.stringify(run([...declarations].reverse(), [...records].reverse())));
 });
