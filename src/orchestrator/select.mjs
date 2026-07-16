@@ -170,8 +170,7 @@ export function selectCapabilities(options = {}) {
   }
 
   const explicit = options.explicitCapability;
-  if (explicit !== undefined && (!validId(explicit) || !declaration.compatible.includes(explicit)
-    || !declaration.owners.includes(explicit))) {
+  if (explicit !== undefined && (!validId(explicit) || !declaration.compatible.includes(explicit))) {
     return blocked('explicit_capability_incompatible', {
       workflow_id: token.workflow_id,
       capability_id: validId(explicit) ? explicit : '',
