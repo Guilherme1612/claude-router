@@ -20,6 +20,10 @@ function bounded(values) {
   return Array.isArray(values) ? values.slice(0, MAX_COLLECTION) : [];
 }
 
+function collection(values) {
+  return Array.isArray(values) ? values : [];
+}
+
 function portable(value) {
   if (Array.isArray(value)) return bounded(value).map(portable);
   if (!value || typeof value !== 'object') return value;
@@ -31,6 +35,18 @@ function portable(value) {
   return output;
 }
 
+function canonicalCollection(values, { unique = false } = {}) {
+  const ordered = sorted(collection(values).map(portable));
+  if (!unique) return ordered.slice(0, MAX_COLLECTION);
+  const seen = new Set();
+  return ordered.filter(value => {
+    const key = stableStringify(value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).slice(0, MAX_COLLECTION);
+}
+
 function tokens(value) {
   return [...new Set(String(value || '')
     .normalize('NFKC')
@@ -39,8 +55,7 @@ function tokens(value) {
     .trim()
     .split(/\s+/)
     .filter(Boolean)
-    .map(token => token.slice(0, MAX_TOKEN_LENGTH))
-    .slice(0, MAX_COLLECTION))].sort();
+    .map(token => token.slice(0, MAX_TOKEN_LENGTH)))].sort().slice(0, MAX_COLLECTION);
 }
 
 function canonicalPolicy(input = {}) {
@@ -97,7 +112,14 @@ function canonicalCandidate(candidate) {
   }
   const records = candidate.records.map(record => {
     validateCapability(record);
-    return { id: stableCapabilityId(record), ...canonicalizeCapability(record) };
+    const canonical = canonicalizeCapability(record);
+    if (canonical.mapping && typeof canonical.mapping === 'object') {
+      canonical.mapping = Object.fromEntries(Object.entries(canonical.mapping).map(([field, values]) => [
+        field,
+        Array.isArray(values) ? canonicalCollection(values, { unique: true }) : values,
+      ]));
+    }
+    return { id: stableCapabilityId(record), ...canonical };
   });
   return { schema_version: candidate.schema_version ?? 1, records: sorted(records) };
 }
@@ -115,17 +137,18 @@ function safety(record, recordsById, requestedScope) {
   if (!record.invocation?.command?.trim()) return { safe: false, reason_code: 'target_not_invocable' };
   if (!scopeApplies(record.scope, requestedScope)) return { safe: false, reason_code: 'target_out_of_scope' };
   const permissions = record.permissions || {};
-  const grants = new Set(bounded(permissions.grants));
-  const denied = new Set(bounded(permissions.denied));
-  if (bounded(permissions.required).some(permission => denied.has(permission))) return { safe: false, reason_code: 'target_permission_denied' };
-  if (bounded(permissions.required).some(permission => !grants.has(permission))) return { safe: false, reason_code: 'target_permission_incomplete' };
-  for (const dependency of bounded(record.dependencies?.items)) {
+  const grants = new Set(canonicalCollection(permissions.grants, { unique: true }));
+  const denied = new Set(canonicalCollection(permissions.denied, { unique: true }));
+  const required = canonicalCollection(permissions.required, { unique: true });
+  if (required.some(permission => denied.has(permission))) return { safe: false, reason_code: 'target_permission_denied' };
+  if (required.some(permission => !grants.has(permission))) return { safe: false, reason_code: 'target_permission_incomplete' };
+  for (const dependency of canonicalCollection(record.dependencies?.items, { unique: true })) {
     const dependencyRecord = recordsById.get(dependency.id);
     if (!dependency.available || (dependencyRecord && (!dependencyRecord.dispatchable || dependencyRecord.lifecycle !== 'ready'))) {
       return { safe: false, reason_code: 'target_dependency_incomplete' };
     }
   }
-  if (bounded(record.conflicts).some(conflict => ['dispatch-blocking', 'build-blocking'].includes(conflict.severity))) {
+  if (canonicalCollection(record.conflicts, { unique: true }).some(conflict => ['dispatch-blocking', 'build-blocking'].includes(conflict.severity))) {
     return { safe: false, reason_code: 'target_collision_blocked' };
   }
   return { safe: true, reason_code: 'target_safe' };
@@ -134,11 +157,11 @@ function safety(record, recordsById, requestedScope) {
 function mappingMetadata(record) {
   const mapping = record.mapping && typeof record.mapping === 'object' ? record.mapping : {};
   return {
-    explicit: [...new Set([...bounded(mapping.explicit_subjects), ...bounded(mapping.declared_subjects), ...bounded(mapping.aliases)])].sort(),
-    identity: [...new Set(bounded(mapping.identity_subjects))].sort(),
-    subjects: [...new Set(bounded(mapping.subjects))].sort(),
-    routeFamilies: [...new Set(bounded(mapping.route_families))].sort(),
-    triggers: [...new Set([...bounded(mapping.triggers), record.name])].sort(),
+    explicit: canonicalCollection([...collection(mapping.explicit_subjects), ...collection(mapping.declared_subjects), ...collection(mapping.aliases)], { unique: true }),
+    identity: canonicalCollection(mapping.identity_subjects, { unique: true }),
+    subjects: canonicalCollection(mapping.subjects, { unique: true }),
+    routeFamilies: canonicalCollection(mapping.route_families, { unique: true }),
+    triggers: canonicalCollection([...collection(mapping.triggers), record.name], { unique: true }),
   };
 }
 
@@ -198,7 +221,7 @@ function resultForSubject(subjectId, context) {
     if (mapping.subject_id !== subjectId) continue;
     const record = recordsById.get(mapping.target_id);
     const meta = record ? mappingMetadata(record) : { routeFamilies: [] };
-    const event = bounded(lifecycle?.events).find(item => item?.canonical_id === mapping.target_id
+    const event = lifecycle?.events?.find(item => item?.canonical_id === mapping.target_id
       && item.authoritative === true && ['renamed', 'moved'].includes(item.primary));
     const sameIdentity = record && mapping.stable_identity === record.id;
     const familyMatches = !mapping.route_family || meta.routeFamilies.includes(mapping.route_family) || event?.route_family === mapping.route_family;
@@ -323,8 +346,8 @@ export function mapCandidateRegistry(options = {}) {
     throw new TypeError('reconciliation candidate fingerprint does not match the exact candidate');
   }
   const recordsById = new Map(canonical.records.map(record => [record.id, record]));
-  const existingMappings = sorted(bounded(options.existingMappings).map(portable));
-  const advisoryEvidence = sorted(bounded(options.advisoryEvidence).map(portable));
+  const existingMappings = canonicalCollection(options.existingMappings);
+  const advisoryEvidence = canonicalCollection(options.advisoryEvidence);
   const subjectIds = new Set();
   for (const record of canonical.records) {
     const meta = mappingMetadata(record);
@@ -336,7 +359,7 @@ export function mapCandidateRegistry(options = {}) {
     recordsById,
     existingMappings,
     advisoryEvidence,
-    lifecycle: portable(options.lifecycle || { events: [] }),
+    lifecycle: portable({ ...(options.lifecycle || {}), events: canonicalCollection(options.lifecycle?.events) }),
     policy,
     requestedScope: portable(options.requestedScope),
   };
