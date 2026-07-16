@@ -178,6 +178,9 @@ export function compareWitnesses(capsuleWitness, authoritativeWitness) {
 const IDENTITY = ['workflow', 'phase', 'plan'];
 const FIELDS = ['action', 'workflow', 'phase', 'plan', 'task', 'status', 'artifact_ref', 'blockers'];
 export function assembleRefreshEvidence({ capsule = {}, authoritative = {}, live = {}, explicit = {}, diagnostics = [] } = {}) {
+  const boundedDiagnostics = diagnostics.slice(0, SOURCE_LIMITS.diagnostics).map(entry => ({ status: entry.status, reason_code: entry.reason_code }));
+  const critical = diagnostics.find(entry => entry?.status === 'unresolved');
+  if (critical) return result('unresolved', critical.reason_code || 'identity_conflict', { ...(critical.field ? { conflict_field: critical.field } : {}), diagnostics: boundedDiagnostics });
   for (const key of IDENTITY) if (live[key] !== undefined && authoritative[key] !== undefined && live[key] !== authoritative[key]) return result('unresolved', 'identity_conflict', { conflict_field: key });
   const value = {};
   for (const key of FIELDS) {
@@ -185,5 +188,5 @@ export function assembleRefreshEvidence({ capsule = {}, authoritative = {}, live
     if (selected !== undefined) value[key] = selected;
   }
   if (!value.phase && !value.workflow) return result('unresolved', 'identity_missing');
-  return result('dispatchable', 'refresh_evidence_ready', { value, diagnostics: diagnostics.slice(0, SOURCE_LIMITS.diagnostics).map(entry => ({ status: entry.status, reason_code: entry.reason_code })) });
+  return result('dispatchable', 'refresh_evidence_ready', { value, diagnostics: boundedDiagnostics });
 }
