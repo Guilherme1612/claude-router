@@ -1,16 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const LIVE_HOOK = '/Users/guilherme/.claude/hooks/router.mjs';
 const MODULE = resolve('src/context/prompt-route.mjs');
 const CANARY = 'PRIVATE-CANARY-raw-prompt-secret';
+const VERSION = 'v1-0123456789abcdef';
 
 function capsule(overrides = {}) {
   return {
@@ -20,6 +23,32 @@ function capsule(overrides = {}) {
     artifacts: [{ ref: 'docs/design.md', type: 'design', status: 'current', witness: { kind: 'version', value: '1' }, priority: 1 }],
     blockers: [], freshness: { captured_at: 1, generation: 'phase-15' }, provenance: { source: 'workflow-state', version: '1' }, ...overrides,
   };
+}
+
+function saveCompiledCapsule(root, value) {
+  const versionRoot = join(root, 'compiled-index', 'versions', VERSION);
+  mkdirSync(versionRoot, { recursive: true });
+  const index = {
+    schema_version: 1, version_id: VERSION, policy_version: 'workflow-transitions-v1',
+    capsule_contract_version: 1,
+    routes: { 'gsd-execute-phase': {
+      workflow_id: 'gsd-execute-phase', transition_id: 'gsd.execute',
+      dispatch_eligible: true, reason_code: 'unique_valid_transition',
+    } },
+  };
+  const bytes = stableStringify(index) + '\n';
+  const payloadSha = createHash('sha256').update(bytes).digest('hex');
+  writeFileSync(join(versionRoot, 'index.json'), bytes);
+  writeFileSync(join(versionRoot, 'metadata.json'), stableStringify({
+    schema_version: 1, state: 'verified', version_id: VERSION,
+    created_at: Date.now() - 1_000, expires_at: Date.now() + 60_000,
+    compatibility: { router_contract: 'prompt-route-v1', policy_version: 'workflow-transitions-v1', capsule_schema_version: 1 },
+    payload_sha256: payloadSha,
+  }) + '\n');
+  writeFileSync(join(root, 'compiled-index', 'active.json'), stableStringify({
+    schema_version: 1, version_id: VERSION, payload_sha256: payloadSha,
+  }) + '\n');
+  return saveCapsule({ ownedRoot: root, capsule: value });
 }
 
 function runHook(prompt, env = {}) {
@@ -32,7 +61,7 @@ function runHook(prompt, env = {}) {
 test('prompt adapter owns all three referential outcomes and never returns prompt bytes', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-prompt-context-'));
   try {
-    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    assert.equal(saveCompiledCapsule(root, capsule()).status, 'saved');
     for (const [prompt, action] of [['continue', 'continue_workflow'], ['finish it', 'finish_remaining_work'], ['use the design', 'use_linked_design']]) {
       const routed = routeContextPrompt({ prompt, ownedRoot: root, projectRoot: root });
       assert.equal(routed.handled, true);
@@ -47,7 +76,7 @@ test('prompt adapter owns all three referential outcomes and never returns promp
 test('prompt adapter refreshes uniquely, clarifies ambiguity, and rejects terminal revival', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-prompt-refresh-'));
   try {
-    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    assert.equal(saveCompiledCapsule(root, capsule()).status, 'saved');
     const refreshed = routeContextPrompt({
       prompt: 'continue', ownedRoot: root, projectRoot: root, forceStale: true,
       authoritative: { status: 'dispatchable', value: { workflow: 'gsd-execute-phase', phase: '15', plan: '03', task: '4', status: 'active', action: 'continue_workflow' } },
@@ -55,7 +84,7 @@ test('prompt adapter refreshes uniquely, clarifies ambiguity, and rejects termin
     assert.equal(refreshed.resolution.outcome, 'refresh');
     assert.equal(JSON.parse(readFileSync(join(root, 'context-capsule.json'))).position.task, '4');
 
-    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule({ status: 'completed' }) }).status, 'saved');
+    assert.equal(saveCompiledCapsule(root, capsule({ status: 'completed' })).status, 'saved');
     const terminal = routeContextPrompt({ prompt: 'finish it', ownedRoot: root, projectRoot: root });
     assert.equal(terminal.resolution.reason_code, 'terminal_workflow');
     assert.equal(terminal.resolution.dispatch_eligible, false);
@@ -66,7 +95,7 @@ test('prompt adapter refreshes uniquely, clarifies ambiguity, and rejects termin
 test('real UserPromptSubmit hook resolves before normal routing and failures remain fail-open', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-live-context-'));
   try {
-    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    assert.equal(saveCompiledCapsule(root, capsule()).status, 'saved');
     const resumed = runHook('continue', { ROUTER_CONTEXT_OWNED_ROOT: root, ROUTER_CONTEXT_PROJECT_ROOT: root });
     assert.equal(resumed.status, 0, resumed.stderr);
     const output = JSON.parse(resumed.stdout);
