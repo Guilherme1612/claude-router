@@ -1,4 +1,11 @@
 import { createHash } from 'node:crypto';
+import {
+  activateCandidate,
+  executeRollback,
+  previewRollback,
+  recoverActiveVersion,
+  recoverRollbackJournal,
+} from '../registry/activate.mjs';
 
 export const REQUIRED_GATES = Object.freeze([
   'safety', 'privacy', 'quality', 'context_budget', 'compatibility', 'latency',
@@ -108,4 +115,88 @@ export function evaluateCandidate({ candidate, evidence_window, gates, known_goo
     },
     gates: stableValue(gates),
   });
+}
+
+const REGISTRY_PUBLICATION = Object.freeze({
+  activateCandidate,
+  executeRollback,
+  previewRollback,
+  recoverActiveVersion,
+  recoverRollbackJournal,
+});
+
+function recoveryBlock(result) {
+  return result?.recovery_status === 'recovery_required'
+    || (result?.recovery_status === 'blocked' && result.reason_code !== 'no_valid_history');
+}
+
+export function applyCanaryDecision({
+  evaluation,
+  demonstrated_benefit,
+  activation,
+  ownedRoot = activation?.ownedRoot,
+  known_good_version = null,
+  published_version = null,
+  publication = REGISTRY_PUBLICATION,
+} = {}) {
+  const candidateId = evaluation?.candidate_id ?? null;
+  if (!evaluation || typeof evaluation.promotable !== 'boolean') {
+    return { status: 'rejected', candidate_id: candidateId, reason_code: 'invalid_canary_evaluation', active_version: known_good_version };
+  }
+
+  if (!evaluation.promotable && !published_version) {
+    return { status: 'rejected', candidate_id: candidateId, reason_code: evaluation.reason_code, active_version: known_good_version };
+  }
+
+  const journal = publication.recoverRollbackJournal({ ownedRoot });
+  if (recoveryBlock(journal)) {
+    return { status: 'recovery_required', candidate_id: candidateId, reason_code: journal.reason_code, active_version: known_good_version };
+  }
+  const recovered = publication.recoverActiveVersion({ ownedRoot });
+  if (recoveryBlock(recovered)) {
+    return { status: 'recovery_required', candidate_id: candidateId, reason_code: recovered.reason_code, active_version: known_good_version };
+  }
+
+  if (!evaluation.promotable) {
+    if (!known_good_version) {
+      return { status: 'recovery_required', candidate_id: candidateId, reason_code: 'missing_known_good_version', active_version: recovered.version_id ?? null };
+    }
+    const preview = publication.previewRollback({ ownedRoot, destination: known_good_version });
+    if (preview.preview_status !== 'ready') {
+      return { status: 'recovery_required', candidate_id: candidateId, reason_code: preview.reason_code, active_version: recovered.version_id ?? published_version };
+    }
+    const rollback = publication.executeRollback({
+      ownedRoot,
+      preview,
+      confirmation: known_good_version,
+      reason: 'rollback',
+    });
+    if (rollback.rollback_status !== 'rolled_back') {
+      return { status: 'recovery_required', candidate_id: candidateId, reason_code: rollback.reason_code, active_version: recovered.version_id ?? published_version };
+    }
+    return { status: 'rolled_back', candidate_id: candidateId, reason_code: evaluation.reason_code, active_version: known_good_version };
+  }
+
+  const benefitStatus = demonstrated_benefit?.status;
+  if (benefitStatus !== 'demonstrated' && benefitStatus !== 'safety_correction') {
+    return {
+      status: 'preserved',
+      candidate_id: candidateId,
+      reason_code: demonstrated_benefit?.reason_code ?? 'benefit_not_demonstrated',
+      active_version: recovered.version_id ?? known_good_version,
+    };
+  }
+  if (!activation || activation.ownedRoot !== ownedRoot) {
+    return { status: 'rejected', candidate_id: candidateId, reason_code: 'invalid_activation_input', active_version: recovered.version_id ?? known_good_version };
+  }
+  const activated = publication.activateCandidate(activation);
+  if (activated.activation_status !== 'activated') {
+    return {
+      status: activated.activation_status === 'recovery_required' ? 'recovery_required' : 'rejected',
+      candidate_id: candidateId,
+      reason_code: activated.reason_code,
+      active_version: recovered.version_id ?? known_good_version,
+    };
+  }
+  return { status: 'promoted', candidate_id: candidateId, reason_code: demonstrated_benefit.reason_code, active_version: activated.version_id };
 }
