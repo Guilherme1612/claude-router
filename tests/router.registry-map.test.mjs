@@ -38,6 +38,33 @@ function mapped(result, subjectId) {
   return result.subjects.find(subject => subject.subject_id === subjectId);
 }
 
+function assertPermutationStableAtCollectionBounds(label, makeOptions) {
+  for (const size of [127, 128, 129]) {
+    const forward = makeOptions(size);
+    const reverse = makeOptions(size);
+    forward.reconciliation = { disposition: 'eligible' };
+    for (const [key, value] of Object.entries(reverse)) {
+      if (Array.isArray(value)) reverse[key] = [...value].reverse();
+      else if (key === 'lifecycle') reverse.lifecycle = { ...value, events: [...value.events].reverse() };
+      else if (key === 'candidate') {
+        reverse.candidate = {
+          ...value,
+          records: value.records.map(record => ({
+            ...record,
+            mapping: Object.fromEntries(Object.entries(record.mapping || {}).map(([field, entries]) => [field, [...entries].reverse()])),
+          })),
+        };
+      }
+    }
+    reverse.reconciliation = { disposition: 'eligible' };
+    assert.equal(
+      stableStringify(mapCandidateRegistry(forward)),
+      stableStringify(mapCandidateRegistry(reverse)),
+      `${label} must be permutation-stable at ${size} entries`,
+    );
+  }
+}
+
 test('D-01 policy is schema-versioned, integer-scored, fingerprinted, and fully explained', () => {
   assert.equal(DEFAULT_MAPPING_POLICY.schema_version, 1);
   assert.match(DEFAULT_MAPPING_POLICY.policy_fingerprint, /^[a-f0-9]{64}$/);
@@ -174,6 +201,58 @@ test('D-08 every contributing collection is permutation-stable and inputs stay u
     })))));
   assert.equal(new Set(outputs.map(stableStringify)).size, 1);
   assert.deepEqual({ records, lifecycle, existingMappings, advisoryEvidence }, original);
+});
+
+test('D-08 advisory evidence stays canonical across the 127/128/129 boundary', () => {
+  assertPermutationStableAtCollectionBounds('advisory evidence', size => ({
+    ...eligible([target('advised')]),
+    advisoryEvidence: Array.from({ length: size }, (_, index) => ({
+      subject_id: `route:advisory-${String(index).padStart(3, '0')}`,
+      target_id: 'router/advised',
+      score_basis_points: 7000,
+      resolver: 'fixture',
+      model_version: '1',
+    })),
+  }));
+});
+
+test('D-08 existing mappings stay canonical across the 127/128/129 boundary', () => {
+  assertPermutationStableAtCollectionBounds('existing mappings', size => ({
+    ...eligible([target('inherited')]),
+    existingMappings: Array.from({ length: size }, (_, index) => ({
+      subject_id: `route:existing-${String(index).padStart(3, '0')}`,
+      target_id: 'router/inherited',
+      stable_identity: 'router/inherited',
+    })),
+  }));
+});
+
+test('D-08 lifecycle events stay canonical across the 127/128/129 boundary', () => {
+  assertPermutationStableAtCollectionBounds('lifecycle events', size => ({
+    ...eligible([target('continuity', { route_families: ['planning'] })]),
+    existingMappings: [{
+      subject_id: 'route:continuity',
+      target_id: 'router/continuity',
+      stable_identity: 'router/old',
+      route_family: 'planning',
+    }],
+    lifecycle: { events: [
+      { canonical_id: 'router/continuity', primary: 'renamed', authoritative: true, route_family: 'planning' },
+      ...Array.from({ length: size - 1 }, (_, index) => ({
+        canonical_id: `router/filler-${String(index).padStart(3, '0')}`,
+        primary: 'unchanged',
+        authoritative: false,
+      })),
+    ] },
+  }));
+});
+
+test('D-08 record-owned mapping arrays stay canonical across the 127/128/129 boundary', () => {
+  assertPermutationStableAtCollectionBounds('record-owned mapping arrays', size => ({
+    ...eligible([target('owned', {
+      explicit_subjects: Array.from({ length: size }, (_, index) => `route:owned-${String(index).padStart(3, '0')}`),
+    })]),
+  }));
 });
 
 test('D-09 advisory evidence is portable, subordinate, bounded, and never mutates active state', () => {
