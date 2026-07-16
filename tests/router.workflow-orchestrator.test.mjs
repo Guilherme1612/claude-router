@@ -5,6 +5,7 @@ import {
   TRANSITION_POLICY_VERSION,
   WORKFLOW_TRANSITIONS,
   nextValidTransitions,
+  selectWorkflow,
 } from '../src/orchestrator/transitions.mjs';
 
 function evidence(overrides = {}) {
@@ -83,4 +84,80 @@ test('transition evaluation never observes capability, registry, tool, MCP, hook
   const result = nextValidTransitions(input);
   assert.deepEqual(result.candidates.map(row => row.transition_id), ['gsd.execute']);
   assert.doesNotMatch(JSON.stringify(result), /capabilit|registry|\btool\b|mcp|hook|prompt/i);
+});
+
+test('one valid transition selects automatically and complete explicit intent supersedes stale intent', () => {
+  const candidates = nextValidTransitions(evidence());
+  const automatic = selectWorkflow(candidates);
+  assert.deepEqual(automatic, {
+    status: 'selected', dispatch_eligible: true, reason_code: 'unique_valid_transition',
+    selection: candidates.candidates[0],
+  });
+
+  const explicit = selectWorkflow(candidates, {
+    present: true, complete: true, transition_id: 'gsd.execute',
+    stale_intent: 'gsd.plan', raw_prompt: 'do not expose this',
+  });
+  assert.equal(explicit.status, 'selected');
+  assert.equal(explicit.reason_code, 'explicit_valid_transition');
+  assert.equal(explicit.dispatch_eligible, true);
+  assert.equal(explicit.selection.transition_id, 'gsd.execute');
+  assert.doesNotMatch(JSON.stringify(explicit), /stale_intent|raw_prompt|do not expose/i);
+});
+
+test('explicit intent cannot bypass terminal, gate, or dependency safety', () => {
+  const intent = { present: true, complete: true, transition_id: 'gsd.execute' };
+  const rows = [
+    nextValidTransitions(evidence({ status: 'completed' })),
+    nextValidTransitions(evidence({ gates: {} })),
+    nextValidTransitions(evidence({ dependencies_safe: false })),
+  ];
+  for (const transitionResult of rows) {
+    const selected = selectWorkflow(transitionResult, intent);
+    assert.equal(selected.status, 'blocked');
+    assert.equal(selected.dispatch_eligible, false);
+    assert.equal(selected.reason_code, transitionResult.reason_code);
+    assert.equal('selection' in selected, false);
+  }
+});
+
+test('incomplete intent and material ties yield exactly one smallest non-dispatchable question', () => {
+  const tiedPolicy = [
+    { id: 'gsd.verify', family: 'gsd', from: 'executed', to: 'verify', workflow_id: 'gsd-verify-work', requires: ['execution_complete'] },
+    { id: 'gsd.audit', family: 'gsd', from: 'executed', to: 'audit', workflow_id: 'gsd-audit-uat', requires: ['execution_complete'] },
+  ];
+  const candidates = nextValidTransitions(
+    evidence({ position: { family: 'gsd', state: 'executed' }, gates: { execution_complete: true } }),
+    tiedPolicy,
+  );
+  const incomplete = selectWorkflow(candidates, { present: true, complete: false });
+  assert.equal(incomplete.reason_code, 'explicit_transition_incomplete');
+  assert.deepEqual(Object.keys(incomplete).filter(key => key === 'question'), ['question']);
+  assert.equal(incomplete.question, 'Should I audit or verify next?');
+
+  const tied = selectWorkflow(candidates);
+  assert.equal(tied.status, 'clarification_required');
+  assert.equal(tied.reason_code, 'material_transition_tie');
+  assert.equal(tied.dispatch_eligible, false);
+  assert.equal(tied.question, 'Should I audit or verify next?');
+  assert.equal((JSON.stringify(tied).match(/\?/g) || []).length, 1);
+});
+
+test('invalid explicit selection blocks and selection is permutation-stable without input mutation', () => {
+  const policy = [
+    { id: 'gsd.verify', family: 'gsd', from: 'executed', to: 'verify', workflow_id: 'gsd-verify-work', requires: ['execution_complete'] },
+    { id: 'gsd.audit', family: 'gsd', from: 'executed', to: 'audit', workflow_id: 'gsd-audit-uat', requires: ['execution_complete'] },
+  ];
+  const source = evidence({ position: { family: 'gsd', state: 'executed' }, gates: { execution_complete: true } });
+  const forward = nextValidTransitions(source, policy);
+  const reverse = nextValidTransitions(source, [...policy].reverse());
+  const before = JSON.stringify(forward);
+  const intent = { present: true, complete: true, transition_id: 'gsd.verify' };
+  assert.equal(JSON.stringify(selectWorkflow(forward, intent)), JSON.stringify(selectWorkflow(reverse, intent)));
+  assert.equal(JSON.stringify(forward), before);
+
+  const invalid = selectWorkflow(forward, { present: true, complete: true, transition_id: 'gsd.execute' });
+  assert.deepEqual(invalid, {
+    status: 'blocked', dispatch_eligible: false, reason_code: 'explicit_transition_invalid',
+  });
 });
