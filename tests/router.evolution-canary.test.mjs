@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 const evidenceUrl = new URL('../src/evolution/evidence.mjs', import.meta.url);
+const canaryUrl = new URL('../src/evolution/canary-controller.mjs', import.meta.url);
 
 function validSignal(overrides = {}) {
   return {
@@ -139,4 +140,94 @@ test('D-08 fewer than 30 eligible observations cannot authorize promotion', asyn
   const sufficient = store.window({ project_id: 'project-a' });
   assert.equal(sufficient.sufficient, true);
   assert.equal(sufficient.reason_code, 'evidence_sufficient');
+});
+
+function candidateInput(overrides = {}) {
+  return {
+    source_evidence_fingerprint: 'b'.repeat(64),
+    policy_version: 'policy-v1',
+    compiled_index_version: 'compiled-v1',
+    evaluation_inputs: {
+      corpus_version: 'calibration-v1',
+      fixture_ids: ['dependency-1', 'ambiguity-1'],
+      baseline_version: 'known-good-v1',
+    },
+    proposal: { route_weights: { 'gsd-debug': 0.75 } },
+    ...overrides,
+  };
+}
+
+function passingGates(overrides = {}) {
+  return {
+    safety: { pass: true, reason_code: 'safety_pass' },
+    privacy: { pass: true, reason_code: 'privacy_pass' },
+    quality: { pass: true, reason_code: 'quality_pass' },
+    context_budget: { pass: true, reason_code: 'context_budget_pass' },
+    compatibility: { pass: true, reason_code: 'compatibility_pass' },
+    latency: { pass: true, reason_code: 'latency_pass' },
+    ...overrides,
+  };
+}
+
+test('D-09 candidates are immutable content-addressed reproducible state', async () => {
+  const { proposeCandidate } = await import(canaryUrl);
+  const first = proposeCandidate(candidateInput());
+  const reordered = proposeCandidate({
+    proposal: { route_weights: { 'gsd-debug': 0.75 } },
+    evaluation_inputs: {
+      baseline_version: 'known-good-v1',
+      fixture_ids: ['dependency-1', 'ambiguity-1'],
+      corpus_version: 'calibration-v1',
+    },
+    compiled_index_version: 'compiled-v1',
+    policy_version: 'policy-v1',
+    source_evidence_fingerprint: 'b'.repeat(64),
+  });
+  assert.equal(first.status, 'proposed');
+  assert.equal(first.candidate.id, reordered.candidate.id);
+  assert.match(first.candidate.id, /^candidate-[a-f0-9]{64}$/);
+  assert.throws(() => { first.candidate.proposal.route_weights['gsd-debug'] = 1; }, TypeError);
+  assert.throws(() => { first.candidate.evaluation_inputs.fixture_ids.push('new'); }, TypeError);
+});
+
+test('D-10 promotion requires sufficient evidence and every independent hard gate', async () => {
+  const { proposeCandidate, evaluateCandidate, REQUIRED_GATES } = await import(canaryUrl);
+  const candidate = proposeCandidate(candidateInput()).candidate;
+  const sufficientEvidence = { status: 'validated', sufficient: true, reason_code: 'evidence_sufficient', sample_count: 30, weighted_samples: 29.99 };
+  const accepted = evaluateCandidate({ candidate, evidence_window: sufficientEvidence, gates: passingGates() });
+  assert.equal(accepted.promotable, true);
+  assert.equal(accepted.reason_code, 'candidate_promotable');
+
+  for (const gate of REQUIRED_GATES) {
+    const rejected = evaluateCandidate({
+      candidate,
+      evidence_window: sufficientEvidence,
+      gates: passingGates({ [gate]: { pass: false, reason_code: `${gate}_failed` } }),
+    });
+    assert.equal(rejected.promotable, false, `${gate} must be independently mandatory`);
+    assert.equal(rejected.reason_code, `${gate}_failed`);
+  }
+
+  const lowVolume = evaluateCandidate({
+    candidate,
+    evidence_window: { ...sufficientEvidence, sufficient: false, reason_code: 'insufficient_evidence_samples', sample_count: 29 },
+    gates: passingGates(),
+  });
+  assert.equal(lowVolume.promotable, false);
+  assert.equal(lowVolume.reason_code, 'insufficient_evidence_samples');
+});
+
+test('D-10 uncertainty preserves known-good and weighted scores cannot compensate', async () => {
+  const { proposeCandidate, evaluateCandidate } = await import(canaryUrl);
+  const candidate = proposeCandidate(candidateInput()).candidate;
+  const result = evaluateCandidate({
+    candidate,
+    evidence_window: { status: 'validated', sufficient: true, reason_code: 'evidence_sufficient', sample_count: 100, weighted_samples: 99.9 },
+    gates: passingGates({ privacy: { pass: false, reason_code: 'privacy_failed', score: 0.999 } }),
+    known_good_version: 'known-good-v1',
+  });
+  assert.equal(result.promotable, false);
+  assert.equal(result.preserve_version, 'known-good-v1');
+  assert.equal(result.reason_code, 'privacy_failed');
+  assert.equal('active_version' in result, false, 'evaluation must not mutate publication authority');
 });
