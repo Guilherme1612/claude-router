@@ -217,9 +217,9 @@ test('capability selection rejects before registry access unless one workflow to
 
 test('declared ownership alone seeds roots and explicit capability only narrows compatibly', () => {
   const records = [
-    { id: 'router/executor', type: 'agent' },
-    { id: 'router/execute-command', type: 'command' },
-    { id: 'router/github-mcp', type: 'mcp' },
+    capabilityRecord('router/executor', 'agent'),
+    capabilityRecord('router/execute-command', 'command'),
+    capabilityRecord('router/github-mcp', 'mcp'),
   ];
   const base = {
     workflow: selectedWorkflow(), workflowDeclarations: [workflowDeclaration()],
@@ -245,7 +245,7 @@ test('capability ownership selection is byte-stable across declaration and regis
     workflowDeclaration(),
     workflowDeclaration({ workflow_id: 'gsd-plan-phase', owners: ['router/planner'], compatible: ['router/planner'] }),
   ];
-  const records = [{ id: 'router/executor', type: 'agent' }, { id: 'router/execute-command', type: 'command' }];
+  const records = [capabilityRecord('router/executor', 'agent'), capabilityRecord('router/execute-command', 'command')];
   const run = (workflowDeclarations, registryRecords) => selectCapabilities({
     workflow: selectedWorkflow(), workflowDeclarations,
     getRegistry: () => ({ records: registryRecords }),
