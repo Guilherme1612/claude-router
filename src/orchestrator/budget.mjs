@@ -10,6 +10,9 @@ const PHASE_MAXIMA = Object.freeze({
   diagnostic: 2048,
 });
 const PHASE_TOTAL_MAX_BYTES = 12288;
+const SOURCE_CLASS_ORDER = new Map([
+  'transition_facts', 'dependency_facts', 'artifact_summary', 'diagnostic',
+].map((sourceClass, index) => [sourceClass, index]));
 const BROAD_SOURCE_CLASSES = new Set([
   'full_manifest', 'manifest_body', 'planning_tree', 'planning_directory',
   'conversation_history', 'complete_design_body', 'design_body',
@@ -148,9 +151,18 @@ export function planContextLoad(options = {}) {
     if (unique.has(key)) return blocked('source_identity_ambiguous');
     unique.add(key);
   }
+  const descriptorClasses = new Set(descriptors.map(source => source.class));
+  const missingRequiredClass = options.contract.sources
+    .filter(source => source.required && !descriptorClasses.has(source.class))
+    .sort((left, right) => SOURCE_CLASS_ORDER.get(left.class) - SOURCE_CLASS_ORDER.get(right.class))[0];
+  if (missingRequiredClass) {
+    return blocked('required_source_class_missing', {
+      blocker: { class: missingRequiredClass.class },
+    });
+  }
   const ordered = [...descriptors].sort((left, right) => {
-    const priority = rules.get(left.class).priority - rules.get(right.class).priority;
-    return priority || left.canonical_id.localeCompare(right.canonical_id);
+    const semanticOrder = SOURCE_CLASS_ORDER.get(left.class) - SOURCE_CLASS_ORDER.get(right.class);
+    return semanticOrder || left.canonical_id.localeCompare(right.canonical_id);
   });
 
   const included = [];
