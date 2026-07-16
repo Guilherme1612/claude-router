@@ -240,6 +240,44 @@ test('declared ownership alone seeds roots and explicit capability only narrows 
   });
 });
 
+test('compatible non-owner capability narrows while retaining declared requirements', () => {
+  const records = [
+    capabilityRecord('router/executor', 'agent'),
+    capabilityRecord('router/required-policy', 'permission'),
+    capabilityRecord('router/compatible-tool', 'tool', ['router/tool-dependency']),
+    capabilityRecord('router/tool-dependency', 'mcp'),
+    capabilityRecord('router/incompatible-tool', 'tool'),
+  ];
+  const declaration = workflowDeclaration({
+    owners: ['router/executor'],
+    requirements: ['router/required-policy'],
+    compatible: ['router/executor', 'router/compatible-tool'],
+  });
+  const run = (workflowDeclarations, registryRecords) => selectCapabilities({
+    workflow: selectedWorkflow(), workflowDeclarations,
+    registry: { records: registryRecords }, explicitCapability: 'router/compatible-tool',
+  });
+
+  const narrowed = run([declaration], records);
+  assert.equal(narrowed.status, 'resolved');
+  assert.deepEqual(narrowed.roots, ['router/compatible-tool', 'router/required-policy']);
+  assert.deepEqual(
+    narrowed.closure.map(value => value.canonical_id),
+    ['router/tool-dependency', 'router/compatible-tool', 'router/required-policy'],
+  );
+  assert.equal(
+    JSON.stringify(narrowed),
+    JSON.stringify(run([declaration], [...records].reverse())),
+  );
+
+  const incompatible = selectCapabilities({
+    workflow: selectedWorkflow(), workflowDeclarations: [declaration],
+    registry: { records }, explicitCapability: 'router/incompatible-tool',
+  });
+  assert.equal(incompatible.reason_code, 'explicit_capability_incompatible');
+  assert.equal(incompatible.dispatch_eligible, false);
+});
+
 test('capability ownership selection is byte-stable across declaration and registry permutations', () => {
   const declarations = [
     workflowDeclaration(),
