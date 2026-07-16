@@ -40,7 +40,7 @@ test('capsule canonicalization is deterministic, bounded, and identity is label-
   assert.equal(deriveWorkflowIdentity(input), deriveWorkflowIdentity({ ...input, goal: { ...input.goal, summary: 'different label' } }));
 
   const many = capsule({ artifacts: Array.from({ length: CAPSULE_LIMITS.artifacts + 3 }, (_, i) => ({
-    ref: `out/${i}.json`, type: 'report', status: i === 20 ? 'next' : 'current', priority: i,
+    ref: `out/${i}.json`, type: 'report', status: i === CAPSULE_LIMITS.artifacts + 2 ? 'next' : 'current', priority: i,
     witness: { kind: 'version', value: `v${i}` },
   })) });
   const bounded = canonicalizeCapsule(many);
@@ -72,7 +72,7 @@ test('strict allowlist excludes prompt history, documents, credentials, and tool
   const bytes = stableCapsuleStringify(input);
   assert.doesNotMatch(bytes, new RegExp(canary));
   assert.doesNotMatch(bytes, /prompt|transcript|credentials|tool_output|document_body/);
-  assert.throws(() => stableCapsuleStringify(capsule({ goal: { id: canary, summary: 'ok' } })), error => !JSON.stringify(error).includes(canary));
+  assert.throws(() => stableCapsuleStringify(capsule({ goal: { id: canary.repeat(10), summary: 'ok' } })), error => !JSON.stringify(error).includes(canary));
 });
 
 test('active and one LKG capsule persist privately and recover only corrupt active bytes', async () => {
