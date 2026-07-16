@@ -182,6 +182,13 @@ test('D-13 through D-16 fixed corpus passes independent semantic budget and REL-
   const evaluation = evaluateCalibrationCorpus({ corpus: CALIBRATION_CORPUS, route, versions });
   const measured = measureRoutes({ fixtures: CALIBRATION_CORPUS, route, versions, baseline: { p50_ms: 1, p95_ms: 2 }, warmup_runs: 14, measured_runs: 70 });
   assert.equal(measured.corpus_fingerprint, '3ea61ea5a997a93e1341120657d3be3c9d9b3437379390ea6c8f4b1367f3ac5f');
+  assert.ok(measured.warm.p95_ms < 25, `warm p95 ${measured.warm.p95_ms} ms`);
+  assert.ok(measured.warm.max_ms < 100, `warm max ${measured.warm.max_ms} ms`);
+  assert.deepEqual(measured.versions, versions);
+  assert.equal(typeof measured.warm.p50_ms, 'number');
+  assert.equal(typeof measured.warm.p95_ms, 'number');
+  assert.equal(typeof measured.warm.max_ms, 'number');
+  assert.equal(typeof measured.baseline_delta.p50_ms, 'number');
   assert.equal(typeof measured.baseline_delta.p95_ms, 'number');
   const result = assessCalibration({ evaluation, performance: measured });
   assert.equal(result.pass, true);
