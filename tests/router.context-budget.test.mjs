@@ -65,6 +65,32 @@ test('forbidden broad source classes never enter a default plan', async () => {
   }
 });
 
+test('every required class must have a valid descriptor before dispatch', async () => {
+  const { planContextLoad } = await api();
+  const required = [
+    descriptor('transition_facts', 'transition:a', { transition: 'a' }),
+    descriptor('dependency_facts', 'dependency:a', { dependency: 'a' }),
+    descriptor('artifact_summary', 'artifact:a', { artifact: 'a' }),
+  ];
+  for (let missing = 0; missing < required.length; missing += 1) {
+    const result = planContextLoad({
+      workflow: workflow(), closure: closure(), contract: contract(),
+      sources: required.filter((_, index) => index !== missing),
+    });
+    assert.deepEqual(result, {
+      status: 'blocked', dispatch_eligible: false, reason_code: 'required_source_class_missing',
+      blocker: { class: required[missing].class },
+    });
+  }
+  assert.deepEqual(
+    planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [] }),
+    {
+      status: 'blocked', dispatch_eligible: false, reason_code: 'required_source_class_missing',
+      blocker: { class: 'transition_facts' },
+    },
+  );
+});
+
 test('required per-source overflow blocks by one byte and optional overflow is omitted', async () => {
   const { planContextLoad } = await api();
   const requiredContract = contract({ total_max_bytes: 100, sources: [{ class: 'transition_facts', required: true, max_bytes: 4, priority: 10 }] });
@@ -93,6 +119,30 @@ test('stable semantic priority and canonical identity make permutations byte-sta
   assert.deepEqual(left.report.included_sources.map(x => x.canonical_id), ['transition:a', 'dependency:a', 'artifact:a', 'artifact:b', 'diagnostic:z']);
 });
 
+test('semantic class order is policy-owned despite caller priority inversion', async () => {
+  const { planContextLoad } = await api();
+  const inverted = contract({ sources: [
+    { class: 'transition_facts', required: true, max_bytes: 2048, priority: 40 },
+    { class: 'dependency_facts', required: true, max_bytes: 2048, priority: 30 },
+    { class: 'artifact_summary', required: true, max_bytes: 6144, priority: 20 },
+    { class: 'diagnostic', required: false, max_bytes: 2048, priority: 10 },
+  ] });
+  const sources = [
+    descriptor('diagnostic', 'diagnostic:a', { diagnostic: 'a' }),
+    descriptor('artifact_summary', 'artifact:a', { artifact: 'a' }),
+    descriptor('dependency_facts', 'dependency:a', { dependency: 'a' }),
+    descriptor('transition_facts', 'transition:a', { transition: 'a' }),
+  ];
+  const result = planContextLoad({ workflow: workflow(), closure: closure(), contract: inverted, sources });
+  assert.deepEqual(result.report.included_sources.map(value => value.class), [
+    'transition_facts', 'dependency_facts', 'artifact_summary', 'diagnostic',
+  ]);
+  assert.equal(
+    JSON.stringify(result),
+    JSON.stringify(planContextLoad({ workflow: workflow(), closure: closure(), contract: inverted, sources: [...sources].reverse() })),
+  );
+});
+
 test('utf8-bytes-v1-ceil-div-3 accounts for ASCII, multibyte, and exact boundaries', async () => {
   const { ESTIMATOR_VERSION, estimateRoutingTokens } = await api();
   assert.equal(ESTIMATOR_VERSION, 'utf8-bytes-v1-ceil-div-3');
@@ -108,17 +158,18 @@ test('summary reuse requires exact identity, witness, and contract version', asy
     witness: { kind: 'sha256', value: 'a'.repeat(64) }, summary_contract_version: 'artifact-summary-v1',
   });
   const exact = { canonical_id: 'artifact:plan', identity: base.identity, witness: base.witness, summary_contract_version: 'artifact-summary-v1', summary: { title: 'safe summary' } };
-  const hit = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [base], summaryIndex: [exact] });
-  assert.equal(hit.report.included_sources[0].reuse_status, 'hit');
+  const required = [descriptor('transition_facts', 'transition:a', {}), descriptor('dependency_facts', 'dependency:a', {})];
+  const hit = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [...required, base], summaryIndex: [exact] });
+  assert.equal(hit.report.included_sources[2].reuse_status, 'hit');
   for (const [field, mutate, reason] of [
     ['identity', x => ({ ...x, plan: '02' }), 'summary_identity_mismatch'],
     ['witness', () => ({ kind: 'version', value: 'old' }), 'summary_witness_mismatch'],
     ['summary_contract_version', () => 'artifact-summary-v0', 'summary_contract_version_mismatch'],
   ]) {
     const candidate = { ...exact, [field]: mutate(exact[field]) };
-    const miss = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [base], summaryIndex: [candidate] });
-    assert.equal(miss.report.included_sources[0].reuse_status, 'miss');
-    assert.equal(miss.report.included_sources[0].reuse_reason_code, reason);
+    const miss = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [...required, base], summaryIndex: [candidate] });
+    assert.equal(miss.report.included_sources[2].reuse_status, 'miss');
+    assert.equal(miss.report.included_sources[2].reuse_reason_code, reason);
     assert.doesNotMatch(JSON.stringify(miss), /safe summary/);
   }
 });
@@ -126,21 +177,24 @@ test('summary reuse requires exact identity, witness, and contract version', asy
 test('reports expose exact totals, ceilings, and signed baseline deltas', async () => {
   const { planContextLoad } = await api();
   const result = planContextLoad({
-    workflow: workflow(), closure: closure(), contract: contract(),
+    workflow: workflow(), closure: closure(), contract: contract({ total_max_bytes: 100, sources: [{ class: 'transition_facts', required: true, max_bytes: 100, priority: 10 }] }),
     sources: [descriptor('transition_facts', 'transition:a', 'abc', { canonical_bytes: 3 })],
     baseline: { canonical_bytes: 5, estimated_tokens: 4 },
   });
   assert.equal(result.report.canonical_bytes, 3);
   assert.equal(result.report.estimated_tokens, 1);
   assert.deepEqual(result.report.regression_delta, { canonical_bytes: -2, estimated_tokens: -3 });
-  assert.equal(result.report.total_max_bytes, 12288);
+  assert.equal(result.report.total_max_bytes, 100);
   assert.equal(result.report.estimator_version, 'utf8-bytes-v1-ceil-div-3');
 });
 
 test('total token accounting estimates the canonical aggregate rather than summing rounded sources', async () => {
   const { planContextLoad } = await api();
   const result = planContextLoad({
-    workflow: workflow(), closure: closure(), contract: contract(),
+    workflow: workflow(), closure: closure(), contract: contract({ total_max_bytes: 100, sources: [
+      { class: 'transition_facts', required: true, max_bytes: 50, priority: 10 },
+      { class: 'dependency_facts', required: true, max_bytes: 50, priority: 20 },
+    ] }),
     sources: [
       descriptor('transition_facts', 'transition:a', 'a', { canonical_bytes: 1 }),
       descriptor('dependency_facts', 'dependency:a', 'b', { canonical_bytes: 1 }),
@@ -155,7 +209,10 @@ test('pre-accounted descriptors do not expose or inspect bounded source bodies',
   const { planContextLoad } = await api();
   const source = descriptor('diagnostic', 'diagnostic:safe', undefined, { canonical_bytes: 3 });
   Object.defineProperty(source, 'value', { enumerable: true, get() { throw new Error('body inspected'); } });
-  const result = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [source] });
+  const result = planContextLoad({
+    workflow: workflow(), closure: closure(), contract: contract(),
+    sources: [descriptor('transition_facts', 'transition:a', {}), descriptor('dependency_facts', 'dependency:a', {}), descriptor('artifact_summary', 'artifact:a', {}), source],
+  });
   assert.equal(result.status, 'planned');
   assert.doesNotMatch(JSON.stringify(result), /body inspected/);
 });
