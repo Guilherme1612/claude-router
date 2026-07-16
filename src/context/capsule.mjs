@@ -161,6 +161,7 @@ function parsePath(path) {
 
 export function saveCapsule({ ownedRoot, capsule }) {
   const bytes = stableCapsuleStringify(capsule) + '\n';
+  if (typeof ownedRoot === 'string' && existsSync(ownedRoot) && lstatSync(ownedRoot).isSymbolicLink()) return { status: 'blocked', reason_code: 'unsafe_owned_root' };
   const p = capsulePaths(ownedRoot);
   mkdirSync(p.root, { recursive: true, mode: 0o700 });
   if (unsafe(p.active) || unsafe(p.lkg)) return { status: 'blocked', reason_code: 'unsafe_capsule_path' };
@@ -183,6 +184,7 @@ export function saveCapsule({ ownedRoot, capsule }) {
 }
 
 export function loadCapsule({ ownedRoot }) {
+  if (typeof ownedRoot === 'string' && existsSync(ownedRoot) && lstatSync(ownedRoot).isSymbolicLink()) return { status: 'blocked', reason_code: 'unsafe_owned_root' };
   let p;
   try { p = capsulePaths(ownedRoot); } catch { return { status: 'blocked', reason_code: 'owned_root_invalid' }; }
   const active = parsePath(p.active);
