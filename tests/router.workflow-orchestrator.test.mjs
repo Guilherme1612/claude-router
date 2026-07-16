@@ -193,6 +193,16 @@ test('invalid explicit selection blocks and selection is permutation-stable with
   assert.deepEqual(invalid, {
     status: 'blocked', dispatch_eligible: false, reason_code: 'explicit_transition_invalid',
   });
+
+  const conflicting = selectWorkflow(forward, {
+    present: true,
+    complete: true,
+    transition_id: 'gsd.verify',
+    workflow_id: 'gsd-audit-uat',
+  });
+  assert.deepEqual(conflicting, {
+    status: 'blocked', dispatch_eligible: false, reason_code: 'explicit_transition_invalid',
+  });
 });
 
 test('capability selection rejects before registry access unless one workflow token is dispatch eligible', () => {

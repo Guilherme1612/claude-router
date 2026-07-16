@@ -161,9 +161,8 @@ export function selectWorkflow(transitionResult, explicitIntent) {
       return clarification(candidates, 'explicit_transition_incomplete');
     }
     const matching = candidates.filter(candidate => (
-      validString(transitionId)
-        ? candidate.transition_id === transitionId
-        : candidate.workflow_id === workflowId
+      (!validString(transitionId) || candidate.transition_id === transitionId)
+      && (!validString(workflowId) || candidate.workflow_id === workflowId)
     ));
     if (matching.length !== 1) return selectionBlocked('explicit_transition_invalid');
     return {
