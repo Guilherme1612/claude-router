@@ -1,6 +1,7 @@
 import { loadCapsule, saveCapsule } from './capsule.mjs';
 import { normalizeContextInstruction, resolveContextAction } from './resolve.mjs';
 import { assembleRefreshEvidence, collectAuthoritativeSnapshot } from './sources.mjs';
+import { loadCompiledIndex } from '../prompt/compile-index.mjs';
 
 const MAX_CONTEXT_BYTES = 2048;
 
@@ -48,6 +49,7 @@ function injection(resolution) {
     fields.push(`Next workflow action: ${typeof resolution.action === 'string' ? resolution.action : JSON.stringify(resolution.action)}`);
     if (resolution.artifact_ref) fields.push(`Referenced artifact: ${resolution.artifact_ref}`);
   } else if (resolution.question) fields.push(resolution.question);
+  else if (resolution.diagnostic) fields.push(resolution.diagnostic);
   fields.push('</context-recovery>');
   const value = fields.join('\n');
   return Buffer.byteLength(value) <= MAX_CONTEXT_BYTES ? value : '<!-- router-inject -->\n<context-recovery outcome="clarify" reason="bounded_output">Which workflow should I continue?</context-recovery>';
@@ -79,17 +81,34 @@ function authoritativeEvidence(capsule, projectRoot) {
   });
 }
 
-export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale = false, authoritative } = {}) {
+export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale = false, authoritative, now = Date.now(), compiledFs } = {}) {
   const instruction = parseInstruction(prompt);
   if (instruction.kind === 'none') return { handled: false, reason_code: 'instruction_not_contextual' };
   if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return { handled: false, reason_code: 'context_roots_missing' };
   const loaded = loadCapsule({ ownedRoot });
   const capsule = loaded.capsule;
   if (!capsule && instruction.kind === 'explicit') return { handled: false, reason_code: loaded.reason_code };
+  const compiledIndex = loadCompiledIndex({ ownedRoot, now, ...(compiledFs ? { fs: compiledFs } : {}) });
+  if (!compiledIndex.dispatch_eligible) {
+    const resolution = {
+      outcome: 'blocked', dispatch_eligible: false,
+      reason_code: compiledIndex.reason_code, diagnostic: compiledIndex.diagnostic,
+    };
+    return { handled: true, resolution, additional_context: injection(resolution) };
+  }
   const resolution = resolveContextAction({
     instruction, capsule,
     ...(forceStale && capsule ? { freshness: 'stale', authoritative: authoritative || authoritativeEvidence(capsule, projectRoot) } : {}),
   });
+  const workflowId = resolution.outcome === 'override' ? resolution.action?.workflow : capsule?.position?.workflow;
+  const projection = compiledIndex.index.routes?.[workflowId];
+  if (resolution.dispatch_eligible && !projection) {
+    const blockedResolution = {
+      outcome: 'blocked', dispatch_eligible: false, reason_code: 'compiled_workflow_missing',
+      diagnostic: 'Activate a compiled routing index containing the selected workflow.',
+    };
+    return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
+  }
   let save = null;
   if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh) });
   if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution) });
@@ -98,6 +117,11 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
     handled: true,
     resolution,
     additional_context: injection(resolution),
+    ...(projection ? { compiled: {
+      version_id: compiledIndex.version_id, source: compiledIndex.source,
+      workflow_id: projection.workflow_id, transition_id: projection.transition_id,
+      reason_code: projection.reason_code,
+    } } : {}),
     ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}),
   };
 }
