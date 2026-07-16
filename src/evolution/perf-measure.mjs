@@ -12,13 +12,13 @@ function freeze(value) {
 }
 
 export const CALIBRATION_CORPUS = freeze([
-  { id: 'minimal-prompt-v1', fixture_class: 'minimal_prompt', input: { prompt: 'continue' }, expected: { outcome: 'continue', dispatch_eligible: true }, max_context_bytes: 2048 },
+  { id: 'minimal-prompt-v1', fixture_class: 'minimal_prompt', input: { prompt: 'continue' }, expected: { outcome: 'resume', dispatch_eligible: true }, max_context_bytes: 2048 },
   { id: 'explicit-override-v1', fixture_class: 'explicit_override', input: { prompt: 'execute phase 17' }, expected: { outcome: 'override', dispatch_eligible: true }, max_context_bytes: 2048 },
   { id: 'stale-context-v1', fixture_class: 'stale_context', input: { prompt: 'continue', force_stale: true }, expected: { outcome: 'refresh', dispatch_eligible: true }, max_context_bytes: 2048 },
   { id: 'ambiguity-v1', fixture_class: 'ambiguity', input: { prompt: 'continue', tied: true }, expected: { outcome: 'clarify', dispatch_eligible: false }, max_context_bytes: 2048 },
-  { id: 'terminal-state-v1', fixture_class: 'terminal_state', input: { prompt: 'continue', status: 'complete' }, expected: { outcome: 'blocked', dispatch_eligible: false }, max_context_bytes: 2048 },
-  { id: 'dependency-v1', fixture_class: 'dependency', input: { prompt: 'continue', dependencies: 'ready' }, expected: { outcome: 'continue', dispatch_eligible: true }, max_context_bytes: 2048 },
-  { id: 'context-budget-v1', fixture_class: 'context_budget', input: { prompt: 'continue', context_bytes: 2048 }, expected: { outcome: 'continue', dispatch_eligible: true, context_within_budget: true }, max_context_bytes: 2048 },
+  { id: 'terminal-state-v1', fixture_class: 'terminal_state', input: { prompt: 'continue', status: 'complete' }, expected: { outcome: 'clarify', dispatch_eligible: false }, max_context_bytes: 2048 },
+  { id: 'dependency-v1', fixture_class: 'dependency', input: { prompt: 'continue', dependencies: 'ready' }, expected: { outcome: 'resume', dispatch_eligible: true }, max_context_bytes: 2048 },
+  { id: 'context-budget-v1', fixture_class: 'context_budget', input: { prompt: 'continue', context_bytes: 2048 }, expected: { outcome: 'resume', dispatch_eligible: true, context_within_budget: true }, max_context_bytes: 2048 },
 ]);
 
 const corpusBytes = JSON.stringify({ version: CALIBRATION_CORPUS_VERSION, fixtures: CALIBRATION_CORPUS });

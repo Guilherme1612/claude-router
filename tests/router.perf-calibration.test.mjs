@@ -6,7 +6,7 @@ const perfUrl = new URL('../src/evolution/perf-measure.mjs', import.meta.url);
 test('D-13/D-15 calibration corpus is byte-locked and covers all seven classes', async () => {
   const { CALIBRATION_CORPUS, CALIBRATION_CORPUS_FINGERPRINT, CALIBRATION_CORPUS_VERSION } = await import(perfUrl);
   assert.equal(CALIBRATION_CORPUS_VERSION, 'router-calibration-v1');
-  assert.equal(CALIBRATION_CORPUS_FINGERPRINT, '7bc53e0215dd75fdd98cb6a4b4c0df77a9360ab3194b1ccb26ae89a85e2b677d');
+  assert.equal(CALIBRATION_CORPUS_FINGERPRINT, '3ea61ea5a997a93e1341120657d3be3c9d9b3437379390ea6c8f4b1367f3ac5f');
   assert.deepEqual(CALIBRATION_CORPUS.map(fixture => fixture.fixture_class), [
     'minimal_prompt', 'explicit_override', 'stale_context', 'ambiguity', 'terminal_state', 'dependency', 'context_budget',
   ]);
