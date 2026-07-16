@@ -231,3 +231,88 @@ test('D-10 uncertainty preserves known-good and weighted scores cannot compensat
   assert.equal(result.reason_code, 'privacy_failed');
   assert.equal('active_version' in result, false, 'evaluation must not mutate publication authority');
 });
+
+test('D-11 hard rejection preserves unpublished known-good without publication', async () => {
+  const { applyCanaryDecision } = await import(canaryUrl);
+  const calls = [];
+  const result = applyCanaryDecision({
+    evaluation: { promotable: false, reason_code: 'privacy_failed', candidate_id: 'candidate-x' },
+    known_good_version: 'v1-known',
+    publication: { activateCandidate: () => calls.push('activate') },
+  });
+  assert.deepEqual(result, {
+    status: 'rejected', candidate_id: 'candidate-x', reason_code: 'privacy_failed', active_version: 'v1-known',
+  });
+  assert.deepEqual(calls, []);
+});
+
+test('D-12 promotion delegates to journaled atomic registry activation', async () => {
+  const { applyCanaryDecision } = await import(canaryUrl);
+  const calls = [];
+  const activation = { ownedRoot: '/owned', candidate: {}, mapping: {}, reconciliation: {}, policy: {}, verification: {} };
+  const result = applyCanaryDecision({
+    evaluation: { promotable: true, reason_code: 'candidate_promotable', candidate_id: 'candidate-x' },
+    demonstrated_benefit: { status: 'demonstrated', reason_code: 'quality_improved' },
+    activation,
+    publication: {
+      recoverRollbackJournal: (input) => { calls.push(['journal', input]); return { recovery_status: 'healthy' }; },
+      recoverActiveVersion: (input) => { calls.push(['recover', input]); return { recovery_status: 'healthy', version_id: 'v1-known' }; },
+      activateCandidate: (input) => { calls.push(['activate', input]); return { activation_status: 'activated', version_id: 'v1-new' }; },
+    },
+  });
+  assert.equal(result.status, 'promoted');
+  assert.equal(result.active_version, 'v1-new');
+  assert.deepEqual(calls.map(([name]) => name), ['journal', 'recover', 'activate']);
+  assert.equal(calls[2][1], activation);
+});
+
+test('D-11 quality regression automatically rolls a published canary back', async () => {
+  const { applyCanaryDecision } = await import(canaryUrl);
+  const calls = [];
+  const result = applyCanaryDecision({
+    evaluation: { promotable: false, reason_code: 'quality_regression', candidate_id: 'candidate-x' },
+    published_version: 'v1-canary', known_good_version: 'v1-known', ownedRoot: '/owned',
+    publication: {
+      recoverRollbackJournal: () => ({ recovery_status: 'healthy' }),
+      recoverActiveVersion: () => ({ recovery_status: 'healthy', version_id: 'v1-canary' }),
+      previewRollback: (input) => { calls.push(['preview', input]); return { preview_status: 'ready', destination_version_id: 'v1-known' }; },
+      executeRollback: (input) => { calls.push(['rollback', input]); return { rollback_status: 'rolled_back' }; },
+    },
+  });
+  assert.equal(result.status, 'rolled_back');
+  assert.equal(result.active_version, 'v1-known');
+  assert.equal(calls[1][1].confirmation, 'v1-known');
+});
+
+test('D-12 crash-boundary recovery blocks publication until authority is healthy', async () => {
+  const { applyCanaryDecision } = await import(canaryUrl);
+  let activated = false;
+  const result = applyCanaryDecision({
+    evaluation: { promotable: true, reason_code: 'candidate_promotable', candidate_id: 'candidate-x' },
+    demonstrated_benefit: { status: 'demonstrated', reason_code: 'latency_improved' },
+    activation: { ownedRoot: '/owned' },
+    publication: {
+      recoverRollbackJournal: () => ({ recovery_status: 'recovery_required', reason_code: 'rollback_journal_invalid' }),
+      recoverActiveVersion: () => ({ recovery_status: 'healthy', version_id: 'v1-known' }),
+      activateCandidate: () => { activated = true; },
+    },
+  });
+  assert.equal(result.status, 'recovery_required');
+  assert.equal(result.reason_code, 'rollback_journal_invalid');
+  assert.equal(activated, false);
+});
+
+test('D-16 neutral speedups stay on known-good while safety corrections may promote', async () => {
+  const { applyCanaryDecision } = await import(canaryUrl);
+  const base = {
+    evaluation: { promotable: true, reason_code: 'candidate_promotable', candidate_id: 'candidate-x' },
+    known_good_version: 'v1-known', activation: { ownedRoot: '/owned' },
+    publication: {
+      recoverRollbackJournal: () => ({ recovery_status: 'healthy' }),
+      recoverActiveVersion: () => ({ recovery_status: 'healthy', version_id: 'v1-known' }),
+      activateCandidate: () => ({ activation_status: 'activated', version_id: 'v1-new' }),
+    },
+  };
+  assert.equal(applyCanaryDecision({ ...base, demonstrated_benefit: { status: 'neutral', reason_code: 'faster_only' } }).status, 'preserved');
+  assert.equal(applyCanaryDecision({ ...base, demonstrated_benefit: { status: 'safety_correction', reason_code: 'compatibility_repair' } }).status, 'promoted');
+});
