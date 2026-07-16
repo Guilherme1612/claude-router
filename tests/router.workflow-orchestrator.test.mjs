@@ -7,7 +7,7 @@ import {
   nextValidTransitions,
   selectWorkflow,
 } from '../src/orchestrator/transitions.mjs';
-import { selectCapabilities } from '../src/orchestrator/select.mjs';
+import { resolveDependencies, selectCapabilities } from '../src/orchestrator/select.mjs';
 
 function evidence(overrides = {}) {
   return {
@@ -38,6 +38,16 @@ function workflowDeclaration(overrides = {}) {
     workflow_id: 'gsd-execute-phase',
     owners: ['router/executor', 'router/execute-command'],
     compatible: ['router/executor', 'router/execute-command'],
+    ...overrides,
+  };
+}
+
+function capabilityRecord(id, type, dependencies = [], overrides = {}) {
+  return {
+    id, type, lifecycle: 'ready', dispatchable: true, available: true,
+    scope: { kind: 'global' },
+    dependencies: { state: dependencies.length ? 'declared' : 'unknown', items: dependencies.map(value => ({ id: value, available: true })) },
+    permissions: { required: [], grants: [], denied: [] }, conflicts: [], provenance: [],
     ...overrides,
   };
 }
@@ -241,4 +251,89 @@ test('capability ownership selection is byte-stable across declaration and regis
     getRegistry: () => ({ records: registryRecords }),
   });
   assert.equal(JSON.stringify(run(declarations, records)), JSON.stringify(run([...declarations].reverse(), [...records].reverse())));
+});
+
+test('dependency closure traverses every kind and separates invocations, models, permissions, and hooks', () => {
+  const records = [
+    capabilityRecord('router/skill', 'skill', ['router/command', 'router/hook']),
+    capabilityRecord('router/command', 'command', ['router/agent']),
+    capabilityRecord('router/agent', 'agent', ['router/mcp']),
+    capabilityRecord('router/mcp', 'mcp', ['router/tool']),
+    capabilityRecord('router/tool', 'tool', ['router/model', 'router/permission']),
+    capabilityRecord('router/model', 'model'),
+    capabilityRecord('router/permission', 'permission'),
+    capabilityRecord('router/hook', 'hook', [], { dispatchable: false, event: 'PreToolUse' }),
+  ];
+  const result = resolveDependencies({ roots: ['router/skill'], registry: { records } });
+  assert.equal(result.status, 'resolved');
+  assert.equal(result.dispatch_eligible, true);
+  assert.deepEqual(result.invokable_capabilities.map(value => value.canonical_id), [
+    'router/skill', 'router/command', 'router/agent', 'router/mcp', 'router/tool',
+  ]);
+  assert.deepEqual(result.required_models, ['router/model']);
+  assert.deepEqual(result.required_permissions, ['router/permission']);
+  assert.deepEqual(result.lifecycle_bindings, [{ canonical_id: 'router/hook', event: 'PreToolUse' }]);
+  assert.equal(result.invokable_capabilities.some(value => value.kind === 'hook'), false);
+  assert.doesNotMatch(JSON.stringify(result), /source content|raw_prompt/);
+});
+
+test('dependency safety matrix blocks with canonical first reason and no dispatchable closure', () => {
+  const rows = [
+    ['dependency_missing', []],
+    ['dependency_unavailable', [capabilityRecord('router/missing', 'tool', [], { available: false })]],
+    ['dependency_not_ready', [capabilityRecord('router/missing', 'tool', [], { lifecycle: 'partial' })]],
+    ['dependency_not_dispatchable', [capabilityRecord('router/missing', 'tool', [], { dispatchable: false })]],
+    ['dependency_out_of_scope', [capabilityRecord('router/missing', 'tool', [], { scope: { kind: 'project', repository: 'repo:other', worktree: 'main' } })]],
+    ['dependency_permission_incomplete', [capabilityRecord('router/missing', 'tool', [], { permissions: { required: ['network'], grants: [], denied: [] } })]],
+    ['dependency_conflict', [capabilityRecord('router/missing', 'tool', [], { conflicts: [{ severity: 'dispatch-blocking' }] })]],
+  ];
+  for (const [reason, tail] of rows) {
+    const root = capabilityRecord('router/root', 'skill', ['router/missing']);
+    const result = resolveDependencies({
+      roots: ['router/root'], registry: { records: [root, ...tail].reverse() },
+      requestedScope: { kind: 'project', repository: 'repo:router', worktree: 'main' },
+    });
+    assert.equal(result.reason_code, reason, reason);
+    assert.equal(result.dispatch_eligible, false);
+    assert.deepEqual(result.closure, []);
+  }
+});
+
+test('cycles block deterministically and equivalent graph permutations are byte-identical', () => {
+  const cycle = [
+    capabilityRecord('router/a', 'skill', ['router/b']),
+    capabilityRecord('router/b', 'command', ['router/a']),
+  ];
+  const first = resolveDependencies({ roots: ['router/a'], registry: { records: cycle } });
+  const second = resolveDependencies({ roots: ['router/a'], registry: { records: [...cycle].reverse() } });
+  assert.equal(first.reason_code, 'dependency_cycle');
+  assert.equal(JSON.stringify(first), JSON.stringify(second));
+
+  const safe = [
+    capabilityRecord('router/root', 'skill', ['router/z-tool', 'router/a-command']),
+    capabilityRecord('router/z-tool', 'tool'), capabilityRecord('router/a-command', 'command'),
+  ];
+  assert.equal(
+    JSON.stringify(resolveDependencies({ roots: ['router/root'], registry: { records: safe } })),
+    JSON.stringify(resolveDependencies({ roots: ['router/root'], registry: { records: [...safe].reverse() } })),
+  );
+});
+
+test('capability selection integrates safe closure and blocks unsafe dependency graphs', () => {
+  const records = [
+    capabilityRecord('router/executor', 'agent', ['router/model']),
+    capabilityRecord('router/execute-command', 'command'), capabilityRecord('router/model', 'model'),
+  ];
+  const selected = selectCapabilities({
+    workflow: selectedWorkflow(), workflowDeclarations: [workflowDeclaration()], registry: { records },
+  });
+  assert.equal(selected.status, 'resolved');
+  assert.deepEqual(selected.required_models, ['router/model']);
+
+  const blocked = selectCapabilities({
+    workflow: selectedWorkflow(), workflowDeclarations: [workflowDeclaration()],
+    registry: { records: records.filter(value => value.id !== 'router/model') },
+  });
+  assert.equal(blocked.reason_code, 'dependency_missing');
+  assert.equal(blocked.workflow_id, 'gsd-execute-phase');
 });
