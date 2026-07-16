@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -97,6 +97,20 @@ test('bounded loader accepts a verified compatible active projection', () => {
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('F-01 every malformed route projection fails closed', () => {
+  const malformed = [
+    {}, [], null, { workflow_id: 'gsd-execute-phase' },
+    { workflow_id: 'other', transition_id: 'gsd.execute', dispatch_eligible: true, reason_code: 'ok' },
+    { workflow_id: 'gsd-execute-phase', transition_id: 'gsd.execute', dispatch_eligible: true, reason_code: 'ok', unknown: true },
+    { workflow_id: 'gsd-execute-phase', transition_id: 'x'.repeat(129), dispatch_eligible: true, reason_code: 'ok' },
+  ];
+  for (const route of malformed) {
+    const { root } = fixture({ index: { ...projection(), routes: { 'gsd-execute-phase': route } } });
+    try { assert.equal(loadCompiledIndex({ ownedRoot: root, now: NOW }).dispatch_eligible, false); }
+    finally { rmSync(root, { recursive: true, force: true }); }
+  }
+});
+
 test('invalid active state selects only an explicit verified compatible known-good version', () => {
   const { root } = fixture({ state: 'candidate' });
   const lkgId = 'v1-fedcba9876543210';
@@ -179,6 +193,7 @@ test('explicit override and stale capsule semantics remain stable behind compile
     const explicit = routeContextPrompt({ prompt: 'execute phase 17', ownedRoot: root, projectRoot: root, now: NOW });
     assert.equal(explicit.resolution.reason_code, 'explicit_instruction_override');
     assert.equal(explicit.resolution.dispatch_eligible, true);
+    assert.equal(JSON.parse(readFileSync(join(root, 'context-capsule.json'))).freshness.captured_at, NOW);
 
     const stale = routeContextPrompt({
       prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW, forceStale: true,
@@ -210,20 +225,22 @@ test('hot path observes only explicitly addressed pointer metadata payload and c
   try {
     assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
     const compiledFs = {
-      lstatSync(path) { observed.push(['stat', path]); return (awaitFs()).lstatSync(path); },
-      readFileSync(path) { observed.push(['read', path]); return (awaitFs()).readFileSync(path); },
+      openSync(path, flags) { observed.push(['open', path]); return openSync(path, flags); },
+      fstatSync(fd) { observed.push(['fstat']); return fstatSync(fd); },
+      readSync(fd, buffer, offset, length, position) { observed.push(['read']); return readSync(fd, buffer, offset, length, position); },
+      closeSync(fd) { observed.push(['close']); return closeSync(fd); },
       readdirSync() { throw new Error('directory enumeration forbidden'); },
     };
     const result = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW, compiledFs });
     assert.equal(result.resolution.dispatch_eligible, true);
-    assert.deepEqual(observed, [
-      ['stat', join(root, 'compiled-index', 'active.json')],
-      ['read', join(root, 'compiled-index', 'active.json')],
-      ['stat', join(root, 'compiled-index', 'versions', VERSION, 'metadata.json')],
-      ['read', join(root, 'compiled-index', 'versions', VERSION, 'metadata.json')],
-      ['stat', join(root, 'compiled-index', 'versions', VERSION, 'index.json')],
-      ['read', join(root, 'compiled-index', 'versions', VERSION, 'index.json')],
+    assert.deepEqual(observed.filter(entry => entry[0] === 'open').map(entry => entry[1]), [
+      join(root, 'compiled-index', 'active.json'),
+      join(root, 'compiled-index', 'versions', VERSION, 'metadata.json'),
+      join(root, 'compiled-index', 'versions', VERSION, 'index.json'),
     ]);
+    assert.equal(observed.filter(entry => entry[0] === 'fstat').length, 3);
+    assert.equal(observed.filter(entry => entry[0] === 'read').length, 3);
+    assert.equal(observed.filter(entry => entry[0] === 'close').length, 3);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -233,10 +250,3 @@ test('compiled seam has no registry-build external-model or history-replay depen
   assert.doesNotMatch(loaderSource, /readdir|registry\/build|child_process|fetch\s*\(|https?:|history|telemetry/i);
   assert.doesNotMatch(routeSource, /registry\/build|child_process|fetch\s*\(|https?:|history|telemetry/i);
 });
-
-function awaitFs() {
-  return { lstatSync: (path) => {
-    const bytes = readFileSync(path);
-    return { isSymbolicLink: () => false, isFile: () => true, size: bytes.length };
-  }, readFileSync };
-}

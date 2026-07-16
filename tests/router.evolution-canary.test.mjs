@@ -101,7 +101,8 @@ test('D-07 project evidence is isolated and aggregate eligibility is explicit', 
     { status: 'denied', reason_code: 'aggregate_eligibility_required' },
   );
   assert.equal(store.append(validSignal({ timestamp_ms: now }), { scope: 'aggregate', aggregate_eligible: true }).status, 'stored');
-  const aggregate = store.window({ scope: 'aggregate' });
+  assert.deepEqual(store.window({ scope: 'aggregate' }), { status: 'denied', reason_code: 'aggregate_eligibility_required' });
+  const aggregate = store.window({ scope: 'aggregate', aggregate_eligible: true });
   assert.equal(aggregate.observations.length, 1);
   assert.equal('project_id' in aggregate.observations[0].scope, false);
 });
@@ -191,9 +192,13 @@ test('D-09 candidates are immutable content-addressed reproducible state', async
 });
 
 test('D-10 promotion requires sufficient evidence and every independent hard gate', async () => {
+  const { createEvidenceStore } = await import(evidenceUrl);
   const { proposeCandidate, evaluateCandidate, REQUIRED_GATES } = await import(canaryUrl);
-  const candidate = proposeCandidate(candidateInput()).candidate;
-  const sufficientEvidence = { status: 'validated', sufficient: true, reason_code: 'evidence_sufficient', sample_count: 30, weighted_samples: 29.99 };
+  const now = 1_750_000_000_000;
+  const store = createEvidenceStore({ now: () => now });
+  for (let i = 0; i < 30; i += 1) store.append(validSignal({ timestamp_ms: now - i }), { project_id: 'project-a' });
+  const sufficientEvidence = store.window({ project_id: 'project-a' });
+  const candidate = proposeCandidate(candidateInput({ source_evidence_fingerprint: sufficientEvidence.fingerprint })).candidate;
   const accepted = evaluateCandidate({ candidate, evidence_window: sufficientEvidence, gates: passingGates() });
   assert.equal(accepted.promotable, true);
   assert.equal(accepted.reason_code, 'candidate_promotable');
@@ -214,15 +219,20 @@ test('D-10 promotion requires sufficient evidence and every independent hard gat
     gates: passingGates(),
   });
   assert.equal(lowVolume.promotable, false);
-  assert.equal(lowVolume.reason_code, 'insufficient_evidence_samples');
+  assert.notEqual(lowVolume.reason_code, 'candidate_promotable');
 });
 
 test('D-10 uncertainty preserves known-good and weighted scores cannot compensate', async () => {
+  const { createEvidenceStore } = await import(evidenceUrl);
   const { proposeCandidate, evaluateCandidate } = await import(canaryUrl);
-  const candidate = proposeCandidate(candidateInput()).candidate;
+  const now = 1_750_000_000_000;
+  const store = createEvidenceStore({ now: () => now, minimum_samples: 1 });
+  store.append(validSignal({ timestamp_ms: now }), { project_id: 'project-a' });
+  const evidence_window = store.window({ project_id: 'project-a' });
+  const candidate = proposeCandidate(candidateInput({ source_evidence_fingerprint: evidence_window.fingerprint })).candidate;
   const result = evaluateCandidate({
     candidate,
-    evidence_window: { status: 'validated', sufficient: true, reason_code: 'evidence_sufficient', sample_count: 100, weighted_samples: 99.9 },
+    evidence_window,
     gates: passingGates({ privacy: { pass: false, reason_code: 'privacy_failed', score: 0.999 } }),
     known_good_version: 'known-good-v1',
   });
@@ -230,6 +240,13 @@ test('D-10 uncertainty preserves known-good and weighted scores cannot compensat
   assert.equal(result.preserve_version, 'known-good-v1');
   assert.equal(result.reason_code, 'privacy_failed');
   assert.equal('active_version' in result, false, 'evaluation must not mutate publication authority');
+});
+
+test('F-02 fabricated and candidate-mismatched evidence cannot authorize promotion', async () => {
+  const { proposeCandidate, evaluateCandidate } = await import(canaryUrl);
+  const candidate = proposeCandidate(candidateInput()).candidate;
+  const fabricated = Object.freeze({ status: 'validated', sufficient: true, sample_count: 0, weighted_samples: -99 });
+  assert.equal(evaluateCandidate({ candidate, evidence_window: fabricated, gates: passingGates() }).promotable, false);
 });
 
 test('D-11 hard rejection preserves unpublished known-good without publication', async () => {

@@ -28,6 +28,18 @@ test('fixed corpus evaluates deterministic quality and context-budget outcomes',
   });
 });
 
+test('F-03 context budget is measured from UTF-8 output, never self-attested', async () => {
+  const { evaluateCalibrationCorpus } = await import(perfUrl);
+  const corpus = [{ id: 'oversized', fixture_class: 'context_budget', expected: { context: 'x'.repeat(100_000), context_within_budget: true }, max_context_bytes: 2048 }];
+  const result = evaluateCalibrationCorpus({ corpus, route: fixture => fixture.expected, versions: { candidate: 'c', compiled_index: 'i', policy: 'p' } });
+  assert.equal(result.quality.pass, true);
+  assert.equal(result.context_budget.pass, false);
+  assert.equal(result.fixtures[0].measured_context_bytes, 100_000);
+
+  const utf8 = evaluateCalibrationCorpus({ corpus: [{ id: 'utf8', fixture_class: 'context_budget', expected: { context: 'é' }, max_context_bytes: 16 }], route: fixture => fixture.expected, versions: { candidate: 'c', compiled_index: 'i', policy: 'p' } });
+  assert.equal(utf8.fixtures[0].measured_context_bytes, Buffer.byteLength('é', 'utf8'));
+});
+
 test('D-14 monotonic measurement excludes warmup and computes deterministic nearest-rank percentiles', async () => {
   const { measureRoutes, percentile } = await import(perfUrl);
   assert.equal(percentile([9, 1, 5, 3], 0.5), 3);
