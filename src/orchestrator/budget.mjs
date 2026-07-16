@@ -156,7 +156,6 @@ export function planContextLoad(options = {}) {
   const included = [];
   const omitted = [];
   let totalBytes = 0;
-  let totalTokens = 0;
   for (const source of ordered) {
     const rule = rules.get(source.class);
     const reuse = reuseFor(source, options.summaryIndex);
@@ -174,8 +173,9 @@ export function planContextLoad(options = {}) {
     }
     included.push(sourceFact(source, rule, accounting, reuse));
     totalBytes += accounting.canonical_bytes;
-    totalTokens += accounting.estimated_tokens;
   }
+
+  const totalTokens = Math.ceil(totalBytes / 3);
 
   const baseline = options.baseline;
   const regression_delta = baseline && Number.isSafeInteger(baseline.canonical_bytes)
