@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { stableStringify } from '../src/registry/schema.mjs';
+import { saveCapsule } from '../src/context/capsule.mjs';
+import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 
 const NOW = 1_800_000_000_000;
@@ -70,6 +72,17 @@ function fixture(options = {}) {
   const version = writeVersion(root, options);
   writePointer(root, options.versionId || VERSION, version.metadata.payload_sha256);
   return { root, ...version };
+}
+
+function capsule(overrides = {}) {
+  return {
+    schema_version: 1, scope: { workspace_id: 'router-build', project_id: 'router' },
+    goal: { id: 'phase-17', summary: 'Compiled prompt routing' },
+    position: { workflow: 'gsd-execute-phase', phase: '17', plan: '01', task: '2' },
+    status: 'active', artifacts: [], blockers: [],
+    freshness: { captured_at: NOW - 1_000, generation: 'phase-17' },
+    provenance: { source: 'workflow-state', version: '1' }, ...overrides,
+  };
 }
 
 test('bounded loader accepts a verified compatible active projection', () => {
@@ -142,4 +155,51 @@ test('candidate and quarantined known-good entries are never fallback eligible',
       assert.equal(loadCompiledIndex({ ownedRoot: root, now: NOW }).dispatch_eligible, false);
     } finally { rmSync(root, { recursive: true, force: true }); }
   }
+});
+
+test('live contextual routing consumes the verified projection and selected fresh capsule', () => {
+  const { root } = fixture();
+  try {
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    const result = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW });
+    assert.equal(result.handled, true);
+    assert.equal(result.resolution.reason_code, 'unique_continue_workflow');
+    assert.equal(result.resolution.dispatch_eligible, true);
+    assert.deepEqual(result.compiled, {
+      version_id: VERSION, source: 'active', workflow_id: 'gsd-execute-phase',
+      transition_id: 'gsd.execute', reason_code: 'unique_valid_transition',
+    });
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('explicit override and stale capsule semantics remain stable behind compiled validation', () => {
+  const { root } = fixture();
+  try {
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    const explicit = routeContextPrompt({ prompt: 'execute phase 17', ownedRoot: root, projectRoot: root, now: NOW });
+    assert.equal(explicit.resolution.reason_code, 'explicit_instruction_override');
+    assert.equal(explicit.resolution.dispatch_eligible, true);
+
+    const stale = routeContextPrompt({
+      prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW, forceStale: true,
+      authoritative: { status: 'unresolved', reason_code: 'identity_missing' },
+    });
+    assert.equal(stale.resolution.reason_code, 'authoritative_identity_unresolved');
+    assert.equal(stale.resolution.dispatch_eligible, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('no compatible compiled version is handled as bounded non-dispatchable output', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-compiled-missing-'));
+  try {
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    const result = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW });
+    assert.equal(result.handled, true);
+    assert.deepEqual(result.resolution, {
+      outcome: 'blocked', dispatch_eligible: false,
+      reason_code: 'no_compatible_compiled_index',
+      diagnostic: 'Rebuild and activate a verified compatible compiled routing index.',
+    });
+    assert.match(result.additional_context, /no_compatible_compiled_index/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
