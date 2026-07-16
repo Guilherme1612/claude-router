@@ -52,7 +52,7 @@ export function percentile(values, fraction) {
   return ordered[Math.max(0, Math.ceil(fraction * ordered.length) - 1)];
 }
 
-export function measureRoutes({ fixtures, route, versions, warmup_runs = 5, measured_runs = 20, now = () => performance.now() } = {}) {
+export function measureRoutes({ fixtures, route, versions, baseline = null, warmup_runs = 5, measured_runs = 20, now = () => performance.now() } = {}) {
   if (!Array.isArray(fixtures) || fixtures.length === 0 || typeof route !== 'function') throw new TypeError('fixtures and route are required');
   if (!Number.isInteger(warmup_runs) || warmup_runs < 0 || !Number.isInteger(measured_runs) || measured_runs < 1 || measured_runs > 10_000) throw new TypeError('bounded run counts are required');
   const invoke = index => {
@@ -64,9 +64,15 @@ export function measureRoutes({ fixtures, route, versions, warmup_runs = 5, meas
   for (let index = 0; index < warmup_runs; index += 1) invoke(index);
   const samples = Array.from({ length: measured_runs }, (_, index) => invoke(index));
   const durations = samples.map(sample => sample.elapsed_ms);
+  const warm = { p50_ms: percentile(durations, 0.5), p95_ms: percentile(durations, 0.95), max_ms: Math.max(...durations) };
   return freeze({
     versions: exactVersions(versions), samples,
-    warm: { p50_ms: percentile(durations, 0.5), p95_ms: percentile(durations, 0.95), max_ms: Math.max(...durations) },
+    corpus_fingerprint: CALIBRATION_CORPUS_FINGERPRINT,
+    baseline_delta: baseline ? {
+      p50_ms: warm.p50_ms - baseline.p50_ms,
+      p95_ms: warm.p95_ms - baseline.p95_ms,
+    } : null,
+    warm,
   });
 }
 
