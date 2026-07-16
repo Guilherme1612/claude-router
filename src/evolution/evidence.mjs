@@ -12,6 +12,10 @@ const VERDICTS = new Set(['success', 'regression']);
 const PRIVACY_GUARDS = new Set(['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected']);
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 
+export const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
+export const MAX_RETENTION_MS = 7 * HALF_LIFE_MS;
+export const MINIMUM_SAMPLES = 30;
+
 function boundedToken(value, max = 128) {
   return typeof value === 'string' && value.length > 0 && value.length <= max && TOKEN.test(value);
 }
@@ -60,6 +64,67 @@ export function createEvidenceJournal({ write = () => {}, hash = defaultHash } =
       });
       write(record);
       return { status: 'stored', fingerprint: record.fingerprint };
+    },
+  });
+}
+
+export function createEvidenceStore({ now = Date.now, minimum_samples = MINIMUM_SAMPLES } = {}) {
+  if (typeof now !== 'function') throw new TypeError('now must be a function');
+  if (!Number.isSafeInteger(minimum_samples) || minimum_samples < 1) throw new TypeError('minimum_samples must be a positive integer');
+  const records = [];
+
+  function scopeFor(options) {
+    if (options.scope === 'aggregate') {
+      if (options.aggregate_eligible !== true) return deny('aggregate_eligibility_required');
+      return { kind: 'aggregate' };
+    }
+    if (!boundedToken(options.project_id, 128)) return deny('invalid_project_scope');
+    return { kind: 'project', project_id: options.project_id };
+  }
+
+  function matchesScope(record, options) {
+    if (options.scope === 'aggregate') return record.scope.kind === 'aggregate';
+    return record.scope.kind === 'project' && record.scope.project_id === options.project_id;
+  }
+
+  return Object.freeze({
+    append(input, options = {}) {
+      const validated = validateEvidenceEnvelope(input);
+      if (validated.status !== 'accepted') return validated;
+      const scope = scopeFor(options);
+      if (scope.status === 'denied') return scope;
+      const current = now();
+      if (!Number.isSafeInteger(current) || validated.signal.timestamp_ms > current) return deny('invalid_evidence_time');
+      const fingerprint = defaultHash(JSON.stringify(validated.signal));
+      records.push(Object.freeze({ scope: Object.freeze(scope), signal: validated.signal, fingerprint }));
+      return { status: 'stored', fingerprint };
+    },
+
+    window(options = {}) {
+      const requestedScope = options.scope === 'aggregate'
+        ? { kind: 'aggregate' }
+        : boundedToken(options.project_id, 128) ? { kind: 'project', project_id: options.project_id } : null;
+      if (!requestedScope) return { status: 'denied', reason_code: 'invalid_project_scope' };
+      const current = now();
+      const observations = records.filter((record) => {
+        const age = current - record.signal.timestamp_ms;
+        return age >= 0 && age <= MAX_RETENTION_MS && matchesScope(record, options);
+      });
+      const weighted_samples = observations.reduce((sum, record) => {
+        const age = current - record.signal.timestamp_ms;
+        return sum + (2 ** (-age / HALF_LIFE_MS));
+      }, 0);
+      const sufficient = observations.length >= minimum_samples;
+      return Object.freeze({
+        status: 'validated',
+        scope: Object.freeze(requestedScope),
+        observations: Object.freeze([...observations]),
+        sample_count: observations.length,
+        weighted_samples,
+        minimum_samples,
+        sufficient,
+        reason_code: sufficient ? 'evidence_sufficient' : 'insufficient_evidence_samples',
+      });
     },
   });
 }
