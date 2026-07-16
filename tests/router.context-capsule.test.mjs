@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -111,4 +111,16 @@ test('missing, symlinked, corrupt and unsafe storage fails closed without path d
     assert.throws(() => capsulePaths('relative/root'), /owned_root_invalid/);
     chmodSync(root, 0o700);
   } finally { await rm(root, { recursive: true, force: true }); await rm(outside, { recursive: true, force: true }); }
+});
+
+test('owned root itself may not be a symlink and persistence leaves no temporary history', async () => {
+  const parent = mkdtempSync(join(tmpdir(), 'router-capsule-parent-'));
+  const target = mkdtempSync(join(tmpdir(), 'router-capsule-target-'));
+  const linked = join(parent, 'linked-root');
+  try {
+    symlinkSync(target, linked, 'dir');
+    assert.equal(saveCapsule({ ownedRoot: linked, capsule: capsule() }).reason_code, 'unsafe_owned_root');
+    assert.equal(loadCapsule({ ownedRoot: linked }).reason_code, 'unsafe_owned_root');
+    assert.equal(existsSync(join(target, 'context-capsule.json')), false);
+  } finally { await rm(parent, { recursive: true, force: true }); await rm(target, { recursive: true, force: true }); }
 });
