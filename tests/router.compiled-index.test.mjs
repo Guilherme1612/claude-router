@@ -203,3 +203,40 @@ test('no compatible compiled version is handled as bounded non-dispatchable outp
     assert.match(result.additional_context, /no_compatible_compiled_index/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
+
+test('hot path observes only explicitly addressed pointer metadata payload and capsule paths', () => {
+  const { root } = fixture();
+  const observed = [];
+  try {
+    assert.equal(saveCapsule({ ownedRoot: root, capsule: capsule() }).status, 'saved');
+    const compiledFs = {
+      lstatSync(path) { observed.push(['stat', path]); return (awaitFs()).lstatSync(path); },
+      readFileSync(path) { observed.push(['read', path]); return (awaitFs()).readFileSync(path); },
+      readdirSync() { throw new Error('directory enumeration forbidden'); },
+    };
+    const result = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW, compiledFs });
+    assert.equal(result.resolution.dispatch_eligible, true);
+    assert.deepEqual(observed, [
+      ['stat', join(root, 'compiled-index', 'active.json')],
+      ['read', join(root, 'compiled-index', 'active.json')],
+      ['stat', join(root, 'compiled-index', 'versions', VERSION, 'metadata.json')],
+      ['read', join(root, 'compiled-index', 'versions', VERSION, 'metadata.json')],
+      ['stat', join(root, 'compiled-index', 'versions', VERSION, 'index.json')],
+      ['read', join(root, 'compiled-index', 'versions', VERSION, 'index.json')],
+    ]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('compiled seam has no registry-build external-model or history-replay dependency', () => {
+  const loaderSource = readFileSync(new URL('../src/prompt/compile-index.mjs', import.meta.url), 'utf8');
+  const routeSource = readFileSync(new URL('../src/context/prompt-route.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(loaderSource, /readdir|registry\/build|child_process|fetch\s*\(|https?:|history|telemetry/i);
+  assert.doesNotMatch(routeSource, /registry\/build|child_process|fetch\s*\(|https?:|history|telemetry/i);
+});
+
+function awaitFs() {
+  return { lstatSync: (path) => {
+    const bytes = readFileSync(path);
+    return { isSymbolicLink: () => false, isFile: () => true, size: bytes.length };
+  }, readFileSync };
+}
