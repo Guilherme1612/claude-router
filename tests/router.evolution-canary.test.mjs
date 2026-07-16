@@ -85,3 +85,58 @@ test('D-06 privacy guards suppress prompt signatures', async () => {
   assert.deepEqual(leaked, { status: 'denied', reason_code: 'privacy_signature_forbidden' });
   assert.equal(writes.length, 1);
 });
+
+test('D-07 project evidence is isolated and aggregate eligibility is explicit', async () => {
+  const { createEvidenceStore } = await import(evidenceUrl);
+  const now = 1_750_000_000_000;
+  const store = createEvidenceStore({ now: () => now });
+  assert.equal(store.append(validSignal({ timestamp_ms: now }), { project_id: 'project-a' }).status, 'stored');
+  assert.equal(store.append(validSignal({ timestamp_ms: now, route_id: 'route-b' }), { project_id: 'project-b' }).status, 'stored');
+  assert.equal(store.window({ project_id: 'project-a' }).observations.length, 1);
+  assert.equal(store.window({ project_id: 'project-a' }).observations[0].signal.route_id, 'gsd-debug');
+
+  assert.deepEqual(
+    store.append(validSignal({ timestamp_ms: now }), { scope: 'aggregate' }),
+    { status: 'denied', reason_code: 'aggregate_eligibility_required' },
+  );
+  assert.equal(store.append(validSignal({ timestamp_ms: now }), { scope: 'aggregate', aggregate_eligible: true }).status, 'stored');
+  const aggregate = store.window({ scope: 'aggregate' });
+  assert.equal(aggregate.observations.length, 1);
+  assert.equal('project_id' in aggregate.observations[0].scope, false);
+});
+
+test('D-08 retention and 24-hour exponential decay are deterministic', async () => {
+  const { createEvidenceStore, HALF_LIFE_MS, MAX_RETENTION_MS } = await import(evidenceUrl);
+  let now = 1_750_000_000_000;
+  const store = createEvidenceStore({ now: () => now, minimum_samples: 1 });
+  store.append(validSignal({ timestamp_ms: now }), { project_id: 'project-a' });
+  now += HALF_LIFE_MS;
+  store.append(validSignal({ timestamp_ms: now }), { project_id: 'project-a' });
+  const decayed = store.window({ project_id: 'project-a' });
+  assert.equal(decayed.observations.length, 2);
+  assert.ok(Math.abs(decayed.weighted_samples - 1.5) < 1e-12);
+  assert.equal(decayed.sufficient, true);
+
+  now += MAX_RETENTION_MS;
+  const pruned = store.window({ project_id: 'project-a' });
+  assert.equal(pruned.observations.length, 1, 'the exact seven-day boundary remains eligible');
+  assert.ok(Math.abs(pruned.weighted_samples - (2 ** -7)) < 1e-12);
+});
+
+test('D-08 fewer than 30 eligible observations cannot authorize promotion', async () => {
+  const { createEvidenceStore } = await import(evidenceUrl);
+  const now = 1_750_000_000_000;
+  const store = createEvidenceStore({ now: () => now });
+  for (let i = 0; i < 29; i += 1) {
+    assert.equal(store.append(validSignal({ timestamp_ms: now - i }), { project_id: 'project-a' }).status, 'stored');
+  }
+  const insufficient = store.window({ project_id: 'project-a' });
+  assert.equal(insufficient.sufficient, false);
+  assert.equal(insufficient.reason_code, 'insufficient_evidence_samples');
+  assert.equal(insufficient.sample_count, 29);
+
+  store.append(validSignal({ timestamp_ms: now - 29 }), { project_id: 'project-a' });
+  const sufficient = store.window({ project_id: 'project-a' });
+  assert.equal(sufficient.sufficient, true);
+  assert.equal(sufficient.reason_code, 'evidence_sufficient');
+});
