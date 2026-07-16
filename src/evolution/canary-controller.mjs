@@ -6,6 +6,7 @@ import {
   recoverActiveVersion,
   recoverRollbackJournal,
 } from '../registry/activate.mjs';
+import { evidenceWindowFingerprint } from './evidence.mjs';
 
 export const REQUIRED_GATES = Object.freeze([
   'safety', 'privacy', 'quality', 'context_budget', 'compatibility', 'latency',
@@ -94,6 +95,20 @@ export function evaluateCandidate({ candidate, evidence_window, gates, known_goo
   const { id: ignored, ...content } = candidate;
   if (`candidate-${sha256(stableStringify(content))}` !== candidate.id) return rejected(candidate, 'candidate_integrity_failed', known_good_version);
   if (!evidence_window || evidence_window.status !== 'validated') return rejected(candidate, 'unvalidated_evidence_window', known_good_version);
+  if (!Object.isFrozen(evidence_window) || !Object.isFrozen(evidence_window.scope) || !Object.isFrozen(evidence_window.observations)) return rejected(candidate, 'mutable_evidence_window', known_good_version);
+  if (evidence_window.schema_version !== 1
+    || !['project', 'aggregate'].includes(evidence_window.scope?.kind)
+    || (evidence_window.scope.kind === 'project' && !validToken(evidence_window.scope.project_id))
+    || !Array.isArray(evidence_window.observations)
+    || !Number.isSafeInteger(evidence_window.sample_count) || evidence_window.sample_count <= 0
+    || evidence_window.sample_count !== evidence_window.observations.length
+    || !Number.isFinite(evidence_window.weighted_samples) || evidence_window.weighted_samples < 0 || evidence_window.weighted_samples > evidence_window.sample_count
+    || !Number.isSafeInteger(evidence_window.minimum_samples) || evidence_window.minimum_samples < 1
+    || evidence_window.sufficient !== (evidence_window.sample_count >= evidence_window.minimum_samples)
+    || evidence_window.weighting_policy !== 'exponential-half-life-v1') return rejected(candidate, 'invalid_evidence_window', known_good_version);
+  const fingerprint = evidenceWindowFingerprint(evidence_window);
+  if (evidence_window.fingerprint !== fingerprint || evidence_window.source_evidence_fingerprint !== fingerprint) return rejected(candidate, 'evidence_integrity_failed', known_good_version);
+  if (candidate.source_evidence_fingerprint !== fingerprint) return rejected(candidate, 'candidate_evidence_mismatch', known_good_version);
   if (evidence_window.sufficient !== true) return rejected(candidate, evidence_window.reason_code ?? 'insufficient_evidence_samples', known_good_version);
   if (!gates || typeof gates !== 'object') return rejected(candidate, 'missing_hard_gates', known_good_version);
 

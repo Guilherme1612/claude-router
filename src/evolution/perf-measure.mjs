@@ -36,8 +36,15 @@ export function evaluateCalibrationCorpus({ corpus = CALIBRATION_CORPUS, route, 
   const fixtures = corpus.map(fixture => {
     const actual = route(fixture);
     const pass = JSON.stringify(actual) === JSON.stringify(fixture.expected);
-    const contextPass = fixture.fixture_class !== 'context_budget' || actual?.context_within_budget === true;
-    return freeze({ id: fixture.id, fixture_class: fixture.fixture_class, pass, context_budget_pass: contextPass });
+    let context;
+    if (typeof actual?.additional_context === 'string') context = actual.additional_context;
+    else if (typeof actual?.context === 'string') context = actual.context;
+    else if (actual && typeof actual === 'object') context = JSON.stringify(actual);
+    const measured_context_bytes = typeof context === 'string' ? Buffer.byteLength(context, 'utf8') : null;
+    const maximum_context_bytes = fixture.max_context_bytes;
+    const contextPass = Number.isSafeInteger(maximum_context_bytes) && maximum_context_bytes >= 0
+      && measured_context_bytes !== null && measured_context_bytes <= maximum_context_bytes;
+    return freeze({ id: fixture.id, fixture_class: fixture.fixture_class, pass, context_budget_pass: contextPass, measured_context_bytes, maximum_context_bytes });
   });
   return freeze({
     versions: exactVersions(versions), fixtures,

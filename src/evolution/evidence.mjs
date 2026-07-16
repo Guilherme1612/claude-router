@@ -49,6 +49,28 @@ function defaultHash(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function deepFreeze(value) {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+export function evidenceWindowFingerprint(window) {
+  const content = {
+    schema_version: window.schema_version,
+    scope: window.scope,
+    observation_fingerprints: window.observations.map(record => record.fingerprint),
+    sample_count: window.sample_count,
+    weighted_samples: window.weighted_samples,
+    minimum_samples: window.minimum_samples,
+    sufficient: window.sufficient,
+    weighting_policy: window.weighting_policy,
+  };
+  return defaultHash(JSON.stringify(content));
+}
+
 export function createEvidenceJournal({ write = () => {}, hash = defaultHash } = {}) {
   if (typeof write !== 'function' || typeof hash !== 'function') throw new TypeError('write and hash must be functions');
   return Object.freeze({
@@ -101,10 +123,8 @@ export function createEvidenceStore({ now = Date.now, minimum_samples = MINIMUM_
     },
 
     window(options = {}) {
-      const requestedScope = options.scope === 'aggregate'
-        ? { kind: 'aggregate' }
-        : boundedToken(options.project_id, 128) ? { kind: 'project', project_id: options.project_id } : null;
-      if (!requestedScope) return { status: 'denied', reason_code: 'invalid_project_scope' };
+      const requestedScope = scopeFor(options);
+      if (requestedScope.status === 'denied') return requestedScope;
       const current = now();
       const observations = records.filter((record) => {
         const age = current - record.signal.timestamp_ms;
@@ -115,16 +135,20 @@ export function createEvidenceStore({ now = Date.now, minimum_samples = MINIMUM_
         return sum + (2 ** (-age / HALF_LIFE_MS));
       }, 0);
       const sufficient = observations.length >= minimum_samples;
-      return Object.freeze({
+      const envelope = {
+        schema_version: 1,
         status: 'validated',
-        scope: Object.freeze(requestedScope),
-        observations: Object.freeze([...observations]),
+        scope: requestedScope,
+        observations: [...observations],
         sample_count: observations.length,
         weighted_samples,
         minimum_samples,
         sufficient,
+        weighting_policy: 'exponential-half-life-v1',
         reason_code: sufficient ? 'evidence_sufficient' : 'insufficient_evidence_samples',
-      });
+      };
+      const fingerprint = evidenceWindowFingerprint(envelope);
+      return deepFreeze({ ...envelope, fingerprint, source_evidence_fingerprint: fingerprint });
     },
   });
 }

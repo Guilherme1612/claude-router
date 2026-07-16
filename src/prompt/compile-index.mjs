@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 
 export const COMPILED_INDEX_SCHEMA_VERSION = 1;
@@ -33,13 +33,39 @@ function contained(root, path) {
 
 function boundedJson(path, limit, io) {
   if (!contained(io.root, path)) return null;
+  let fd;
   try {
-    const info = io.lstatSync(path);
-    if (info.isSymbolicLink() || !info.isFile() || info.size > limit) return null;
-    const bytes = io.readFileSync(path);
-    if (bytes.length > limit) return null;
+    fd = io.openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    const info = io.fstatSync(fd);
+    if (!info.isFile() || info.size > limit) return null;
+    const bytes = Buffer.alloc(info.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = io.readSync(fd, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) break;
+      offset += count;
+    }
+    if (offset !== bytes.length) return null;
     return { value: JSON.parse(bytes.toString('utf8')), bytes };
   } catch { return null; }
+  finally { if (fd !== undefined) { try { io.closeSync(fd); } catch {} } }
+}
+
+const ROUTE_FIELDS = new Set(['workflow_id', 'transition_id', 'reason_code', 'dispatch_eligible']);
+const ROUTE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+
+function validRoutes(routes) {
+  if (!routes || typeof routes !== 'object' || Array.isArray(routes)) return false;
+  const entries = Object.entries(routes);
+  return entries.length > 0 && entries.length <= 1024 && entries.every(([key, route]) => (
+    route && typeof route === 'object' && !Array.isArray(route)
+    && Object.getPrototypeOf(route) === Object.prototype
+    && Object.keys(route).length === ROUTE_FIELDS.size
+    && Object.keys(route).every(field => ROUTE_FIELDS.has(field))
+    && ROUTE_TOKEN.test(key) && route.workflow_id === key
+    && ROUTE_TOKEN.test(route.workflow_id) && ROUTE_TOKEN.test(route.transition_id)
+    && ROUTE_TOKEN.test(route.reason_code) && typeof route.dispatch_eligible === 'boolean'
+  ));
 }
 
 function compatible(value) {
@@ -72,7 +98,7 @@ function verifyVersion({ root, versionId, expectedHash, now, io }) {
     || index.version_id !== versionId
     || index.policy_version !== COMPILED_INDEX_COMPATIBILITY.policy_version
     || index.capsule_contract_version !== COMPILED_INDEX_COMPATIBILITY.capsule_schema_version
-    || !index.routes || typeof index.routes !== 'object' || Array.isArray(index.routes)) return null;
+    || !validRoutes(index.routes)) return null;
   return { index, metadata };
 }
 
@@ -81,8 +107,10 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {} } = {})
   const root = resolve(ownedRoot);
   const io = {
     root,
-    lstatSync: fs.lstatSync || lstatSync,
-    readFileSync: fs.readFileSync || readFileSync,
+    openSync: fs.openSync || openSync,
+    fstatSync: fs.fstatSync || fstatSync,
+    readSync: fs.readSync || readSync,
+    closeSync: fs.closeSync || closeSync,
   };
   const compiledRoot = resolve(root, 'compiled-index');
   const active = boundedJson(resolve(compiledRoot, 'active.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;

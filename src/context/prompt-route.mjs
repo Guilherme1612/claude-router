@@ -19,22 +19,22 @@ function parseInstruction(prompt) {
   };
 }
 
-function refreshedCapsule(capsule, refresh) {
+function refreshedCapsule(capsule, refresh, now) {
   return {
     ...capsule, position: { ...capsule.position, ...refresh.position }, status: refresh.status || capsule.status,
-    freshness: { captured_at: Date.now(), generation: `refresh-${refresh.position?.phase || capsule.position.phase}` },
+    freshness: { captured_at: now, generation: `refresh-${refresh.position?.phase || capsule.position.phase}` },
     provenance: { source: 'authoritative-refresh', version: '1' },
   };
 }
 
-function overrideCapsule(capsule, resolution) {
+function overrideCapsule(capsule, resolution, now) {
   const action = resolution.action;
   return {
     schema_version: capsule.schema_version, scope: capsule.scope,
     goal: { id: action.goal_id, summary: action.goal_id },
     position: { workflow: action.workflow || 'explicit', phase: action.phase || 'none', plan: action.plan || 'none', task: action.task || action.action || 'next' },
     status: 'active', artifacts: action.artifact_ref ? [{ ref: action.artifact_ref, type: 'artifact', status: 'next', witness: { kind: 'version', value: 'explicit' }, priority: 1 }] : [],
-    blockers: [], freshness: { captured_at: Date.now(), generation: `override-${action.phase || 'explicit'}` },
+    blockers: [], freshness: { captured_at: now, generation: `override-${action.phase || 'explicit'}` },
     provenance: { source: 'explicit-instruction', version: '1' },
     ...(resolution.supersession ? { supersession: { workflow_identity: resolution.supersession.workflow_identity, reason: resolution.supersession.reason } } : {}),
   };
@@ -110,8 +110,8 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
     return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
   }
   let save = null;
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh) });
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution) });
+  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
+  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
   if (save?.status === 'blocked') return { handled: false, reason_code: save.reason_code };
   return {
     handled: true,
