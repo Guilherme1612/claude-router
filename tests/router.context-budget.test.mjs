@@ -137,6 +137,29 @@ test('reports expose exact totals, ceilings, and signed baseline deltas', async 
   assert.equal(result.report.estimator_version, 'utf8-bytes-v1-ceil-div-3');
 });
 
+test('total token accounting estimates the canonical aggregate rather than summing rounded sources', async () => {
+  const { planContextLoad } = await api();
+  const result = planContextLoad({
+    workflow: workflow(), closure: closure(), contract: contract(),
+    sources: [
+      descriptor('transition_facts', 'transition:a', 'a', { canonical_bytes: 1 }),
+      descriptor('dependency_facts', 'dependency:a', 'b', { canonical_bytes: 1 }),
+    ],
+  });
+  assert.equal(result.report.canonical_bytes, 2);
+  assert.equal(result.report.estimated_tokens, 1);
+  assert.equal(result.report.regression_delta, null);
+});
+
+test('pre-accounted descriptors do not expose or inspect bounded source bodies', async () => {
+  const { planContextLoad } = await api();
+  const source = descriptor('diagnostic', 'diagnostic:safe', undefined, { canonical_bytes: 3 });
+  Object.defineProperty(source, 'value', { enumerable: true, get() { throw new Error('body inspected'); } });
+  const result = planContextLoad({ workflow: workflow(), closure: closure(), contract: contract(), sources: [source] });
+  assert.equal(result.status, 'planned');
+  assert.doesNotMatch(JSON.stringify(result), /body inspected/);
+});
+
 test('module remains pure and excludes I/O, tokenizer, hook, telemetry, and compilation imports', () => {
   const source = readFileSync(new URL(MODULE, import.meta.url), 'utf8');
   assert.doesNotMatch(source, /node:fs|node:https|node:http|child_process|tokenizer|installHook|telemetry|compileRegistry|warmLatency/);
