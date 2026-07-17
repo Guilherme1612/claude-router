@@ -1,22 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { installRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
-import { createTestActivationVerifier, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
+import { createTestActivationVerifier } from '../src/registry/validate.mjs';
 import { trusted } from '../src/registry/activate.mjs';
-import { runRegistryWatcher } from '../src/registry/watcher.mjs';
+import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
 
-// Lightweight passing runner map: each of the 8 REQUIRED_ACTIVATION_GATES resolves to
-// a stub runner that always passes. Used when test_mode opts in to the seam.
-export const stubVerificationRunners = Object.fromEntries(
-  REQUIRED_ACTIVATION_GATES.map(id => [id, Object.freeze({
-    id, version: 'test', threshold: {},
-    async run() { return { passed: true, reason_code: 'passed', measured: {}, threshold: {} }; },
-  })]),
-);
+// Re-export the shared seam helpers so tests that import from this file (per the plan's
+// key_links) can access them. The canonical definitions live in tests/helpers/test-mode-seam.mjs
+// so importing them does not register additional tests with the runner.
+export { stubVerificationRunners, inProcessControllerLauncher };
 
 function artifact(name, command = name) {
   return `${JSON.stringify({ schema_version: 1, name, command, mapping: { explicit_subjects: [name] } })}\n`;
@@ -35,42 +31,6 @@ async function waitUntil(predicate, timeoutMs = 2_000) {
     await new Promise(resolve => setTimeout(resolve, 25));
   } while (Date.now() <= deadline);
   assert.fail(`controller did not publish within ${timeoutMs}ms`);
-}
-
-// In-process controller launcher for the opt-in seam. installRouter writes the controller
-// config to disk WITHOUT verification_runners (functions are not JSON-serializable); this
-// launcher reads the on-disk config, reattaches the stub runners, and runs the real
-// runRegistryWatcher in-process so the watcher→controller→compiled-index publication seam
-// drives publication exactly as a spawned child would, but with function-valued runners.
-//
-// The holder parameter is an object the caller supplies; the launcher stashes the pseudo-child
-// on holder.child so the test can kill it directly. We MUST NOT call uninstallRouter here,
-// because the in-process controller reports pid = process.pid (the test process), and
-// stopController would SIGTERM the test process. Instead, child.kill() closes the controller
-// via its close() handle, clearing the heartbeat/control intervals so the event loop drains.
-export function inProcessControllerLauncher(runners, holder = {}) {
-  return (binary, args, spawnOptions) => {
-    const configIndex = args.indexOf('--config');
-    const configPath = configIndex >= 0 ? args[configIndex + 1] : null;
-    const child = {
-      exitCode: null, error: null,
-      kill() { try { handle?.close(); } catch { /* already closed */ } },
-    };
-    holder.child = child;
-    let handle = null;
-    (async () => {
-      try {
-        if (!configPath) throw new Error('controller launcher missing --config');
-        const config = JSON.parse(readFileSync(configPath, 'utf8'));
-        config.verification_runners = runners;
-        handle = await runRegistryWatcher({ config });
-      } catch (error) {
-        child.exitCode = 1;
-        child.error = error;
-      }
-    })();
-    return child;
-  };
 }
 
 test('production-default trusted() rejects test_only:true verification without test_mode', () => {

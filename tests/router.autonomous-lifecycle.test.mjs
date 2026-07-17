@@ -1,15 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { installRouter, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
+import { installRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { buildFullRegistry } from '../src/registry/build.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
-import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
-import { createHash } from 'node:crypto';
+import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
 
 const OPERATIONS = ['add', 'edit', 'rename', 'move', 'disable', 'dependency-change', 'delete'];
 const observedCells = [];
@@ -20,8 +19,11 @@ function artifact(name, command = name, dependencies) {
 
 async function waitUntil(predicate, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
-  do { const value = predicate(); if (value) return value; await new Promise(resolve => setTimeout(resolve, 25)); }
-  while (Date.now() <= deadline);
+  do {
+    const value = predicate();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 25));
+  } while (Date.now() <= deadline);
   assert.fail(`controller did not publish within ${timeoutMs}ms`);
 }
 
@@ -30,51 +32,94 @@ function tupleId(root) {
   catch { return null; }
 }
 
-for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller observes the seven-event lifecycle matrix`, async () => {
+for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller observes the seven-event lifecycle matrix via the real seam`, async () => {
   const root = mkdtempSync(join(tmpdir(), `router-autonomous-${runtime}-`));
-  const claudeRoot = join(root, '.claude');
-  const codexRoot = join(root, '.codex');
-  const runtimeRoot = runtime === 'claude' ? claudeRoot : codexRoot;
-  const sourceRouter = join(root, 'router.mjs');
-  const settingsPath = join(claudeRoot, 'settings.json');
-  const ownedRoot = join(claudeRoot, 'router');
-  const options = { claudeRoot, codexRoot, sourceRouter, settingsPath, nodeBinary: process.execPath, debounceMs: 10, repairMs: 200 };
-  mkdirSync(join(runtimeRoot, 'skills'), { recursive: true });
-  mkdirSync(claudeRoot, { recursive: true });
-  writeFileSync(settingsPath, '{"hooks":{}}\n');
-  writeFileSync(sourceRouter, 'export const router = true;\n');
-  const alpha = join(runtimeRoot, 'skills', 'alpha.json');
-  writeFileSync(alpha, artifact('alpha'));
+  const holder = {};
   try {
+    const claudeRoot = join(root, '.claude');
+    const codexRoot = join(root, '.codex');
+    const runtimeRoot = runtime === 'claude' ? claudeRoot : codexRoot;
+    const sourceRouter = join(root, 'router.mjs');
+    const settingsPath = join(claudeRoot, 'settings.json');
+    const ownedRoot = join(claudeRoot, 'router');
+    const options = {
+      claudeRoot, codexRoot, sourceRouter, settingsPath, nodeBinary: process.execPath,
+      debounceMs: 10, repairMs: 200,
+      // Opt-in testability seam: the installed controller uses injected lightweight passing
+      // verification runners and trusted() accepts test_only:true via test_mode. This lets
+      // the real watcher→controller→compiled-index publication seam drive publication in tests
+      // without weakening production (production never sets testMode).
+      testMode: true, verificationRunners: stubVerificationRunners,
+      launchController: inProcessControllerLauncher(stubVerificationRunners, holder),
+    };
+    mkdirSync(join(runtimeRoot, 'skills'), { recursive: true });
+    mkdirSync(claudeRoot, { recursive: true });
+    writeFileSync(settingsPath, '{"hooks":{}}\n');
+    writeFileSync(sourceRouter, 'export const router = true;\n');
+    const alpha = join(runtimeRoot, 'skills', 'alpha.json');
+    writeFileSync(alpha, artifact('alpha'));
+
     const installed = await installRouter(options);
+    // Wait for the installed controller to publish the initial tuple (alpha seeded above).
+    const initialTuple = await waitUntil(() => tupleId(ownedRoot));
+    // Save a capsule so routeContextPrompt('continue') resolves to workflow 'alpha' and reads
+    // the controller-published compiled route. The capsule is NOT a substitute for the
+    // published tuple — it only selects which compiled route to project.
+    saveCapsule({ ownedRoot, capsule: { schema_version: 1, scope: { workspace_id: runtime, project_id: 'matrix' }, goal: { id: 'matrix', summary: 'matrix' }, position: { workflow: 'alpha', phase: '18', plan: '04', task: 'lifecycle' }, status: 'active', artifacts: [], blockers: [], freshness: { captured_at: Date.now(), generation: 'initial' }, provenance: { source: 'test', version: '1' } } });
+
     let previousCandidate = readFileSync(installed.candidatePath, 'utf8');
-    const verify = async (operation, expectedChange = true) => {
+    let previousTuple = initialTuple;
+
+    const verify = async (operation) => {
+      // Wait for the installed controller to observe the filesystem mutation and update the
+      // candidate publication. The controller publishes via the real seam — no fixture-side
+      // compiled-index publication call.
       const candidateBytes = await waitUntil(() => {
         const value = readFileSync(installed.candidatePath, 'utf8');
         return value !== previousCandidate ? value : null;
       });
-      const full = buildFullRegistry({ claudeRoot, codexRoot });
       const candidate = JSON.parse(candidateBytes);
+
       if (operation === 'disable') {
+        // Unsafe candidate: disposition is quarantined, tuple does NOT advance, and
+        // routeContextPrompt still resolves the prior verified tuple (SAF-09/MAP-02).
         assert.equal(candidate.disposition, 'quarantined');
-        assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, tupleId(ownedRoot));
+        const currentTuple = tupleId(ownedRoot);
+        assert.equal(currentTuple, previousTuple);
+        const compiled = loadCompiledIndex({ ownedRoot });
+        assert.equal(compiled.tuple_version_id, previousTuple);
+        const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
+        assert.equal(routed.compiled?.tuple_version_id, previousTuple);
         observedCells.push(`${runtime}:${operation}`);
         previousCandidate = candidateBytes;
         return;
       }
+
+      // Safe operation: the installed controller activates and publishes a strictly newer
+      // tuple via the real seam. Poll the active tuple pointer until it advances.
+      const published = await waitUntil(() => {
+        const current = tupleId(ownedRoot);
+        return current && current !== previousTuple ? current : null;
+      });
+      // The active canonical registry bytes match buildFullRegistry output (REG-03).
+      const full = buildFullRegistry({ claudeRoot, codexRoot });
       assert.deepEqual({ schema_version: candidate.schema_version, records: candidate.records }, full.registry);
-      const mapping = { schema_version: 1, policy_fingerprint: 'a'.repeat(64), subjects: full.registry.records.filter(record => record.dispatchable).map(record => ({ subject_id: record.name, disposition: 'mapped', target_id: record.id, reason_code: 'explicit_subject' })) };
-      const registryHash = createHash('sha256').update(JSON.stringify(full.registry)).digest('hex');
-      const publication = publishCompiledIndex({ ownedRoot, registry: full.registry, registryVersionId: `v1-${registryHash.slice(0, 16)}`, mapping, policyFingerprint: 'b'.repeat(64) });
+      // routeContextPrompt reads the controller-published tuple and projects the route.
       const compiled = loadCompiledIndex({ ownedRoot });
       assert.equal(compiled.dispatch_eligible, true);
-      assert.equal(compiled.tuple_version_id, publication.tuple_version_id);
-      saveCapsule({ ownedRoot, capsule: { schema_version: 1, scope: { workspace_id: runtime, project_id: 'matrix' }, goal: { id: 'matrix', summary: 'matrix' }, position: { workflow: 'alpha', phase: '18', plan: '01', task: operation }, status: 'active', artifacts: [], blockers: [], freshness: { captured_at: Date.now(), generation: operation }, provenance: { source: 'test', version: '1' } } });
+      assert.equal(compiled.tuple_version_id, published);
       const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-      assert.equal(routed.compiled?.tuple_version_id, publication.tuple_version_id);
+      assert.equal(routed.compiled?.tuple_version_id, published);
+      // Route semantics from the controller-published tuple (D-01/D-03/SAF-09/MAP-01).
+      const alphaRoute = compiled.index.routes.alpha;
+      assert.equal(alphaRoute.dispatch_eligible, true);
+      assert.equal(alphaRoute.scope.kind, 'global');
+      assert.equal(alphaRoute.invocation.command, 'alpha');
       observedCells.push(`${runtime}:${operation}`);
       previousCandidate = candidateBytes;
+      previousTuple = published;
     };
+
     const beta = join(runtimeRoot, 'skills', 'beta.json');
     writeFileSync(beta, artifact('beta')); await verify('add');
     writeFileSync(beta, artifact('beta', 'beta-v2')); await verify('edit');
@@ -84,7 +129,10 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
     writeFileSync(moved, artifact('beta', 'beta-v2', [{ id: 'present', available: true }])); await verify('dependency-change');
     rmSync(moved); await verify('delete');
   } finally {
-    try { await uninstallRouter(options); } catch {}
+    // Close the in-process controller directly so its intervals clear and the event loop
+    // drains. Do NOT call uninstallRouter: stopController would SIGTERM the test process
+    // (the in-process controller reports pid = process.pid).
+    try { holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
