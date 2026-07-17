@@ -120,18 +120,20 @@ test('router sentinel is lexically distinct from caveman output', async () => {
     'caveman output must contain no HTML comment marker');
 });
 
-// --- Sentinel distinctness after each of the five verbs (Gap 3 closure) -------
+// --- Sentinel stability across re-imports (Gap 3 closure) -----------------------
 // The installer verbs (install, upgrade, reinstall, disable+enable, uninstall) operate on a
-// test fixture's router.mjs and must not corrupt the real hook's sentinel. Re-import the hook
-// after each verb label and re-assert the sentinel remains lexically distinct from caveman's
-// plain-text output. A fresh module per verb would be ideal, but the hook is a stable module
-// URL; the assertion proves the SENTINEL export is invariant across re-imports (as it would be
-// after each verb re-imports the installed hook).
+// test fixture's router.mjs and must not corrupt the real hook's sentinel. The actual verb
+// execution is exercised in tests/router.installer-coexistence.test.mjs; this suite verifies
+// the complementary property that the SENTINEL export is stable across re-imports of the
+// stable module URL (as it would be after each verb re-imports the installed hook). These
+// tests are a re-import stability proxy, NOT a verb-execution coverage check — a fresh module
+// per verb would be ideal, but the hook is a stable module URL so Node's module cache returns
+// the same export. The assertions prove the SENTINEL export is invariant across re-imports.
 
 const CAVEMAN_SAMPLE = 'CAVEMAN MODE ACTIVE (lite). Drop articles/filler/pleasantries/hedging. Code/commits/security: write normal';
 
 for (const verb of ['install', 'upgrade', 'reinstall', 'disable+enable', 'uninstall']) {
-  test(`sentinel distinctness after ${verb} verb: re-import hook and re-assert`, async () => {
+  test(`sentinel is stable across re-imports (${verb} verb label)`, async () => {
     const m = await importHook();
     assert.ok(m.SENTINEL.startsWith('<!--') && m.SENTINEL.endsWith('-->'),
       `${verb}: router sentinel must remain an HTML comment`);
