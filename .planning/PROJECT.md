@@ -18,6 +18,10 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **Phase 15 complete and verified on 2026-07-16.** Privacy-safe bounded context capsules now recover authoritative workflow state, refresh stale evidence, resume uniquely identifiable work, and let explicit instructions override stale or conflicting context without reviving terminal work.
 
+**Phases 16–18 complete and verified on 2026-07-17.** Workflow-first orchestration selects the workflow before capabilities and loads only least-sufficient bounded context; compiled prompt routing connects the hot path to safe evolution with canary-gated improvements; and the autonomous lifecycle proves safe add/edit/rename/move/disable/dependency/delete propagation, crash/corrupt/missed-event recovery to a last-known-good active version, install/upgrade/reinstall/disable/uninstall coexistence preserving unrelated state, and a full release matrix tying every v1.2 requirement to executable evidence. The opt-in test_mode seam keeps the production hot path untouched while letting lifecycle tests drive the real watcher→controller→publishCompiledIndex flow.
+
+**Milestone v1.2 complete: all 8 phases (11–18) verified.** The dual-runtime control plane is end-to-end verified across regression, calibration, privacy, coexistence, recovery, context-token, and latency gates (647/647 tests pass; release run all 7 stages pass).
+
 ## Current Milestone: v1.2 Autonomous Dual-Runtime Control Plane
 
 **Goal:** Automatically reconcile additions, edits, moves, disables, dependency changes, and deletions across `.claude` and `.codex`; then select the best workflow and least-sufficient context from prompt intent plus authoritative workflow state.
@@ -95,4 +99,4 @@ The approved design and implementation plan are:
 | Permit only bounded, validated, reversible evolution | Automation must not silently degrade safety | — Pending |
 
 ---
-*Last updated: 2026-07-16 after Phase 15 verification and transition to Phase 16*
+*Last updated: 2026-07-17 after Phase 18 verification and v1.2 milestone completion*
