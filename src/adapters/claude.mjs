@@ -308,6 +308,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
       ...(normalizedHook ? { hook_observation: normalizedHook } : {}),
       conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
       ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
+      ...(nativeRecord.data.mapping && typeof nativeRecord.data.mapping === 'object' ? { mapping: nativeRecord.data.mapping } : {}),
       ...(nativeRecord.data.shared_origin?.authority && nativeRecord.data.shared_origin?.identity
         ? { shared_origin: { authority: String(nativeRecord.data.shared_origin.authority), identity: String(nativeRecord.data.shared_origin.identity) } } : {}) };
     validateCapability(record); return record;

@@ -71,7 +71,7 @@ test('one command installs router, binding, Codex marker, and complete ownership
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
-    assert.equal(manifest.files.length, 44);
+    assert.equal(manifest.files.length, 48);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -88,6 +88,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
       }
       for (const module of ['capsule.mjs', 'resolve.mjs', 'sources.mjs', 'prompt-route.mjs']) {
         assert.equal(existsSync(join(runtimeRoot, 'modules', 'context', module)), true);
+      }
+      for (const module of ['compile-index.mjs', 'publish-index.mjs']) {
+        assert.equal(existsSync(join(runtimeRoot, 'modules', 'prompt', module)), true);
       }
     }
     for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {
