@@ -119,6 +119,7 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
     additional_context: injection(resolution),
     ...(projection ? { compiled: {
       version_id: compiledIndex.version_id, source: compiledIndex.source,
+      ...(compiledIndex.tuple_version_id ? { tuple_version_id: compiledIndex.tuple_version_id, registry_version_id: compiledIndex.registry_version_id } : {}),
       workflow_id: projection.workflow_id, transition_id: projection.transition_id,
       reason_code: projection.reason_code,
     } } : {}),

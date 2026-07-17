@@ -91,7 +91,7 @@ test('publisher commits one verified registry and compiled release tuple', () =>
     const loaded = loadCompiledIndex({ ownedRoot: root, now: NOW });
     assert.equal(loaded.status, 'ready');
     assert.equal(loaded.tuple_version_id, result.tuple_version_id);
-    assert.equal(loaded.registry.version_id, 'v1-aaaaaaaaaaaaaaaa');
+    assert.equal(loaded.registry_version_id, 'v1-aaaaaaaaaaaaaaaa');
     assert.equal(loaded.index.routes['gsd-execute-phase'].target_id, 'capability-1');
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
@@ -267,6 +267,7 @@ test('hot path observes only explicitly addressed pointer metadata payload and c
     const result = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW, compiledFs });
     assert.equal(result.resolution.dispatch_eligible, true);
     assert.deepEqual(observed.filter(entry => entry[0] === 'open').map(entry => entry[1]), [
+      join(root, 'release-tuples', 'active.json'),
       join(root, 'compiled-index', 'active.json'),
       join(root, 'compiled-index', 'versions', VERSION, 'metadata.json'),
       join(root, 'compiled-index', 'versions', VERSION, 'index.json'),

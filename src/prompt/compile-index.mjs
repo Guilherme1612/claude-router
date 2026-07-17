@@ -51,7 +51,7 @@ function boundedJson(path, limit, io) {
   finally { if (fd !== undefined) { try { io.closeSync(fd); } catch {} } }
 }
 
-const ROUTE_FIELDS = new Set(['workflow_id', 'transition_id', 'reason_code', 'dispatch_eligible']);
+const ROUTE_FIELDS = new Set(['workflow_id', 'transition_id', 'reason_code', 'dispatch_eligible', 'target_id', 'scope', 'invocation', 'dependencies']);
 const ROUTE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
 
 function validRoutes(routes) {
@@ -60,11 +60,12 @@ function validRoutes(routes) {
   return entries.length > 0 && entries.length <= 1024 && entries.every(([key, route]) => (
     route && typeof route === 'object' && !Array.isArray(route)
     && Object.getPrototypeOf(route) === Object.prototype
-    && Object.keys(route).length === ROUTE_FIELDS.size
+    && Object.keys(route).length >= 4
     && Object.keys(route).every(field => ROUTE_FIELDS.has(field))
     && ROUTE_TOKEN.test(key) && route.workflow_id === key
     && ROUTE_TOKEN.test(route.workflow_id) && ROUTE_TOKEN.test(route.transition_id)
     && ROUTE_TOKEN.test(route.reason_code) && typeof route.dispatch_eligible === 'boolean'
+    && (route.target_id === undefined || ROUTE_TOKEN.test(route.target_id))
   ));
 }
 
@@ -113,6 +114,37 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {} } = {})
     closeSync: fs.closeSync || closeSync,
   };
   const compiledRoot = resolve(root, 'compiled-index');
+  const tupleRoot = resolve(root, 'release-tuples');
+  const verifyTuple = pointer => {
+    if (pointer?.schema_version !== 1 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
+    const versionRoot = resolve(tupleRoot, 'versions', pointer.tuple_version_id);
+    const manifestRead = boundedJson(resolve(versionRoot, 'manifest.json'), COMPILED_INDEX_LIMITS.metadata_bytes, io);
+    const registryRead = boundedJson(resolve(versionRoot, 'registry.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
+    const indexRead = boundedJson(resolve(versionRoot, 'index.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
+    const manifest = manifestRead?.value;
+    if (!manifest || manifest.state !== 'verified' || manifest.tuple_version_id !== pointer.tuple_version_id
+      || manifest.verification?.disposition !== 'passing' || manifest.verification?.complete !== true
+      || !compatible(manifest.compatibility) || manifest.created_at > now || manifest.expires_at < now
+      || sha256(registryRead?.bytes || '') !== manifest.registry?.payload_sha256
+      || sha256(indexRead?.bytes || '') !== manifest.compiled?.payload_sha256
+      || indexRead?.value?.version_id !== manifest.compiled?.version_id
+      || !validRoutes(indexRead?.value?.routes)) return null;
+    return { manifest, registry: registryRead.value, index: indexRead.value };
+  };
+  const tupleActivePath = resolve(tupleRoot, 'active.json');
+  const tupleActive = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
+  if (tupleActive) {
+    const verified = verifyTuple(tupleActive);
+    if (verified) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_active',
+      tuple_version_id: tupleActive.tuple_version_id, version_id: verified.manifest.compiled.version_id,
+      registry_version_id: verified.manifest.registry.version_id, source: 'active', registry: verified.registry, index: verified.index };
+    const knownGood = boundedJson(resolve(tupleRoot, 'known-good.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
+    const fallback = verifyTuple(knownGood);
+    if (fallback) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_known_good',
+      tuple_version_id: knownGood.tuple_version_id, version_id: fallback.manifest.compiled.version_id,
+      registry_version_id: fallback.manifest.registry.version_id, source: 'known_good', registry: fallback.registry, index: fallback.index };
+    return blocked();
+  }
   const active = boundedJson(resolve(compiledRoot, 'active.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
   if (active?.schema_version === COMPILED_INDEX_SCHEMA_VERSION) {
     const verified = verifyVersion({ root, versionId: active.version_id, expectedHash: active.payload_sha256, now, io });

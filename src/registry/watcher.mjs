@@ -13,6 +13,8 @@ import { mapCandidateRegistry } from './map.mjs';
 import { isCanonicalMappingSafe, produceActivationVerification } from './validate.mjs';
 import { activateCandidate, recoverActiveVersion } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
+import { publishCompiledIndex } from '../prompt/publish-index.mjs';
+import { loadCompiledIndex } from '../prompt/compile-index.mjs';
 
 function hash(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -239,6 +241,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const verifier = dependencies.produceActivationVerification || produceActivationVerification;
   const activator = dependencies.activateCandidate || activateCandidate;
   const recovery = dependencies.recoverActiveVersion || recoverActiveVersion;
+  const publishIndex = dependencies.publishCompiledIndex || publishCompiledIndex;
   const writeJson = dependencies.writeJson || atomicJson;
   const readActive = dependencies.readActive || (async () => {
     const empty = () => {
@@ -246,20 +249,14 @@ export function createRegistryReconciler(config, dependencies = {}) {
       const bytes = `${stableStringify(registry)}\n`;
       return { registry, bytes, fingerprint: createHash('sha256').update(bytes).digest('hex'), authority_status: 'empty' };
     };
-    if (!config.active_path) {
+    if (!config.activation_root) {
       return empty();
     }
     try {
-      const pointerBytes = await readFile(config.active_path, 'utf8');
-      const pointer = JSON.parse(pointerBytes);
-      let bytes = pointerBytes;
-      if (config.activation_root && typeof pointer.version_id === 'string') {
-        const root = resolve(config.activation_root);
-        const registryPath = resolve(join(root, 'versions', pointer.version_id, 'registry.json'));
-        if (!registryPath.startsWith(`${root}/`)) throw new TypeError('active version escapes activation root');
-        bytes = await readFile(registryPath, 'utf8');
-      }
-      return { registry: JSON.parse(bytes), bytes, fingerprint: createHash('sha256').update(bytes).digest('hex'), authority_status: 'active' };
+      const tuple = loadCompiledIndex({ ownedRoot: resolve(config.activation_root) });
+      if (!tuple.dispatch_eligible || !tuple.registry) return empty();
+      const bytes = `${stableStringify(tuple.registry)}\n`;
+      return { registry: tuple.registry, bytes, fingerprint: createHash('sha256').update(bytes).digest('hex'), authority_status: 'active', tuple_version_id: tuple.tuple_version_id };
     } catch (error) {
       if (error?.code === 'ENOENT') return empty();
       throw error;
@@ -321,6 +318,15 @@ export function createRegistryReconciler(config, dependencies = {}) {
           });
           if (verification.disposition === 'passing' && verification.complete === true) {
             activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher' });
+            if (activation.activation_status === 'activated' && activation.version_id) {
+              const publication = await publishIndex({
+                ownedRoot: config.activation_root, registry: built.registry,
+                registryVersionId: activation.version_id, mapping,
+                policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+              });
+              if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
+              activation = { ...activation, ...publication };
+            }
           } else activation = { activation_status: 'preserved', reason_code: 'verification_non_passing' };
         } else activation = { activation_status: 'preserved', reason_code: 'mapping_ambiguous' };
       }
@@ -335,6 +341,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
       ...(config.activation_root ? {
         activation_status: activation.activation_status,
         activation_reason: activation.reason_code || null,
+        ...(activation.tuple_version_id ? { tuple_version_id: activation.tuple_version_id } : {}),
       } : {}),
     };
   };
