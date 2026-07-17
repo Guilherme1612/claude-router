@@ -4,14 +4,14 @@ milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
 current_phase: 18
 status: completed
-stopped_at: Completed 18-04-PLAN.md
-last_updated: "2026-07-17T11:47:23.217Z"
+stopped_at: context exhaustion at 81% (2026-07-17)
+last_updated: "2026-07-17T19:21:22.690Z"
 last_activity: 2026-07-17
 last_activity_desc: Phase 18 complete
 progress:
-  total_phases: 8
+  total_phases: 10
   completed_phases: 7
-  total_plans: 38
+  total_plans: 41
   completed_plans: 37
 current_phase_name: autonomous-lifecycle-and-release-gates
 ---
@@ -153,6 +153,11 @@ None yet.
 
 None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
+### Roadmap Evolution
+
+- Phase 19 added: Close gap: TOK-02 + ORC-01 — wire orchestrator {select,transitions,budget} into publish-index.mjs + prompt-route.mjs live path and deployed bundle
+- Phase 20 added: Close gap: EVO-05 — add production trigger for canary-controller (watcher/CLI/release-runner) so telemetry drives canary promotion + rollback
+
 ## Deferred Items
 
 | Category | Item | Status | Deferred At |
@@ -162,6 +167,6 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-17T10:26:41.457Z
-Stopped at: Completed 18-04-PLAN.md
-Resume file: None
+Last session: 2026-07-17T19:21:22.682Z
+Stopped at: context exhaustion at 81% (2026-07-17)
+Resume file: .planning/phases/19-close-gap-tok-02-orc-01-wire-orchestrator-select-transitions/19-CONTEXT.md

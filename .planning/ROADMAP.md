@@ -329,10 +329,20 @@ Plans:
 **Plans:** 4 plans
 
 Plans:
+**Wave 1**
 
 - [ ] 19-01-PLAN.md — Q1 design spike (orchestrator-input source + sibling/manifest/compatibility shape lock) + 19-VALIDATION.md scaffold (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 19-02-PLAN.md — compile-index.mjs schema bump 1→2 + publish-index.mjs orchestrator wiring + sibling writes + fallback :63-67 removal + workflow-declarations.json (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 19-03-PLAN.md — router-lifecycle.mjs moduleNames +4 bundle extension + prompt-route.mjs read-only sibling projection + dispatch_eligible gate (Wave 2, parallel with 19-02)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 19-04-PLAN.md — schema-bump fixture sweep (~10-17 test files) + D-09 E2E evidence in autonomous-lifecycle + test-mode-seam + v1.2-matrix.json phase-19-live-path secondary entry (Wave 3)
 
 ### Phase 20: Close gap: EVO-05 — add production trigger for canary-controller (watcher/CLI/release-runner) so telemetry drives canary promotion + rollback
@@ -343,8 +353,16 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 20-01-PLAN.md — Telemetry→evidence bridge + persistent evidence store + deployed-bundle inclusion (Wave 1 foundation)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 20-02-PLAN.md — Watcher canary trigger wiring (Wave 2 automatic trigger)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 20-03-PLAN.md — CLI canary subcommands status/promote/rollback (Wave 3 operator trigger)
 
 ---
