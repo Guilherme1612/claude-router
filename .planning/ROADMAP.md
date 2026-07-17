@@ -323,14 +323,17 @@ Plans:
 
 ### Phase 19: Close gap: TOK-02 + ORC-01 — wire orchestrator {select,transitions,budget} into publish-index.mjs + prompt-route.mjs live path and deployed bundle
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Wire the already-built orchestrator functions (selectCapabilities, selectWorkflow/nextValidTransitions, planContextLoad) into the publish-time path (publishCompiledIndex in src/prompt/publish-index.mjs) so their output is frozen into the immutable compiled tuple, extend compile-index.mjs (schema 1→2 + compatibility gate + sibling loaders), extend the route path (prompt-route.mjs) as a read-only projection consumer of the frozen tuple, extend the deployed bundle manifest (router-lifecycle.mjs moduleNames +3 + workflow-declarations.json), remove the blanket fallback, and extend the Phase 18 E2E tests with D-09 evidence — closing the live-path gap for ORC-01 and TOK-02 that the Phase 16 traceability marking did not cover.
+**Requirements**: ORC-01, TOK-02
 **Depends on:** Phase 18
-**Plans:** 0 plans
+**Plans:** 4 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 19 to break down)
+- [ ] 19-01-PLAN.md — Q1 design spike (orchestrator-input source + sibling/manifest/compatibility shape lock) + 19-VALIDATION.md scaffold (Wave 1)
+- [ ] 19-02-PLAN.md — compile-index.mjs schema bump 1→2 + publish-index.mjs orchestrator wiring + sibling writes + fallback :63-67 removal + workflow-declarations.json (Wave 2)
+- [ ] 19-03-PLAN.md — router-lifecycle.mjs moduleNames +4 bundle extension + prompt-route.mjs read-only sibling projection + dispatch_eligible gate (Wave 2, parallel with 19-02)
+- [ ] 19-04-PLAN.md — schema-bump fixture sweep (~10-17 test files) + D-09 E2E evidence in autonomous-lifecycle + test-mode-seam + v1.2-matrix.json phase-19-live-path secondary entry (Wave 3)
 
 ### Phase 20: Close gap: EVO-05 — add production trigger for canary-controller (watcher/CLI/release-runner) so telemetry drives canary promotion + rollback
 
