@@ -108,8 +108,9 @@ async function safeStopController(f, holder) {
   // kill() returns a promise that resolves once the controller's async close() completes
   // (heartbeat/control intervals cleared + publish('stopped') written). Await it so no async
   // publish('stopped') races with the rmSync below (ENOENT on the deleted controller dir).
+  // No extra sleep is needed: close() awaits publish('stopped') internally, so once kill()
+  // resolves the controller's writes are flushed and there is no background race to paper over.
   try { await holder.child?.kill(); } catch { /* already closed */ }
-  await new Promise(resolve => setTimeout(resolve, 20));
   try { rmSync(join(f.ownedRoot, 'controller', 'status.json'), { force: true }); } catch { /* no status */ }
 }
 
