@@ -103,7 +103,7 @@ function verifyVersion({ root, versionId, expectedHash, now, io }) {
   return { index, metadata };
 }
 
-export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {} } = {}) {
+export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releaseTuplePointer } = {}) {
   if (typeof ownedRoot !== 'string' || !isAbsolute(ownedRoot) || !Number.isFinite(now)) return blocked();
   const root = resolve(ownedRoot);
   const io = {
@@ -132,6 +132,13 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {} } = {})
     return { manifest, registry: registryRead.value, index: indexRead.value };
   };
   const tupleActivePath = resolve(tupleRoot, 'active.json');
+  if (releaseTuplePointer) {
+    const verified = verifyTuple(releaseTuplePointer);
+    if (verified) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_recovery_candidate',
+      tuple_version_id: releaseTuplePointer.tuple_version_id, version_id: verified.manifest.compiled.version_id,
+      registry_version_id: verified.manifest.registry.version_id, source: 'recovery_candidate', registry: verified.registry, index: verified.index };
+    return blocked();
+  }
   const tupleActive = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
   if (tupleActive) {
     const verified = verifyTuple(tupleActive);

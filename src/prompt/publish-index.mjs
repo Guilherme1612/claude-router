@@ -37,7 +37,21 @@ function routeFor(subject, record) {
   };
 }
 
-export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, mapping, policyFingerprint, now = Date.now() } = {}) {
+export function recoverReleaseTuple({ ownedRoot, now = Date.now() } = {}) {
+  const root = resolve(ownedRoot);
+  const loaded = loadCompiledIndex({ ownedRoot: root, now });
+  if (loaded.dispatch_eligible && loaded.source === 'active') return { status: 'already-active', tuple_version_id: loaded.tuple_version_id };
+  let pointer;
+  try { pointer = JSON.parse(readFileSync(join(root, 'release-tuples', 'known-good.json'), 'utf8')); } catch { pointer = null; }
+  const candidate = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer });
+  if (!candidate.dispatch_eligible || !candidate.tuple_version_id) throw new Error('no_verified_release_tuple');
+  replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
+  const repaired = loadCompiledIndex({ ownedRoot: root, now });
+  if (!repaired.dispatch_eligible || repaired.tuple_version_id !== candidate.tuple_version_id) throw new Error('tuple_recovery_failed');
+  return { status: 'recovered', tuple_version_id: repaired.tuple_version_id };
+}
+
+export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, mapping, policyFingerprint, now = Date.now(), crashAt } = {}) {
   const root = resolve(ownedRoot);
   if (!registry || !Array.isArray(registry.records) || !/^v1-[a-f0-9]{16}$/.test(registryVersionId || '')) throw new TypeError('verified registry version required');
   const records = new Map(registry.records.flatMap(record => [record.id, record.canonical_identity, record.name].filter(Boolean).map(key => [key, record])));
@@ -77,7 +91,9 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
     durableWrite(join(tupleRoot, 'manifest.json'), json(manifest));
   }
   const pointer = { schema_version: 1, tuple_version_id: tupleVersionId };
+  if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
+  if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
   const verified = loadCompiledIndex({ ownedRoot: root, now });
   if (!verified.dispatch_eligible || verified.tuple_version_id !== tupleVersionId) throw new Error('tuple_validation_failed');
   replacePointer(join(root, 'release-tuples', 'known-good.json'), pointer);
