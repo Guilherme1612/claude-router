@@ -8,6 +8,7 @@ import {
   loadReleaseMatrix,
   runRelease,
   validateReleaseMatrix,
+  verifyReleaseReport,
 } from '../src/release/run-release.mjs';
 
 const MATRIX_PATH = new URL('../release/v1.2-matrix.json', import.meta.url);
@@ -85,4 +86,48 @@ test('D-11 runner fails closed on command failure, skip, timeout, missing gates,
     });
     await assert.rejects(runRelease({ execute, publish: false }), /release gate failed/, defect);
   }
+});
+
+test('D-12 report is deterministic, privacy-safe, version-bound, and independently verifiable', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-release-report-'));
+  const secret = 'PROMPT-secret-env-/Users/private/tmp';
+  const execute = async request => ({
+    status: 'passed', exit_code: 0, skipped: false, stdout: secret, environment: { TOKEN: secret },
+    gate_results: request.gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass`, raw: secret })),
+    ...(request.stage === 'latency' ? { measurements: { warm_p95_ms: 1.25, max_route_ms: 4.75, raw_path: secret } } : {}),
+  });
+  try {
+    const first = join(root, 'first.json');
+    const second = join(root, 'second.json');
+    await runRelease({ execute, outputPath: first });
+    await runRelease({ execute, outputPath: second });
+    const firstBytes = readFileSync(first, 'utf8');
+    assert.equal(firstBytes, readFileSync(second, 'utf8'));
+    assert.doesNotMatch(firstBytes, /PROMPT|secret|\/Users\/private|TOKEN/);
+    const verified = verifyReleaseReport({ reportPath: first, matrixPath: MATRIX_PATH });
+    assert.equal(verified.status, 'verified');
+    assert.deepEqual(Object.keys(verified.versions).sort(), ['corpus', 'index', 'policy', 'registry']);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('D-12 failed run preserves prior passing evidence and tampering fails verification', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-release-atomic-'));
+  const outputPath = join(root, 'report.json');
+  const passing = async request => ({
+    status: 'passed', exit_code: 0, skipped: false,
+    gate_results: request.gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass` })),
+    ...(request.stage === 'latency' ? { measurements: { warm_p95_ms: 1, max_route_ms: 2 } } : {}),
+  });
+  try {
+    await runRelease({ execute: passing, outputPath });
+    const prior = readFileSync(outputPath, 'utf8');
+    await assert.rejects(runRelease({ outputPath, execute: async request => request.stage === 'privacy'
+      ? { status: 'failed', exit_code: 1, skipped: false, gate_results: [] }
+      : passing(request) }), /release gate failed/);
+    assert.equal(readFileSync(outputPath, 'utf8'), prior);
+    const tampered = JSON.parse(prior);
+    tampered.matrix_sha256 = '0'.repeat(64);
+    writeFileSync(outputPath, JSON.stringify(tampered));
+    assert.throws(() => verifyReleaseReport({ reportPath: outputPath, matrixPath: MATRIX_PATH }), /matrix hash/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
