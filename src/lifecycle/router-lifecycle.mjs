@@ -1,5 +1,5 @@
 import {
-  copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync,
+  closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync,
   rmdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -21,6 +21,108 @@ function atomicWrite(file, value) {
   const temporary = `${file}.tmp.${process.pid}`;
   writeFileSync(temporary, value);
   renameSync(temporary, file);
+}
+
+function durableAtomicWrite(file, value) {
+  mkdirSync(dirname(file), { recursive: true });
+  const temporary = `${file}.tmp.${process.pid}.${Date.now()}`;
+  const fd = openSync(temporary, 'wx', 0o600);
+  try { writeFileSync(fd, value); fsyncSync(fd); } finally { closeSync(fd); }
+  renameSync(temporary, file);
+  const directory = openSync(dirname(file), 'r');
+  try { fsyncSync(directory); } finally { closeSync(directory); }
+}
+
+function generationPaths(options) {
+  const p = paths(options);
+  const stateRoot = join(p.ownedRoot, 'install-state');
+  return { ...p, stateRoot, generationsRoot: join(stateRoot, 'generations'),
+    activeGenerationPath: join(stateRoot, 'active.json'), knownGoodGenerationPath: join(stateRoot, 'known-good.json'),
+    lifecyclePath: join(stateRoot, 'lifecycle.json') };
+}
+
+function verifiedGeneration(p, pointer) {
+  if (pointer?.schema_version !== 1 || !/^g1-[a-f0-9]{16}$/.test(pointer.generation_id || '')) return null;
+  const root = join(p.generationsRoot, pointer.generation_id);
+  const manifest = readJson(join(root, 'manifest.json'), null, 'generation manifest');
+  if (manifest?.state !== 'complete' || manifest.generation_id !== pointer.generation_id || !Array.isArray(manifest.files)) return null;
+  if (!manifest.files.every(entry => typeof entry.path === 'string' && !entry.path.includes('..')
+    && fileMatches(join(root, entry.path), entry.fingerprint))) return null;
+  return { generationId: pointer.generation_id, root, manifest };
+}
+
+export function resolveInstallGeneration(options, { repair = true } = {}) {
+  const p = generationPaths(options);
+  mkdirSync(p.generationsRoot, { recursive: true });
+  for (const name of readdirSync(p.generationsRoot)) {
+    if (name.endsWith('.staging')) rmSync(join(p.generationsRoot, name), { recursive: true, force: true });
+  }
+  let active = null;
+  try { active = verifiedGeneration(p, readJson(p.activeGenerationPath, null)); } catch { active = null; }
+  if (active) return active;
+  let knownGood = null;
+  try { knownGood = verifiedGeneration(p, readJson(p.knownGoodGenerationPath, null)); } catch { knownGood = null; }
+  if (!knownGood) throw new Error('no verified installation generation');
+  if (repair) durableAtomicWrite(p.activeGenerationPath, JSON.stringify({ schema_version: 1, generation_id: knownGood.generationId }) + '\n');
+  return knownGood;
+}
+
+function updateManagedBinding(p, options, enabled) {
+  const settings = validatedSettings(p.settingsPath);
+  const groups = settings.hooks.UserPromptSubmit || [];
+  const filtered = groups.filter(group => !isRouterEntry(group, p.routerPath));
+  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, p.routerPath));
+  if (filtered.length) settings.hooks.UserPromptSubmit = filtered;
+  else delete settings.hooks.UserPromptSubmit;
+  durableAtomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+}
+
+export async function upgradeRouter(options) {
+  const p = generationPaths(options);
+  if (!existsSync(p.sourceRouter)) throw new Error(`router source missing: ${p.sourceRouter}`);
+  const routerBytes = readFileSync(p.sourceRouter);
+  const generationId = `g1-${fingerprint(routerBytes).slice(0, 16)}`;
+  const finalRoot = join(p.generationsRoot, generationId);
+  const stagingRoot = `${finalRoot}.staging`;
+  mkdirSync(p.generationsRoot, { recursive: true });
+  if (!existsSync(finalRoot)) {
+    rmSync(stagingRoot, { recursive: true, force: true });
+    mkdirSync(stagingRoot, { recursive: true });
+    durableAtomicWrite(join(stagingRoot, 'router.mjs'), routerBytes);
+    durableAtomicWrite(join(stagingRoot, 'manifest.json'), JSON.stringify({ schema_version: 1, state: 'complete', generation_id: generationId,
+      files: [{ path: 'router.mjs', fingerprint: fingerprint(routerBytes) }] }, null, 2) + '\n');
+    if (options.crashAt === 'before-generation-rename') throw new Error('injected crash before generation rename');
+    renameSync(stagingRoot, finalRoot);
+    const directory = openSync(p.generationsRoot, 'r'); try { fsyncSync(directory); } finally { closeSync(directory); }
+  }
+  if (!verifiedGeneration(p, { schema_version: 1, generation_id: generationId })) throw new Error('generation verification failed');
+  if (options.crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
+  durableAtomicWrite(p.activeGenerationPath, JSON.stringify({ schema_version: 1, generation_id: generationId }) + '\n');
+  if (options.crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
+  durableAtomicWrite(p.knownGoodGenerationPath, JSON.stringify({ schema_version: 1, generation_id: generationId }) + '\n');
+  mkdirSync(dirname(p.routerPath), { recursive: true });
+  durableAtomicWrite(p.routerPath, `import ${JSON.stringify(new URL(`file://${join(finalRoot, 'router.mjs')}`).href)};\n`);
+  updateManagedBinding(p, options, true);
+  durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: true, generation_id: generationId }) + '\n');
+  return { status: 'upgraded', generationId, activePath: p.activeGenerationPath };
+}
+
+export async function disableRouter(options) {
+  const p = generationPaths(options); const generation = resolveInstallGeneration(options);
+  const lifecycle = readJson(p.lifecyclePath, { enabled: true });
+  if (lifecycle.enabled === false) return { status: 'already-disabled', generationId: generation.generationId };
+  updateManagedBinding(p, options, false);
+  durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: false, generation_id: generation.generationId }) + '\n');
+  return { status: 'disabled', generationId: generation.generationId };
+}
+
+export async function enableRouter(options) {
+  const p = generationPaths(options); const generation = resolveInstallGeneration(options);
+  const lifecycle = readJson(p.lifecyclePath, { enabled: false });
+  if (lifecycle.enabled === true) return { status: 'already-enabled', generationId: generation.generationId };
+  updateManagedBinding(p, options, true);
+  durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: true, generation_id: generation.generationId }) + '\n');
+  return { status: 'enabled', generationId: generation.generationId };
 }
 
 function readJson(file, fallback, label = file) {
