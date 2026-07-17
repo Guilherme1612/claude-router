@@ -93,19 +93,51 @@ const STAGES = Object.freeze([
   { id: 'latency', files: ['tests/router.compiled-evolution.test.mjs'], gate_ids: ['warm-p95', 'hard-route-ceiling'], isolated: true },
 ]);
 
+// Parse child test stdout into gate_results reflecting real TAP pass/fail counts and
+// RELEASE_METRICS evidence. Returns { gate_results, reason_code?, measurements? }.
+// Fail-closed reason codes: 'child-error', 'skipped', 'no-tap-summary', 'tap-fail',
+// 'metrics-missing'. The latency stage maps warm_p95_ms -> 'warm-p95' and max_route_ms ->
+// 'hard-route-ceiling'; non-latency stages pass every gate_id when TAP reports fail=0 pass>0.
+export function parseChildEvidence({ stdout, stage, gate_ids, error, skipped }) {
+  if (error) return { gate_results: [], reason_code: 'child-error' };
+  if (skipped) return { gate_results: [], reason_code: 'skipped' };
+  const passMatch = stdout.match(/^# pass (\d+)/m);
+  const failMatch = stdout.match(/^# fail (\d+)/m);
+  if (!passMatch) return { gate_results: [], reason_code: 'no-tap-summary' };
+  const passCount = Number(passMatch[1]);
+  const failCount = failMatch ? Number(failMatch[1]) : 0;
+  if (failCount > 0) return { gate_results: [], reason_code: 'tap-fail' };
+  if (passCount === 0) return { gate_results: [], reason_code: 'no-tap-summary' };
+  const metricsMatch = stdout.match(/RELEASE_METRICS (\{[^\n]+\})/);
+  let measurements;
+  try { if (metricsMatch) measurements = JSON.parse(metricsMatch[1]); } catch { /* invalid evidence -> metrics-missing for latency */ }
+  const gate_results = [];
+  if (stage === 'latency') {
+    if (!measurements) return { gate_results: [], reason_code: 'metrics-missing' };
+    const warm = measurements.warm_p95_ms;
+    const max = measurements.max_route_ms;
+    const warmPass = Number.isFinite(warm) && warm < 25;
+    const maxPass = Number.isFinite(max) && max < 100;
+    gate_results.push({ id: 'warm-p95', pass: warmPass, reason_code: warmPass ? 'warm-p95_pass' : 'threshold' });
+    gate_results.push({ id: 'hard-route-ceiling', pass: maxPass, reason_code: maxPass ? 'hard-route-ceiling_pass' : 'threshold' });
+    return { gate_results, measurements };
+  }
+  for (const id of gate_ids) gate_results.push({ id, pass: true, reason_code: `${id}_pass` });
+  return { gate_results };
+}
+
 function executeChild({ stage, command, gate_ids, timeout_ms }) {
   const files = command.split(' ').slice(2);
   return new Promise(resolveResult => {
     execFile(process.execPath, ['--test', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
       const skipped = /^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout);
-      const metricsMatch = stdout.match(/RELEASE_METRICS (\{[^\n]+\})/);
-      let measurements;
-      try { if (metricsMatch) measurements = JSON.parse(metricsMatch[1]); } catch { /* invalid evidence is handled below */ }
+      const parsed = parseChildEvidence({ stdout, stage, gate_ids, error, skipped });
       resolveResult({
         status: error?.killed ? 'timed_out' : error ? 'failed' : 'passed',
         exit_code: error?.code ?? 0, skipped,
-        gate_results: error || skipped ? [] : gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass` })),
-        ...(measurements ? { measurements } : {}),
+        gate_results: parsed.gate_results,
+        ...(parsed.reason_code ? { reason_code: parsed.reason_code } : {}),
+        ...(parsed.measurements ? { measurements: parsed.measurements } : {}),
         diagnostic: stderr.slice(0, 512),
       });
     });
@@ -120,7 +152,11 @@ function assertStageResult(stage, result) {
     && Number.isFinite(result?.measurements?.max_route_ms) && result.measurements.max_route_ms < 100
   );
   if (result?.status !== 'passed' || result.exit_code !== 0 || result.skipped || !complete || !latencyPass) {
-    const reason = result?.status !== 'passed' ? result?.status : result.exit_code !== 0 ? `exit-${result.exit_code}` : result.skipped ? 'skipped' : !complete ? 'structured-evidence-missing' : 'threshold';
+    const reason = result?.status !== 'passed' ? result?.status
+      : result.exit_code !== 0 ? `exit-${result.exit_code}`
+      : result.skipped ? 'skipped'
+      : !complete ? (result.reason_code || 'structured-evidence-missing')
+      : 'threshold';
     throw new Error(`release gate failed: ${stage.id} (${reason})`);
   }
 }

@@ -510,13 +510,18 @@ export async function uninstallRouter(options) {
     }
   }
 
-  // The router's own binding file (router.mjs) and codex marker are installer-owned by definition.
   // upgradeRouter legitimately rewrites router.mjs as a pointer to the active generation, so its
-  // bytes diverge from the manifest's source fingerprint. Treat these as always-remove so
-  // uninstall completes (and reinstall can proceed) after an upgrade; the fingerprint retention
-  // guard is for files the user might have modified, not for the installer's own binding/marker.
-  const alwaysRemove = new Set([p.routerPath, p.codexMarkerPath]);
-  for (const binding of manifest.bindings) alwaysRemove.add(binding.router_path);
+  // bytes diverge from the manifest's source fingerprint. The fingerprint retention guard is for
+  // files the USER might have modified; an installer-generated pointer file is not user content.
+  // Detect pointer files (the upgradeRouter format) and remove them despite the fingerprint
+  // mismatch so uninstall completes and reinstall can proceed after an upgrade.
+  const isPointerFile = (filePath) => {
+    if (filePath !== p.routerPath) return false;
+    try {
+      const content = readFileSync(filePath, 'utf8');
+      return /^import "file:\/\/[^"]*\/generations\/g1-[a-f0-9]+\/router\.mjs";\n$/.test(content);
+    } catch { return false; }
+  };
 
   const config = readJson(p.controllerConfigPath, null, 'controller config');
   if (config) await stopController(p, fingerprint(stableStringify(config)), options);
@@ -539,7 +544,7 @@ export async function uninstallRouter(options) {
     const mutableOwned = file.mutable === true
       && (file.path === p.controllerStatusPath || file.path === p.controllerControlPath || file.path === p.scanStatePath)
       && (file.path === p.ownedRoot || file.path.startsWith(`${p.ownedRoot}/`));
-    if (!mutableOwned && !alwaysRemove.has(file.path) && !fileMatches(file.path, file.fingerprint)) {
+    if (!mutableOwned && !isPointerFile(file.path) && !fileMatches(file.path, file.fingerprint)) {
       retained.push(file.path);
       continue;
     }
