@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
-import { validateCapability } from '../registry/schema.mjs';
+import { stableStringify, validateCapability } from '../registry/schema.mjs';
 
 const CLAUDE_VERSION = 'claude-adapter/3';
 const MAX_ARTIFACT_BYTES = 1024 * 1024;
@@ -273,16 +273,26 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     if (recognized.type === 'plugin_metadata') return { ignored: true };
     if (recognized.type === 'settings') {
       const records = [];
+      // The installer-owned router hook consumes the candidate registry; it is
+      // lifecycle plumbing, not an inventory capability, and including it would
+      // make the install's own first mutation invalidate its preflight bytes.
+      // Filter router.mjs bindings from every event so install/upgrade/disable/enable/uninstall
+      // mutations (which only add/remove the router-owned UserPromptSubmit binding) do not
+      // change the binding observation's source_fingerprint or candidate_fingerprint. The
+      // source_fingerprint for each binding record is computed from the FILTERED settings
+      // content (router bindings stripped from all events), so the same logical settings state
+      // produces the same fingerprint before and after an install mutation.
+      const filteredHooks = {};
       for (const event of Object.keys(data.hooks || {}).sort()) {
         const bindings = data.hooks[event];
-        // The installer-owned router hook consumes the candidate registry; it is
-        // lifecycle plumbing, not an inventory capability, and including it would
-        // make the install's own first mutation invalidate its preflight bytes.
         const portableBindings = Array.isArray(bindings)
           ? bindings.filter((entry) => !JSON.stringify(entry).includes('router.mjs')) : bindings;
         if (Array.isArray(portableBindings) && portableBindings.length === 0) continue;
+        filteredHooks[event] = portableBindings;
         records.push({ ...base, type: 'binding', name: `settings:${event}`, data: { schema_version: 1, command: event, args: [], native_invocation: { event, bindings: portableBindings } } });
       }
+      const filteredSettingsFingerprint = fingerprint(Buffer.from(stableStringify({ ...data, hooks: filteredHooks }), 'utf8'));
+      for (const record of records) record.sourceFingerprint = filteredSettingsFingerprint;
       return { records };
     }
     if (recognized.type === 'config' && configExpander) return { records: configExpander(base) };

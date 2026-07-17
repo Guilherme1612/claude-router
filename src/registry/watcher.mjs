@@ -210,6 +210,10 @@ export async function runRegistryWatcher(options) {
   });
   await controller.ready;
   await publish('ready');
+  // If close() was called while we were awaiting controller.ready/publish('ready') (the
+  // in-process test launcher can kill the child before runRegistryWatcher resolves), skip
+  // interval/handler registration so nothing leaks past the close. stopping is set by close().
+  if (stopping) return { controller, instanceId, configurationFingerprint, close: async () => {} };
   const heartbeat = setInterval(() => { publish('ready').catch(() => {}); }, heartbeatMs);
   const control = setInterval(async () => {
     const request = await readJson(config.control_path);

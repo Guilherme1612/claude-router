@@ -419,9 +419,22 @@ export async function installRouter(options) {
         { path: p.controllerControlPath, fingerprint: 'mutable', mutable: true },
         { path: p.scanStatePath, fingerprint: 'mutable', mutable: true },
       ],
-      directories: [dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
+      directories: [
+        // The owned roots come FIRST in the list so that after the uninstaller's
+        // `[...directories].reverse()` (which makes the list deepest-first), the roots are
+        // processed LAST — after every subdir they contain has been pruned. Listing a root
+        // after its subdirs (the prior layout) left the root non-empty when it was checked, so
+        // it was never removed even after its subdirs were pruned.
+        p.ownedRoot, p.codexOwnedRoot,
+        dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
         dirname(p.controllerConfigPath), dirname(p.manifestPath),
-        join(p.ownedRoot, 'modules', 'cli'), join(p.codexOwnedRoot, 'modules', 'cli')],
+        // The `modules` parents come before their subdirs in the list so that after reverse,
+        // the subdirs are pruned before their parents. Listing only `modules/cli` left
+        // `modules/registry`, `modules/adapters`, `modules/context`, and `modules/prompt`
+        // behind, leaving the owned root non-empty after uninstall.
+        join(p.ownedRoot, 'modules'), join(p.codexOwnedRoot, 'modules'),
+        ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'modules', name))))],
+        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))]],
       runtime_state_inventory: {
         immutable: { path: join(p.ownedRoot, 'versions'), owned_by_version_manifests: true },
         mutable: [p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'), p.controllerStatusPath, p.controllerControlPath, p.scanStatePath],
@@ -497,6 +510,14 @@ export async function uninstallRouter(options) {
     }
   }
 
+  // The router's own binding file (router.mjs) and codex marker are installer-owned by definition.
+  // upgradeRouter legitimately rewrites router.mjs as a pointer to the active generation, so its
+  // bytes diverge from the manifest's source fingerprint. Treat these as always-remove so
+  // uninstall completes (and reinstall can proceed) after an upgrade; the fingerprint retention
+  // guard is for files the user might have modified, not for the installer's own binding/marker.
+  const alwaysRemove = new Set([p.routerPath, p.codexMarkerPath]);
+  for (const binding of manifest.bindings) alwaysRemove.add(binding.router_path);
+
   const config = readJson(p.controllerConfigPath, null, 'controller config');
   if (config) await stopController(p, fingerprint(stableStringify(config)), options);
 
@@ -518,7 +539,7 @@ export async function uninstallRouter(options) {
     const mutableOwned = file.mutable === true
       && (file.path === p.controllerStatusPath || file.path === p.controllerControlPath || file.path === p.scanStatePath)
       && (file.path === p.ownedRoot || file.path.startsWith(`${p.ownedRoot}/`));
-    if (!mutableOwned && !fileMatches(file.path, file.fingerprint)) {
+    if (!mutableOwned && !alwaysRemove.has(file.path) && !fileMatches(file.path, file.fingerprint)) {
       retained.push(file.path);
       continue;
     }
@@ -527,6 +548,19 @@ export async function uninstallRouter(options) {
   }
   rmSync(p.manifestPath);
   for (const directory of [...new Set(manifest.directories || [])].reverse()) {
+    removeEmptyDirectory(directory);
+  }
+  // The install manifest tracks installer-owned files, but upgradeRouter writes a separate
+  // install-state tree (generations, active.json, known-good.json, lifecycle.json) that is
+  // lifecycle-owned rather than installer-owned. The plan requires uninstall to remove the
+  // owned root completely; prune the lifecycle-owned install-state and versions trees here so
+  // they do not keep the owned root on disk after uninstall. Both are inside the owned root
+  // and are exclusively written by this installer's lifecycle verbs.
+  for (const lifecycleRoot of [join(p.ownedRoot, 'install-state'), join(p.ownedRoot, 'versions')]) {
+    if (existsSync(lifecycleRoot)) rmSync(lifecycleRoot, { recursive: true, force: true });
+  }
+  // Re-prune the owned roots now that lifecycle state is gone so they are removed when empty.
+  for (const directory of [p.ownedRoot, p.codexOwnedRoot]) {
     removeEmptyDirectory(directory);
   }
   return { status: 'uninstalled', removed, retained };
