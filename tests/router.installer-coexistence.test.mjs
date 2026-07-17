@@ -220,6 +220,11 @@ test('upgrade verb: generation N to N+1 selects the new generation and preserves
 test('reinstall verb: uninstall followed by install with same source produces a fresh install transaction and preserves unrelated state', async () => {
   const f = fixture({ variant: 'together' });
   const holder = {};
+  // reinstallHolder is declared at the top scope so the finally block can clean it up
+  // unconditionally even if an assertion in the try block fails before the in-try
+  // safeStopController call runs (otherwise the leaked controller's heartbeat keeps
+  // the event loop alive and can recreate the deleted controller dir).
+  let reinstallHolder = null;
   const preSnapshot = snapshotUnrelated(f);
   // Pre-install settings.json bytes — uninstall must restore byte-identical.
   const preSettingsBytes = readFileSync(f.settingsPath);
@@ -241,7 +246,7 @@ test('reinstall verb: uninstall followed by install with same source produces a 
 
     // Reinstall with the same source: fresh install transaction, router re-installed, controller
     // activates in-test. The install status is 'installed' (fresh transaction, not 'repaired').
-    const reinstallHolder = {};
+    reinstallHolder = {};
     const result = await installRouter(installOptions(f, reinstallHolder));
     assert.ok(result.status === 'installed', `reinstall should install fresh: ${result.status}`);
     assert.equal(existsSync(f.routerPath), true);
@@ -252,7 +257,9 @@ test('reinstall verb: uninstall followed by install with same source produces a 
     // Unrelated files preserved byte-identically across reinstall.
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
     safeStopController(f, reinstallHolder);
+    reinstallHolder = null;
   } finally {
+    if (reinstallHolder) safeStopController(f, reinstallHolder);
     safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
