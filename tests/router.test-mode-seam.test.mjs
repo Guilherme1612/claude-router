@@ -95,7 +95,7 @@ test('opt-in test_mode lets the installed controller publish via the real watche
     // Close the in-process controller directly so its heartbeat/control intervals clear and
     // the event loop drains. Do NOT call uninstallRouter: stopController would SIGTERM the
     // test process (the in-process controller reports pid = process.pid).
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });

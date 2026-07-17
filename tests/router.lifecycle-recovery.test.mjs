@@ -162,7 +162,7 @@ test('D-04 unsafe candidate recovery through installed controller preserves the 
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -211,7 +211,7 @@ for (const variant of CORRUPTION_VARIANTS) test(`D-04 ${variant.name} through in
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -250,7 +250,7 @@ test('D-04 controller interruption recovery through installed controller reconci
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -287,7 +287,7 @@ test('D-04 missed/coalesced events recovery through installed controller produce
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -335,7 +335,7 @@ test('D-06 startup repair recovers the corrupt active pointer from known-good an
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
@@ -375,7 +375,7 @@ test('D-06 steady-state failure recovery through installed controller repairs on
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
     assert.equal(routed.compiled?.tuple_version_id, advanced);
   } finally {
-    try { holder.child?.kill(); } catch {}
+    try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });
