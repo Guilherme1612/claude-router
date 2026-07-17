@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   loadReleaseMatrix,
+  runRelease,
   validateReleaseMatrix,
 } from '../src/release/run-release.mjs';
 
@@ -50,4 +51,38 @@ test('D-11 loader rejects missing matrix bytes', () => {
   try {
     assert.throws(() => loadReleaseMatrix({ matrixPath: join(root, 'missing.json') }), /matrix/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('D-11 one runner executes every hard gate sequentially with latency isolated last', async () => {
+  const calls = [];
+  const execute = async request => {
+    calls.push(request);
+    return {
+      status: 'passed', exit_code: 0, skipped: false,
+      gate_results: request.gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass` })),
+      ...(request.stage === 'latency' ? { measurements: { warm_p95_ms: 1.5, max_route_ms: 4.5 } } : {}),
+    };
+  };
+  const result = await runRelease({ execute, publish: false });
+  assert.equal(result.status, 'passed');
+  assert.deepEqual(result.stages.map(stage => stage.id), [
+    'regression', 'calibration', 'privacy', 'coexistence', 'recovery', 'context-token', 'latency',
+  ]);
+  assert.equal(calls.at(-1).stage, 'latency');
+  assert.equal(calls.at(-1).isolated, true);
+  assert.ok(calls.slice(0, -1).every(call => call.isolated === false));
+  assert.ok(calls.every(call => call.timeout_ms > 0));
+});
+
+test('D-11 runner fails closed on command failure, skip, timeout, missing gates, and latency thresholds', async () => {
+  for (const defect of ['failure', 'skip', 'timeout', 'missing', 'slow']) {
+    const execute = async request => ({
+      status: defect === 'timeout' ? 'timed_out' : 'passed',
+      exit_code: defect === 'failure' ? 1 : 0,
+      skipped: defect === 'skip',
+      gate_results: defect === 'missing' ? [] : request.gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass` })),
+      ...(request.stage === 'latency' ? { measurements: defect === 'slow' ? { warm_p95_ms: 25, max_route_ms: 99 } : { warm_p95_ms: 1, max_route_ms: 2 } } : {}),
+    });
+    await assert.rejects(runRelease({ execute, publish: false }), /release gate failed/, defect);
+  }
 });
