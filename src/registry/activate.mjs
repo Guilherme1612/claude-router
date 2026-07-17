@@ -76,10 +76,18 @@ function rollbackRecord({ preview, now, reason, operationId, outcome }) {
   };
 }
 
-function trusted(options, now = Date.now()) {
+export function trusted(options, now = Date.now()) {
   const verification = options?.verification;
   if (!verification || verification.schema_version !== 1 || verification.verification_policy_version !== 'activation-verification-v1'
-    || verification.trusted !== true || verification.complete !== true || verification.disposition !== 'passing' || verification.test_only !== false) return false;
+    || verification.trusted !== true || verification.complete !== true || verification.disposition !== 'passing') return false;
+  // test_only opt-in seam: test_only === true is accepted ONLY when options.test_mode === true.
+  // Production-default (options.test_mode absent / false) still requires test_only === false,
+  // so real installs reject test-only verifications with verification_not_trusted.
+  if (verification.test_only === true) {
+    if (options.test_mode !== true) return false;
+  } else if (verification.test_only !== false) {
+    return false;
+  }
   if (!Number.isFinite(verification.generated_at) || !Number.isFinite(verification.expires_at)
     || verification.generated_at > now || verification.expires_at < now || verification.expires_at - verification.generated_at > 300_000) return false;
   if (stableStringify(verification.required_gate_ids) !== stableStringify(REQUIRED_ACTIVATION_GATES)) return false;
@@ -90,8 +98,12 @@ function trusted(options, now = Date.now()) {
   if (!Array.isArray(verification.gates) || verification.gates.length !== REQUIRED_ACTIVATION_GATES.length) return false;
   for (const [index, id] of REQUIRED_ACTIVATION_GATES.entries()) {
     const gate = verification.gates[index];
-    const runner = PRODUCTION_GATE_RUNNERS[id];
-    if (!gate || gate.id !== id || gate.runner_id !== runner.id || gate.runner_version !== runner.version || gate.passed !== true) return false;
+    // When test_mode is opted in, the verifier is constructed via createTestActivationVerifier,
+    // which sets runner_id to `test:<id>` and runner_version to 'test'. The production runner
+    // identity check is only enforced for production-default (test_only === false) verifications.
+    const expectedRunner = verification.test_only === true ? null : PRODUCTION_GATE_RUNNERS[id];
+    if (!gate || gate.id !== id || gate.passed !== true) return false;
+    if (expectedRunner !== null && (gate.runner_id !== expectedRunner.id || gate.runner_version !== expectedRunner.version)) return false;
     const { evidence_fingerprint: evidenceFingerprint, ...evidence } = gate;
     if (evidenceFingerprint !== hash(evidence)) return false;
   }
@@ -99,14 +111,14 @@ function trusted(options, now = Date.now()) {
   return verificationFingerprint === hash(canonical);
 }
 
-export function writeImmutableVersion({ ownedRoot, candidate, mapping, reconciliation, policy, verification, now = Date.now() }) {
+export function writeImmutableVersion({ ownedRoot, candidate, mapping, reconciliation, policy, verification, now = Date.now(), test_mode = false }) {
   const p = paths(ownedRoot); mkdirSync(p.versions, { recursive: true });
   const payload = { 'registry.json': json(candidate), 'mappings.json': json(mapping), 'evidence.json': json({ reconciliation, policy }), 'verification.json': json(verification) };
   const bundleFingerprint = hash(stableStringify(Object.fromEntries(Object.entries(payload).sort())));
   const versionId = `v1-${bundleFingerprint.slice(0, 16)}`;
   const final = contained(p.versions, join(p.versions, versionId));
   if (existsSync(final)) {
-    const verdict = verifyVersion({ ownedRoot, versionId, expectedFingerprint: bundleFingerprint });
+    const verdict = verifyVersion({ ownedRoot, versionId, expectedFingerprint: bundleFingerprint, test_mode });
     if (!verdict.valid) throw new Error('version_id_collision');
     return { version_id: versionId, bundle_fingerprint: bundleFingerprint, idempotent: true };
   }
@@ -120,7 +132,7 @@ export function writeImmutableVersion({ ownedRoot, candidate, mapping, reconcili
   } catch (error) { rmSync(staging, { recursive: true, force: true }); throw error; }
 }
 
-export function verifyVersion({ ownedRoot, versionId, expectedFingerprint, now = Date.now() }) {
+export function verifyVersion({ ownedRoot, versionId, expectedFingerprint, now = Date.now(), test_mode = false }) {
   try {
     if (!validId(versionId)) return { valid: false, reason_code: 'invalid_version_id' };
     const p = paths(ownedRoot), dir = contained(p.versions, join(p.versions, versionId));
@@ -136,16 +148,16 @@ export function verifyVersion({ ownedRoot, versionId, expectedFingerprint, now =
     const mapping = JSON.parse(payload['mappings.json']);
     const evidence = JSON.parse(payload['evidence.json']);
     const verification = JSON.parse(payload['verification.json']);
-    if (!trusted({ candidate, mapping, reconciliation: evidence.reconciliation, policy: evidence.policy, verification }, now)) {
+    if (!trusted({ candidate, mapping, reconciliation: evidence.reconciliation, policy: evidence.policy, verification, test_mode }, now)) {
       return { valid: false, reason_code: 'verification_not_trusted', version_id: versionId };
     }
     return { valid: true, reason_code: 'verified', version_id: versionId, bundle_fingerprint: bundle, verification_fingerprint: hash(manifest), created_at: manifest.created_at };
   } catch { return { valid: false, reason_code: 'malformed_version' }; }
 }
 
-export function replaceActivePointer({ ownedRoot, destination, reason, expectedSequence, io = {}, now = Date.now() }) {
+export function replaceActivePointer({ ownedRoot, destination, reason, expectedSequence, io = {}, now = Date.now(), test_mode = false }) {
   const p = paths(ownedRoot); mkdirSync(p.root, { recursive: true });
-  const verified = verifyVersion({ ownedRoot, versionId: destination, now }); if (!verified.valid) return { pointer_status: 'blocked', reason_code: verified.reason_code };
+  const verified = verifyVersion({ ownedRoot, versionId: destination, now, test_mode }); if (!verified.valid) return { pointer_status: 'blocked', reason_code: verified.reason_code };
   const lock = mutationLock(p, io.lock || {});
   if (!lock.acquired) return { pointer_status: 'blocked', reason_code: lock.reason_code };
   let temp;
@@ -156,7 +168,7 @@ export function replaceActivePointer({ ownedRoot, destination, reason, expectedS
     temp = `${p.active}.tmp.${randomUUID()}`;
     durableWrite(temp, json(pointer));
     if ((io.beforeRename || (() => {}))({ destination, pointer }) === false) throw new Error('toctou');
-    const reverified = verifyVersion({ ownedRoot, versionId: destination, expectedFingerprint: verified.bundle_fingerprint, now }); if (!reverified.valid || reverified.verification_fingerprint !== verified.verification_fingerprint) throw new Error('verification_to_pointer_toctou');
+    const reverified = verifyVersion({ ownedRoot, versionId: destination, expectedFingerprint: verified.bundle_fingerprint, now, test_mode }); if (!reverified.valid || reverified.verification_fingerprint !== verified.verification_fingerprint) throw new Error('verification_to_pointer_toctou');
     renameSync(temp, p.active);
     try { syncDir(p.root); } catch { return { pointer_status: 'recovery_required', reason_code: 'pointer_durability_uncertain', pointer }; }
     return { pointer_status: 'replaced', pointer };
@@ -175,12 +187,12 @@ export function activateCandidate(options) {
   } catch (error) { return { activation_status: 'blocked', reason_code: error.code === 'EINVAL' ? 'durability_unsupported' : 'durability_failed' }; }
 }
 
-export function recoverActiveVersion({ ownedRoot, now = Date.now() }) {
+export function recoverActiveVersion({ ownedRoot, now = Date.now(), test_mode = false }) {
   const p = paths(ownedRoot), current = readPointer(p.active);
-  if (current && verifyVersion({ ownedRoot, versionId: current.version_id, expectedFingerprint: current.bundle_fingerprint, now }).valid) return { recovery_status: 'healthy', version_id: current.version_id };
-  const candidates = existsSync(p.versions) ? readdirSync(p.versions).filter(validId).map(id => ({ id, verdict: verifyVersion({ ownedRoot, versionId: id, now }) })).filter(v => v.verdict.valid).sort((a, b) => b.verdict.created_at - a.verdict.created_at || a.id.localeCompare(b.id)) : [];
+  if (current && verifyVersion({ ownedRoot, versionId: current.version_id, expectedFingerprint: current.bundle_fingerprint, now, test_mode }).valid) return { recovery_status: 'healthy', version_id: current.version_id };
+  const candidates = existsSync(p.versions) ? readdirSync(p.versions).filter(validId).map(id => ({ id, verdict: verifyVersion({ ownedRoot, versionId: id, now, test_mode }) })).filter(v => v.verdict.valid).sort((a, b) => b.verdict.created_at - a.verdict.created_at || a.id.localeCompare(b.id)) : [];
   if (!candidates.length) return { recovery_status: 'blocked', reason_code: 'no_valid_history' };
-  const result = replaceActivePointer({ ownedRoot, destination: candidates[0].id, reason: 'recovery', now });
+  const result = replaceActivePointer({ ownedRoot, destination: candidates[0].id, reason: 'recovery', now, test_mode });
   return result.pointer_status === 'replaced' ? { recovery_status: 'recovered', version_id: candidates[0].id } : { recovery_status: 'recovery_required', reason_code: result.reason_code };
 }
 

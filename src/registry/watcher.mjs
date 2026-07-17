@@ -10,7 +10,7 @@ import { diffFingerprintTrees } from './diff.mjs';
 import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from './build.mjs';
 import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
 import { mapCandidateRegistry } from './map.mjs';
-import { isCanonicalMappingSafe, produceActivationVerification } from './validate.mjs';
+import { isCanonicalMappingSafe, produceActivationVerification, createTestActivationVerifier } from './validate.mjs';
 import { activateCandidate, recoverActiveVersion } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 import { publishCompiledIndex } from '../prompt/publish-index.mjs';
@@ -173,9 +173,15 @@ async function readJson(path) {
 }
 
 export async function runRegistryWatcher(options) {
-  const configPath = resolve(options.configPath);
-  const config = options.config || JSON.parse(await readFile(configPath, 'utf8'));
-  const configurationFingerprint = hash(config);
+  const configPath = options.configPath ? resolve(options.configPath) : null;
+  const config = options.config || (configPath ? JSON.parse(await readFile(configPath, 'utf8')) : null);
+  if (!config) throw new Error('runRegistryWatcher requires either options.config or options.configPath');
+  // verification_runners may carry function-valued runner objects when test_mode is opted in
+  // (an in-process test harness reattaches them after reading the on-disk config). They are
+  // not part of the configuration fingerprint: strip them before hashing so the fingerprint
+  // matches the one installRouter computed from the serialized (runner-free) config.
+  const { verification_runners: _runners, ...fingerprintable } = config;
+  const configurationFingerprint = hash(fingerprintable);
   const instanceId = randomUUID();
   const heartbeatMs = config.heartbeat_ms ?? 1_000;
   const controlPollMs = config.control_poll_ms ?? 250;
@@ -185,7 +191,9 @@ export async function runRegistryWatcher(options) {
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
     ...(reconcile.lastReconciliation ? { reconciliation: reconcile.lastReconciliation } : {}),
   });
-  const reconcile = createRegistryReconciler(config);
+  const reconcile = createRegistryReconciler(config, config.test_mode === true
+    ? { produceActivationVerification: createTestActivationVerifier(config.verification_runners || {}) }
+    : {});
   const controller = createRegistryWatcher({
     roots: config.roots,
     statePath: config.state_path,
@@ -211,9 +219,13 @@ export async function runRegistryWatcher(options) {
       await controller.close();
       await publish('stopped');
       if (request.action === 'restart') {
-        spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
-          detached: true, stdio: 'ignore',
-        }).unref();
+        if (configPath) {
+          spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
+            detached: true, stdio: 'ignore',
+          }).unref();
+        }
+        // When configPath is null (in-process test harness with options.config), there is
+        // no on-disk config to re-exec from; the harness owns the controller lifecycle.
       }
     }
   }, controlPollMs);
@@ -297,7 +309,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     if (config.activation_root) {
       let recoveryReady = recovered || active.authority_status === 'empty';
       if (!recovered && active.authority_status !== 'empty') {
-        const recoveryResult = await recovery({ ownedRoot: config.activation_root });
+        const recoveryResult = await recovery({ ownedRoot: config.activation_root, test_mode: config.test_mode === true });
         if (['healthy', 'recovered'].includes(recoveryResult.recovery_status)) {
           recovered = true;
           recoveryReady = true;
@@ -317,7 +329,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
             equivalence: { previous: baseline, diff, options: acquisitionOptions },
           });
           if (verification.disposition === 'passing' && verification.complete === true) {
-            activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher' });
+            activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher', test_mode: config.test_mode === true });
             if (activation.activation_status === 'activated' && activation.version_id) {
               const publication = await publishIndex({
                 ownedRoot: config.activation_root, registry: built.registry,

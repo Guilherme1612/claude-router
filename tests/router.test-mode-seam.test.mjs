@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { installRouter, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
-import { buildFullRegistry } from '../src/registry/build.mjs';
+import { installRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 import { createTestActivationVerifier, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
 import { trusted } from '../src/registry/activate.mjs';
+import { runRegistryWatcher } from '../src/registry/watcher.mjs';
 
 // Lightweight passing runner map: each of the 8 REQUIRED_ACTIVATION_GATES resolves to
 // a stub runner that always passes. Used when test_mode opts in to the seam.
@@ -37,6 +37,42 @@ async function waitUntil(predicate, timeoutMs = 2_000) {
   assert.fail(`controller did not publish within ${timeoutMs}ms`);
 }
 
+// In-process controller launcher for the opt-in seam. installRouter writes the controller
+// config to disk WITHOUT verification_runners (functions are not JSON-serializable); this
+// launcher reads the on-disk config, reattaches the stub runners, and runs the real
+// runRegistryWatcher in-process so the watcher→controller→compiled-index publication seam
+// drives publication exactly as a spawned child would, but with function-valued runners.
+//
+// The holder parameter is an object the caller supplies; the launcher stashes the pseudo-child
+// on holder.child so the test can kill it directly. We MUST NOT call uninstallRouter here,
+// because the in-process controller reports pid = process.pid (the test process), and
+// stopController would SIGTERM the test process. Instead, child.kill() closes the controller
+// via its close() handle, clearing the heartbeat/control intervals so the event loop drains.
+export function inProcessControllerLauncher(runners, holder = {}) {
+  return (binary, args, spawnOptions) => {
+    const configIndex = args.indexOf('--config');
+    const configPath = configIndex >= 0 ? args[configIndex + 1] : null;
+    const child = {
+      exitCode: null, error: null,
+      kill() { try { handle?.close(); } catch { /* already closed */ } },
+    };
+    holder.child = child;
+    let handle = null;
+    (async () => {
+      try {
+        if (!configPath) throw new Error('controller launcher missing --config');
+        const config = JSON.parse(readFileSync(configPath, 'utf8'));
+        config.verification_runners = runners;
+        handle = await runRegistryWatcher({ config });
+      } catch (error) {
+        child.exitCode = 1;
+        child.error = error;
+      }
+    })();
+    return child;
+  };
+}
+
 test('production-default trusted() rejects test_only:true verification without test_mode', () => {
   const root = mkdtempSync(join(tmpdir(), 'router-seam-default-'));
   try {
@@ -59,6 +95,7 @@ test('production-default trusted() rejects test_only:true verification without t
 
 test('opt-in test_mode lets the installed controller publish via the real watcher→controller→compiled-index seam', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-seam-optin-'));
+  const holder = {};
   try {
     const claudeRoot = join(root, '.claude');
     const codexRoot = join(root, '.codex');
@@ -69,6 +106,7 @@ test('opt-in test_mode lets the installed controller publish via the real watche
       claudeRoot, codexRoot, sourceRouter, settingsPath, nodeBinary: process.execPath,
       debounceMs: 10, repairMs: 200,
       testMode: true, verificationRunners: stubVerificationRunners,
+      launchController: inProcessControllerLauncher(stubVerificationRunners, holder),
     };
     mkdirSync(join(claudeRoot, 'skills'), { recursive: true });
     mkdirSync(join(codexRoot, 'skills'), { recursive: true });
@@ -88,14 +126,18 @@ test('opt-in test_mode lets the installed controller publish via the real watche
     const compiled = loadCompiledIndex({ ownedRoot });
     assert.equal(compiled.dispatch_eligible, true);
     assert.equal(compiled.tuple_version_id, published);
-    // Controller config on disk carries the opt-in fields
+    // Controller config on disk carries the opt-in flag (verification_runners is stripped
+    // because functions are not JSON-serializable; the in-process launcher reattaches them).
     const config = JSON.parse(readFileSync(installed.controllerConfigPath, 'utf8'));
     assert.equal(config.test_mode, true);
-    assert.equal(config.verification_runners, stubVerificationRunners);
-
-    try { await uninstallRouter(options); } catch {}
-    return undefined;
-  } finally { rmSync(root, { recursive: true, force: true }); }
+    assert.equal(config.verification_runners, undefined);
+  } finally {
+    // Close the in-process controller directly so its heartbeat/control intervals clear and
+    // the event loop drains. Do NOT call uninstallRouter: stopController would SIGTERM the
+    // test process (the in-process controller reports pid = process.pid).
+    try { holder.child?.kill(); } catch {}
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('opt-in test_mode seam test file does not import the compiled-index publisher (controller publishes on its own)', () => {

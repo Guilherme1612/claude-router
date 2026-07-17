@@ -343,9 +343,21 @@ export async function installRouter(options) {
     repair_ms: options.repairMs ?? 300_000,
     heartbeat_ms: options.heartbeatMs ?? 1_000,
     control_poll_ms: options.controlPollMs ?? 100,
+    // Opt-in testability seam (defaults to absent for production installs):
+    // test_mode === true lets the reconciler use createTestActivationVerifier with injected
+    // verification_runners and lets trusted() accept test_only:true verifications. Production
+    // installer entry points never set options.testMode, so real installs are unchanged.
+    // verification_runners holds function-valued runner objects that cannot survive JSON
+    // serialization; it is therefore stripped before the config is written to disk or
+    // fingerprinted. Test harnesses reattach runners in-process via launchController.
+    ...(options.testMode === true ? { test_mode: true, ...(options.verificationRunners ? { verification_runners: options.verificationRunners } : {}) } : {}),
   };
-  const controllerConfigValue = stableStringify(controllerConfig) + '\n';
-  const configurationFingerprint = fingerprint(stableStringify(controllerConfig));
+  // Serialize and fingerprint the config WITHOUT verification_runners (functions are not
+  // JSON-serializable and must not perturb the configuration fingerprint). Production
+  // configs never set test_mode, so this strip is a no-op there.
+  const { verification_runners: _strippedRunners, ...serializableConfig } = controllerConfig;
+  const controllerConfigValue = stableStringify(serializableConfig) + '\n';
+  const configurationFingerprint = fingerprint(stableStringify(serializableConfig));
   const ownedValues = [
     ...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
     [p.controllerConfigPath, controllerConfigValue],
