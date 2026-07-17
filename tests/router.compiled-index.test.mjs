@@ -9,6 +9,7 @@ import { stableStringify } from '../src/registry/schema.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
+import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
 
 const NOW = 1_800_000_000_000;
 const VERSION = 'v1-0123456789abcdef';
@@ -73,6 +74,38 @@ function fixture(options = {}) {
   writePointer(root, options.versionId || VERSION, version.metadata.payload_sha256);
   return { root, ...version };
 }
+
+test('publisher commits one verified registry and compiled release tuple', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-release-tuple-'));
+  const registry = { schema_version: 1, records: [{
+    id: 'capability-1', name: 'execute', lifecycle: 'ready', dispatchable: true,
+    scope: { kind: 'global' }, invocation: { runtime: 'claude', command: 'execute', args: [] },
+    dependencies: { state: 'ready', items: [] },
+  }] };
+  const mapping = { schema_version: 1, policy_fingerprint: 'a'.repeat(64), subjects: [{
+    subject_id: 'gsd-execute-phase', disposition: 'mapped', target_id: 'capability-1', reason_code: 'explicit_subject',
+  }] };
+  try {
+    const result = publishCompiledIndex({ ownedRoot: root, registry, registryVersionId: 'v1-aaaaaaaaaaaaaaaa', mapping, policyFingerprint: 'b'.repeat(64), now: NOW });
+    assert.equal(result.publication_status, 'published');
+    const loaded = loadCompiledIndex({ ownedRoot: root, now: NOW });
+    assert.equal(loaded.status, 'ready');
+    assert.equal(loaded.tuple_version_id, result.tuple_version_id);
+    assert.equal(loaded.registry.version_id, 'v1-aaaaaaaaaaaaaaaa');
+    assert.equal(loaded.index.routes['gsd-execute-phase'].target_id, 'capability-1');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('tuple reader rejects a mixed or corrupt registry component', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-release-tuple-corrupt-'));
+  const registry = { schema_version: 1, records: [{ id: 'capability-1', name: 'execute', lifecycle: 'ready', dispatchable: true, scope: { kind: 'global' }, invocation: { runtime: 'claude', command: 'execute', args: [] }, dependencies: { state: 'ready', items: [] } }] };
+  const mapping = { schema_version: 1, policy_fingerprint: 'a'.repeat(64), subjects: [{ subject_id: 'gsd-execute-phase', disposition: 'mapped', target_id: 'capability-1', reason_code: 'explicit_subject' }] };
+  try {
+    const result = publishCompiledIndex({ ownedRoot: root, registry, registryVersionId: 'v1-aaaaaaaaaaaaaaaa', mapping, policyFingerprint: 'b'.repeat(64), now: NOW });
+    writeFileSync(join(root, 'release-tuples', 'versions', result.tuple_version_id, 'registry.json'), '{}\n');
+    assert.equal(loadCompiledIndex({ ownedRoot: root, now: NOW }).dispatch_eligible, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 function capsule(overrides = {}) {
   return {
