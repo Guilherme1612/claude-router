@@ -203,8 +203,8 @@ export function pruneVersionHistory({ ownedRoot, policy = DEFAULT_RETENTION_POLI
   return { prune_status: 'complete', removed };
 }
 
-export function previewRollback({ ownedRoot, destination, now = Date.now() }) {
-  const p = paths(ownedRoot), source = readPointer(p.active), verdict = verifyVersion({ ownedRoot, versionId: destination, now });
+export function previewRollback({ ownedRoot, destination, now = Date.now(), test_mode = false }) {
+  const p = paths(ownedRoot), source = readPointer(p.active), verdict = verifyVersion({ ownedRoot, versionId: destination, now, test_mode });
   if (!source || !verdict.valid) return { preview_status: 'blocked', reason_code: verdict.reason_code || 'missing_active_pointer' };
   const body = { schema_version: 1, source_version_id: source.version_id, destination_version_id: destination, source_sequence: source.sequence, destination_verification_fingerprint: verdict.verification_fingerprint, generated_at: now };
   return { ...body, preview_status: 'ready', preview_fingerprint: hash(body) };
@@ -227,15 +227,15 @@ export function recoverRollbackJournal({ ownedRoot }) {
   return { recovery_status: operations.length ? 'recovered' : 'healthy', operations };
 }
 
-export function executeRollback({ ownedRoot, preview, confirmation, now = Date.now(), reason = 'rollback', io }) {
+export function executeRollback({ ownedRoot, preview, confirmation, now = Date.now(), reason = 'rollback', io, test_mode = false }) {
   if (preview?.preview_status !== 'ready' || confirmation !== preview.destination_version_id) return { rollback_status: 'blocked', reason_code: 'confirmation_mismatch' };
-  const fresh = previewRollback({ ownedRoot, destination: preview.destination_version_id, now: preview.generated_at });
+  const fresh = previewRollback({ ownedRoot, destination: preview.destination_version_id, now: preview.generated_at, test_mode });
   if (fresh.preview_fingerprint !== preview.preview_fingerprint) return { rollback_status: 'blocked', reason_code: 'stale_preview' };
   const p = paths(ownedRoot), operationId = randomUUID();
   const pending = rollbackRecord({ preview, now, reason, operationId, outcome: 'pending' });
   try { journalWrite(p, pending, 'pending', io); }
   catch { return { rollback_status: 'blocked', reason_code: 'journal_not_durable', operation_id: operationId }; }
-  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io, now });
+  const result = replaceActivePointer({ ownedRoot, destination: preview.destination_version_id, reason, expectedSequence: preview.source_sequence, io, now, test_mode });
   if (result.pointer_status === 'replaced') {
     const completed = { ...pending, outcome: 'completed' };
     try {
