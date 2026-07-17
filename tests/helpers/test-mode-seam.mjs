@@ -35,15 +35,23 @@ export function inProcessControllerLauncher(runners, holder = {}) {
       // guarantee no async activity races with subsequent filesystem teardown.
       kill() {
         killed = true;
+        // close() returns a promise that may reject if publish('stopped') fails (e.g., the
+        // controller dir was already removed). Catch the rejection so callers that don't await
+        // kill() don't surface an unhandled promise rejection (Node ≥20 can crash on those).
         const closeHandle = () => {
-          try { return handle ? handle.close() : Promise.resolve(); }
-          catch { return Promise.resolve(); /* already closed */ }
+          try {
+            return (handle ? handle.close() : Promise.resolve())
+              .catch(() => { /* already closed or publish('stopped') failed */ });
+          } catch { return Promise.resolve(); /* already closed */ }
         };
         if (handle) { pendingClose = closeHandle(); return pendingClose; }
         // handle not ready: poll until runRegistryWatcher resolves, then close.
         pendingClose = new Promise(resolve => {
           const poll = () => {
-            if (handle) { try { handle.close().then(resolve, resolve); } catch { resolve(); } }
+            if (handle) {
+              try { handle.close().catch(() => {}).then(resolve, resolve); }
+              catch { resolve(); }
+            }
             else setTimeout(poll, 5);
           };
           poll();
