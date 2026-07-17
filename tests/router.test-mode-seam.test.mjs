@@ -64,7 +64,7 @@ test('opt-in test_mode lets the installed controller publish via the real watche
     const ownedRoot = join(claudeRoot, 'router');
     const options = {
       claudeRoot, codexRoot, sourceRouter, settingsPath, nodeBinary: process.execPath,
-      debounceMs: 10, repairMs: 200,
+      debounceMs: 10, repairMs: 60_000,
       testMode: true, verificationRunners: stubVerificationRunners,
       launchController: inProcessControllerLauncher(stubVerificationRunners, holder),
     };

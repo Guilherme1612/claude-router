@@ -44,7 +44,7 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
     const ownedRoot = join(claudeRoot, 'router');
     const options = {
       claudeRoot, codexRoot, sourceRouter, settingsPath, nodeBinary: process.execPath,
-      debounceMs: 10, repairMs: 200,
+      debounceMs: 10, repairMs: 60_000,
       // Opt-in testability seam: the installed controller uses injected lightweight passing
       // verification runners and trusted() accepts test_only:true via test_mode. This lets
       // the real watcher→controller→compiled-index publication seam drive publication in tests
