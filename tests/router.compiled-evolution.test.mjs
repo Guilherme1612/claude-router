@@ -197,6 +197,9 @@ test('D-13 through D-16 fixed corpus passes independent semantic budget and REL-
   assert.equal(result.latency.pass, true);
   assert.deepEqual(evaluation.versions, versions);
   assert.ok(evaluation.fixtures.every(fixture => fixture.pass && fixture.context_budget_pass));
+  if (process.env.ROUTER_RELEASE_STAGE === 'latency') {
+    t.diagnostic(`RELEASE_METRICS ${JSON.stringify({ warm_p95_ms: measured.warm.p95_ms, max_route_ms: measured.warm.max_ms })}`);
+  }
 });
 
 test('D-16 neutral speed alone cannot move active authority', () => {

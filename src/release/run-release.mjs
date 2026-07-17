@@ -1,4 +1,5 @@
 import { accessSync, constants, readFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
@@ -73,10 +74,74 @@ export function loadReleaseMatrix({ matrixPath = resolve(MODULE_ROOT, 'release/v
   }
 }
 
+const STAGES = Object.freeze([
+  { id: 'regression', files: ['tests/router.registry-schema.test.mjs', 'tests/router.registry-build.test.mjs', 'tests/router.adapters.test.mjs', 'tests/router.registry-diff.test.mjs', 'tests/router.registry-watcher.test.mjs', 'tests/router.registry-reconcile.test.mjs', 'tests/router.hook-reconcile.test.mjs', 'tests/router.registry-map.test.mjs', 'tests/router.registry-activate.test.mjs'], gate_ids: ['regression'] },
+  { id: 'calibration', files: ['tests/router.evolution-canary.test.mjs', 'tests/router.compiled-evolution.test.mjs'], gate_ids: ['calibration', 'canary-rollback'] },
+  { id: 'privacy', files: ['tests/router.privacy.test.mjs'], gate_ids: ['privacy'] },
+  { id: 'coexistence', files: ['tests/router.installer-coexistence.test.mjs', 'tests/router.coexistence.test.mjs'], gate_ids: ['coexistence'] },
+  { id: 'recovery', files: ['tests/router.autonomous-lifecycle.test.mjs', 'tests/router.lifecycle-recovery.test.mjs'], gate_ids: ['lifecycle', 'recovery'] },
+  { id: 'context-token', files: ['tests/router.context-capsule.test.mjs', 'tests/router.context-resume.test.mjs', 'tests/router.context-prompt-integration.test.mjs', 'tests/router.workflow-orchestrator.test.mjs', 'tests/router.context-budget.test.mjs', 'tests/router.token-budget.test.mjs'], gate_ids: ['context', 'orchestration', 'token-budget'] },
+  { id: 'latency', files: ['tests/router.compiled-evolution.test.mjs'], gate_ids: ['warm-p95', 'hard-route-ceiling'], isolated: true },
+]);
+
+function executeChild({ stage, command, gate_ids, timeout_ms }) {
+  const files = command.split(' ').slice(2);
+  return new Promise(resolveResult => {
+    execFile(process.execPath, ['--test', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
+      const skipped = /# SKIP|\bskipped [1-9]/i.test(stdout);
+      const metricsMatch = stdout.match(/RELEASE_METRICS (\{[^\n]+\})/);
+      let measurements;
+      try { if (metricsMatch) measurements = JSON.parse(metricsMatch[1]); } catch { /* invalid evidence is handled below */ }
+      resolveResult({
+        status: error?.killed ? 'timed_out' : error ? 'failed' : 'passed',
+        exit_code: error?.code ?? 0, skipped,
+        gate_results: error || skipped ? [] : gate_ids.map(id => ({ id, pass: true, reason_code: `${id}_pass` })),
+        ...(measurements ? { measurements } : {}),
+        diagnostic: stderr.slice(0, 512),
+      });
+    });
+  });
+}
+
+function assertStageResult(stage, result) {
+  const gates = Array.isArray(result?.gate_results) ? result.gate_results : [];
+  const complete = stage.gate_ids.every(id => gates.some(gate => gate?.id === id && gate.pass === true && typeof gate.reason_code === 'string'));
+  const latencyPass = stage.id !== 'latency' || (
+    Number.isFinite(result?.measurements?.warm_p95_ms) && result.measurements.warm_p95_ms < 25
+    && Number.isFinite(result?.measurements?.max_route_ms) && result.measurements.max_route_ms < 100
+  );
+  if (result?.status !== 'passed' || result.exit_code !== 0 || result.skipped || !complete || !latencyPass) throw new Error(`release gate failed: ${stage.id}`);
+}
+
+export async function runRelease({
+  matrix = loadReleaseMatrix(), execute = executeChild, timeoutMs = 120_000,
+  publish = true, outputPath,
+} = {}) {
+  validateReleaseMatrix(matrix);
+  const stages = [];
+  for (const definition of STAGES) {
+    const request = {
+      stage: definition.id, command: `node --test ${definition.files.join(' ')}`,
+      gate_ids: [...definition.gate_ids], timeout_ms: timeoutMs,
+      isolated: definition.isolated === true,
+    };
+    const result = await execute(request);
+    assertStageResult(definition, result);
+    stages.push({ id: definition.id, command: request.command, gate_results: result.gate_results, ...(result.measurements ? { measurements: result.measurements } : {}) });
+  }
+  const release = { status: 'passed', stages };
+  if (publish) {
+    if (typeof outputPath !== 'string') throw new TypeError('release evidence output path is required');
+    throw new TypeError('release evidence publication is not implemented');
+  }
+  return release;
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   try {
-    const matrix = loadReleaseMatrix();
-    process.stdout.write(`${JSON.stringify({ status: 'matrix-valid', requirements: matrix.requirements.length })}\n`);
+    const outputArg = process.argv.find(argument => argument.startsWith('--output='));
+    const result = await runRelease({ outputPath: outputArg?.slice('--output='.length) || resolve(MODULE_ROOT, 'release/v1.2-report.json') });
+    process.stdout.write(`${JSON.stringify({ status: result.status, stages: result.stages.map(stage => stage.id) })}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exitCode = 1;
