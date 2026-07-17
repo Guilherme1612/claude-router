@@ -1,4 +1,5 @@
-import { accessSync, constants, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, isAbsolute, resolve } from 'node:path';
@@ -18,6 +19,14 @@ const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ALLOWED_TOP_KEYS = ['schema_version', 'milestone', 'versions', 'requirements'];
 const ALLOWED_ROW_KEYS = ['id', 'primary', 'secondary'];
 const COMMAND = /^node --test (tests\/router\.[a-z0-9.-]+\.test\.mjs)(?: (tests\/router\.[a-z0-9.-]+\.test\.mjs))*$/;
+
+function canonical(value) {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  return JSON.stringify(value);
+}
+
+const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 function exactKeys(value, allowed, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new TypeError(`${label} must be an object`);
@@ -88,7 +97,7 @@ function executeChild({ stage, command, gate_ids, timeout_ms }) {
   const files = command.split(' ').slice(2);
   return new Promise(resolveResult => {
     execFile(process.execPath, ['--test', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
-      const skipped = /# SKIP|\bskipped [1-9]/i.test(stdout);
+      const skipped = /^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout);
       const metricsMatch = stdout.match(/RELEASE_METRICS (\{[^\n]+\})/);
       let measurements;
       try { if (metricsMatch) measurements = JSON.parse(metricsMatch[1]); } catch { /* invalid evidence is handled below */ }
@@ -110,7 +119,65 @@ function assertStageResult(stage, result) {
     Number.isFinite(result?.measurements?.warm_p95_ms) && result.measurements.warm_p95_ms < 25
     && Number.isFinite(result?.measurements?.max_route_ms) && result.measurements.max_route_ms < 100
   );
-  if (result?.status !== 'passed' || result.exit_code !== 0 || result.skipped || !complete || !latencyPass) throw new Error(`release gate failed: ${stage.id}`);
+  if (result?.status !== 'passed' || result.exit_code !== 0 || result.skipped || !complete || !latencyPass) {
+    const reason = result?.status !== 'passed' ? result?.status : result.exit_code !== 0 ? `exit-${result.exit_code}` : result.skipped ? 'skipped' : !complete ? 'structured-evidence-missing' : 'threshold';
+    throw new Error(`release gate failed: ${stage.id} (${reason})`);
+  }
+}
+
+function canonicalReport(matrix, stages) {
+  return {
+    schema_version: 1,
+    milestone: 'v1.2',
+    matrix_sha256: sha256(canonical(matrix)),
+    versions: { ...RELEASE_VERSIONS },
+    thresholds: { warm_p95_ms_lt: 25, max_route_ms_lt: 100 },
+    stages: stages.map(stage => ({
+      id: stage.id,
+      command: stage.command,
+      result: 'pass',
+      gates: stage.gate_results.map(gate => ({ id: gate.id, pass: true, reason_code: gate.reason_code })),
+      ...(stage.id === 'latency' ? { measurements: {
+        warm_p95_ms: stage.measurements.warm_p95_ms,
+        max_route_ms: stage.measurements.max_route_ms,
+      } } : {}),
+    })),
+  };
+}
+
+function publishAtomic(outputPath, bytes) {
+  const target = resolve(outputPath);
+  mkdirSync(dirname(target), { recursive: true });
+  const temporary = `${target}.tmp`;
+  let descriptor;
+  try {
+    descriptor = openSync(temporary, 'w', 0o600);
+    writeFileSync(descriptor, bytes, 'utf8');
+    closeSync(descriptor); descriptor = undefined;
+    renameSync(temporary, target);
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    try { unlinkSync(temporary); } catch { /* no partial file */ }
+    throw error;
+  }
+}
+
+export function verifyReleaseReport({ reportPath, matrixPath = resolve(MODULE_ROOT, 'release/v1.2-matrix.json') } = {}) {
+  const matrix = loadReleaseMatrix({ matrixPath });
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  exactKeys(report, ['schema_version', 'milestone', 'matrix_sha256', 'versions', 'thresholds', 'stages'], 'release report');
+  if (report.schema_version !== 1 || report.milestone !== 'v1.2') throw new TypeError('release report version mismatch');
+  if (report.matrix_sha256 !== sha256(canonical(matrix))) throw new TypeError('release report matrix hash mismatch');
+  if (canonical(report.versions) !== canonical(RELEASE_VERSIONS)) throw new TypeError('release report immutable version mismatch');
+  if (canonical(report.thresholds) !== canonical({ warm_p95_ms_lt: 25, max_route_ms_lt: 100 })) throw new TypeError('release thresholds mismatch');
+  if (!Array.isArray(report.stages) || report.stages.length !== STAGES.length || STAGES.some((stage, index) => report.stages[index]?.id !== stage.id || report.stages[index]?.result !== 'pass')) throw new TypeError('release stages incomplete');
+  for (let index = 0; index < STAGES.length; index += 1) {
+    const expected = STAGES[index]; const actual = report.stages[index];
+    if (actual.command !== `node --test ${expected.files.join(' ')}` || !Array.isArray(actual.gates) || expected.gate_ids.some(id => !actual.gates.some(gate => gate.id === id && gate.pass === true))) throw new TypeError(`release stage evidence mismatch: ${expected.id}`);
+  }
+  const latency = report.stages.at(-1)?.measurements;
+  if (!Number.isFinite(latency?.warm_p95_ms) || latency.warm_p95_ms >= 25 || !Number.isFinite(latency?.max_route_ms) || latency.max_route_ms >= 100) throw new TypeError('release latency threshold mismatch');
+  return Object.freeze({ status: 'verified', versions: Object.freeze({ ...report.versions }), matrix_sha256: report.matrix_sha256 });
 }
 
 export async function runRelease({
@@ -132,7 +199,11 @@ export async function runRelease({
   const release = { status: 'passed', stages };
   if (publish) {
     if (typeof outputPath !== 'string') throw new TypeError('release evidence output path is required');
-    throw new TypeError('release evidence publication is not implemented');
+    const report = canonicalReport(matrix, stages);
+    publishAtomic(outputPath, `${canonical(report)}\n`);
+    verifyReleaseReport({ reportPath: outputPath });
+    release.report_path = resolve(outputPath);
+    release.matrix_sha256 = report.matrix_sha256;
   }
   return release;
 }
