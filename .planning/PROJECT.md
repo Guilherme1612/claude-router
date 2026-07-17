@@ -12,6 +12,12 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **v1.1 shipped and verified on 2026-07-14.** The router now provides expanded route coverage, inspect/preview/explain commands, health and coverage diagnostics, practical codebase calibration, privacy-preserving evolution proposals, and executable safety/coexistence release gates.
 
+**Phase 11 complete and verified on 2026-07-14.** The v1.2 control plane now has a deterministic canonical capability registry with native Claude and Codex adapters, bounded installed-runtime parsing, provenance, diagnostics, and rollback-safe versioning.
+
+**Phases 12–14 complete and verified on 2026-07-16.** The control plane now detects incremental changes, reconciles and quarantines candidates safely, produces deterministic mappings, authenticates behavioral verification evidence, and performs atomic activation, compatible recovery, and durable rollback without changing active authority on failure.
+
+**Phase 15 complete and verified on 2026-07-16.** Privacy-safe bounded context capsules now recover authoritative workflow state, refresh stale evidence, resume uniquely identifiable work, and let explicit instructions override stale or conflicting context without reviving terminal work.
+
 ## Current Milestone: v1.2 Autonomous Dual-Runtime Control Plane
 
 **Goal:** Automatically reconcile additions, edits, moves, disables, dependency changes, and deletions across `.claude` and `.codex`; then select the best workflow and least-sufficient context from prompt intent plus authoritative workflow state.
@@ -38,11 +44,16 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Inspect, preview, explain-last, doctor, routes, unmapped, and coverage commands — v1.1
 - ✓ Codebase routing calibration with preserved core fixtures — v1.1
 - ✓ Missing-MCP safety, hook coexistence, and executable release gates — v1.1
+- ✓ Canonical registry and native Claude/Codex runtime adapters — validated in Phase 11
+- ✓ Incremental change detection and watcher publication — validated in Phase 12
+- ✓ Target safety, hook reconciliation, and quarantine — validated in Phase 13
+- ✓ Deterministic mapping, atomic activation, compatible recovery, and durable rollback — validated in Phase 14
+- ✓ Bounded context capsules and deterministic workflow-state recovery — validated in Phase 15
 
 ### Active
 
 - [ ] Autonomous dual-runtime registry reconciliation.
-- [ ] Workflow-state-aware routing and compact context capsules.
+- [ ] Workflow-first capability selection and least-sufficient context budgets.
 - [ ] Guarded automatic map updates and reversible self-evolution.
 - [ ] Measured token, latency, safety, and routing-quality improvements.
 
@@ -80,8 +91,8 @@ The approved design and implementation plan are:
 | Reuse existing workflow and discovery primitives | Avoid duplicate orchestration engines | ✓ Good |
 | Treat missing MCP dependencies as warnings, never auto-dispatch targets | Prevent predictable runtime failures | ✓ Good |
 | Use one canonical registry with runtime adapters | Prevent `.claude`/`.codex` mapping drift | — Pending |
-| Use workflow state plus prompt intent for selection | Short prompts require more than lexical context | — Pending |
+| Use workflow state plus prompt intent for selection | Short prompts require more than lexical context | ✓ Good |
 | Permit only bounded, validated, reversible evolution | Automation must not silently degrade safety | — Pending |
 
 ---
-*Last updated: 2026-07-14 after v1.1 milestone closeout and v1.2 goal approval*
+*Last updated: 2026-07-16 after Phase 15 verification and transition to Phase 16*

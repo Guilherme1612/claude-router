@@ -7,50 +7,50 @@
 
 ### Canonical Registry
 
-- [ ] **REG-01**: One canonical schema represents Claude and Codex capabilities with stable identities.
-- [ ] **REG-02**: Full rebuilds discover supported skills, plugin skills, agents, commands, hooks, bindings, scopes, and dependencies.
-- [ ] **REG-03**: Incremental and full rebuilds produce identical canonical registries.
+- [x] **REG-01**: One canonical schema represents Claude and Codex capabilities with stable identities.
+- [x] **REG-02**: Full rebuilds discover supported skills, plugin skills, agents, commands, hooks, bindings, scopes, and dependencies.
+- [x] **REG-03**: Incremental and full rebuilds produce identical canonical registries.
 
 ### Runtime Adapters
 
-- [ ] **ADP-01**: The Claude adapter covers global, plugin, agents-store, and project-scoped inventory.
-- [ ] **ADP-02**: The Codex adapter covers skills, plugins, agents, hooks, configuration, and project scope.
+- [x] **ADP-01**: The Claude adapter covers global, plugin, agents-store, and project-scoped inventory.
+- [x] **ADP-02**: The Codex adapter covers skills, plugins, agents, hooks, configuration, and project scope.
 
 ### Change Detection
 
-- [ ] **CHG-01**: Add, edit, rename, move, disable, dependency-change, and delete events are classified correctly.
-- [ ] **CHG-02**: Filesystem changes are detected within 2 seconds and missed events within 5 minutes.
+- [x] **CHG-01**: Add, edit, rename, move, disable, dependency-change, and delete events are classified correctly.
+- [x] **CHG-02**: Filesystem changes are detected within 2 seconds and missed events within 5 minutes.
 
 ### Safety and Reconciliation
 
-- [ ] **SAF-09**: Missing or deleted targets cannot remain activatable through aliases or schema exceptions.
-- [ ] **SAF-10**: Hook files and bindings are reconciled as orphan-file, orphan-binding, or valid pairs.
+- [x] **SAF-09**: Missing or deleted targets cannot remain activatable through aliases or schema exceptions.
+- [x] **SAF-10**: Hook files and bindings are reconciled as orphan-file, orphan-binding, or valid pairs.
 
 ### Mapping and Activation
 
-- [ ] **MAP-01**: Deterministic mapping runs before any background ambiguity resolver.
-- [ ] **MAP-02**: Unsafe or ambiguous candidates are quarantined without changing the active registry.
-- [ ] **ACT-01**: Passing candidates activate through an atomic version pointer and support rollback.
+- [x] **MAP-01**: Deterministic mapping runs before any background ambiguity resolver.
+- [x] **MAP-02**: Unsafe or ambiguous candidates are quarantined without changing the active registry.
+- [x] **ACT-01**: Passing candidates activate through an atomic version pointer and support rollback.
 
 ### Context Recovery
 
-- [ ] **CTX-01**: Context capsules persist the active goal, workflow position, artifacts, blockers, and freshness without raw prompt history.
-- [ ] **CTX-02**: Minimal prompts such as `continue` resume a uniquely identifiable workflow without restating context.
+- [x] **CTX-01**: Context capsules persist the active goal, workflow position, artifacts, blockers, and freshness without raw prompt history.
+- [x] **CTX-02**: Minimal prompts such as `continue` resume a uniquely identifiable workflow without restating context.
 
 ### Workflow Orchestration
 
-- [ ] **ORC-01**: Workflow selection precedes skill, command, agent, MCP, and tool selection.
-- [ ] **ORC-02**: Explicit user instructions override stale or conflicting capsule state.
+- [x] **ORC-01**: Workflow selection precedes skill, command, agent, MCP, and tool selection.
+- [x] **ORC-02**: Explicit user instructions override stale or conflicting capsule state.
 
 ### Token Efficiency
 
-- [ ] **TOK-01**: Default routing loads no full manifest, planning directory, conversation history, or complete design document.
-- [ ] **TOK-02**: Each workflow enforces a declared context budget and reuses unchanged artifact summaries.
+- [x] **TOK-01**: Default routing loads no full manifest, planning directory, conversation history, or complete design document.
+- [x] **TOK-02**: Each workflow enforces a declared context budget and reuses unchanged artifact summaries.
 
 ### Evolution and Reliability
 
-- [ ] **EVO-05**: Privacy-safe telemetry canary-tests weight and signal changes and rolls back regressions.
-- [ ] **REL-01**: Warm routing p95 is below 25ms and every measured route remains below 100ms.
+- [x] **EVO-05**: Privacy-safe telemetry canary-tests weight and signal changes and rolls back regressions.
+- [x] **REL-01**: Warm routing p95 is below 25ms and every measured route remains below 100ms.
 
 ## Future Requirements
 
@@ -71,28 +71,29 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| REG-01 | Phase 11 | Pending |
-| REG-02 | Phase 11 | Pending |
-| ADP-01 | Phase 11 | Pending |
-| ADP-02 | Phase 11 | Pending |
-| REG-03 | Phase 12 | Pending |
-| CHG-01 | Phase 12 | Pending |
-| CHG-02 | Phase 12 | Pending |
-| SAF-09 | Phase 13 | Pending |
-| SAF-10 | Phase 13 | Pending |
-| MAP-02 | Phase 13 | Pending |
-| MAP-01 | Phase 14 | Pending |
-| ACT-01 | Phase 14 | Pending |
-| CTX-01 | Phase 15 | Pending |
-| CTX-02 | Phase 15 | Pending |
-| ORC-02 | Phase 15 | Pending |
-| ORC-01 | Phase 16 | Pending |
-| TOK-01 | Phase 16 | Pending |
-| TOK-02 | Phase 16 | Pending |
-| EVO-05 | Phase 17 | Pending |
-| REL-01 | Phase 17 | Pending |
+| REG-01 | Phase 11 | Complete |
+| REG-02 | Phase 11 | Complete |
+| ADP-01 | Phase 11 | Complete |
+| ADP-02 | Phase 11 | Complete |
+| REG-03 | Phase 12 | Complete |
+| CHG-01 | Phase 12 | Complete |
+| CHG-02 | Phase 12 | Complete |
+| SAF-09 | Phase 13 | Complete |
+| SAF-10 | Phase 13 | Complete |
+| MAP-02 | Phase 13 | Complete |
+| MAP-01 | Phase 14 | Complete |
+| ACT-01 | Phase 14 | Complete |
+| CTX-01 | Phase 15 | Complete |
+| CTX-02 | Phase 15 | Complete |
+| ORC-02 | Phase 15 | Complete |
+| ORC-01 | Phase 16 | Complete |
+| TOK-01 | Phase 16 | Complete |
+| TOK-02 | Phase 16 | Complete |
+| EVO-05 | Phase 17 | Complete |
+| REL-01 | Phase 17 | Complete |
 
 **Coverage:**
+
 - v1.2 requirements: 20 total
 - Mapped to primary implementation phases: 20
 - Cross-phase verification: Phase 18 covers all 20
