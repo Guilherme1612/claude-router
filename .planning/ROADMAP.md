@@ -321,5 +321,28 @@ Plans:
 | 17. Compiled Prompt Routing and Safe Evolution | v1.2 | 5/5 | Complete    | 2026-07-16 |
 | 18. Autonomous Lifecycle and Release Gates | v1.2 | 5/5 | Complete    | 2026-07-17 |
 
+### Phase 19: Close gap: TOK-02 + ORC-01 — wire orchestrator {select,transitions,budget} into publish-index.mjs + prompt-route.mjs live path and deployed bundle
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 18
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 19 to break down)
+
+### Phase 20: Close gap: EVO-05 — add production trigger for canary-controller (watcher/CLI/release-runner) so telemetry drives canary promotion + rollback
+
+**Goal:** Privacy-safe telemetry canary-tests drive canary-controller promotion and rollback from the watcher and operator CLI, closing audit BLOCKER 2 (evolution library no longer orphaned; production trigger wired).
+**Requirements**: EVO-05
+**Depends on:** Phase 19
+**Plans:** 3 plans
+
+Plans:
+- [ ] 20-01-PLAN.md — Telemetry→evidence bridge + persistent evidence store + deployed-bundle inclusion (Wave 1 foundation)
+- [ ] 20-02-PLAN.md — Watcher canary trigger wiring (Wave 2 automatic trigger)
+- [ ] 20-03-PLAN.md — CLI canary subcommands status/promote/rollback (Wave 3 operator trigger)
+
 ---
 *Roadmap initialized: 2026-07-14 for v1.2 Autonomous Dual-Runtime Control Plane*
