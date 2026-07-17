@@ -130,7 +130,12 @@ function executeChild({ stage, command, gate_ids, timeout_ms }) {
   const files = command.split(' ').slice(2);
   return new Promise(resolveResult => {
     execFile(process.execPath, ['--test', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
-      const skipped = /^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout);
+      // Only treat the stage as skipped when there are NO passing tests. A stage with 5 passing
+      // tests and 1 platform-specific `# SKIP` must not be marked fully skipped — that would
+      // block legitimate releases where a single test is conditionally skipped.
+      const passMatch = stdout.match(/^# pass (\d+)/m);
+      const skipped = (/^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout))
+        && (!passMatch || Number(passMatch[1]) === 0);
       const parsed = parseChildEvidence({ stdout, stage, gate_ids, error, skipped });
       resolveResult({
         status: error?.killed ? 'timed_out' : error ? 'failed' : 'passed',
