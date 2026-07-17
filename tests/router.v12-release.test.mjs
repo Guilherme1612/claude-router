@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   loadReleaseMatrix,
+  parseChildEvidence,
   runRelease,
   validateReleaseMatrix,
   verifyReleaseReport,
@@ -130,4 +131,96 @@ test('D-12 failed run preserves prior passing evidence and tampering fails verif
     writeFileSync(outputPath, JSON.stringify(tampered));
     assert.throws(() => verifyReleaseReport({ reportPath: outputPath, matrixPath: MATRIX_PATH }), /matrix hash/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+// --- Gap 4 closure: executeChild parses real TAP/RELEASE_METRICS evidence (fail-closed) -------
+// The release runner's executeChild must populate gate_results from parsed child test stdout
+// (TAP pass/fail counts + RELEASE_METRICS evidence), not synthesized pass entries. These tests
+// drive the pure parser `parseChildEvidence` directly with mock stdout to assert fail-closed
+// behavior on missing, malformed, or failing evidence.
+
+test('parseChildEvidence: non-latency stage with TAP pass>0 fail=0 -> all gate_ids pass', () => {
+  const stdout = 'ok 1 - a\nok 2 - b\n# pass 2\n# fail 0\n# cancelled 0\n';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: null, skipped: false });
+  assert.equal(result.gate_results.length, 1);
+  assert.equal(result.gate_results[0].id, 'regression');
+  assert.equal(result.gate_results[0].pass, true);
+  assert.equal(result.gate_results[0].reason_code, 'regression_pass');
+  assert.equal(result.reason_code, undefined);
+});
+
+test('parseChildEvidence: TAP fail count > 0 -> fail closed with reason tap-fail', () => {
+  const stdout = 'not ok 1 - a\n# pass 0\n# fail 1\n';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: null, skipped: false });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'tap-fail');
+});
+
+test('parseChildEvidence: no TAP summary in stdout -> fail closed with reason no-tap-summary', () => {
+  const stdout = 'some random output without tap summary lines';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: null, skipped: false });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'no-tap-summary');
+});
+
+test('parseChildEvidence: TAP pass=0 fail=0 -> fail closed with reason no-tap-summary', () => {
+  const stdout = '# pass 0\n# fail 0\n';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: null, skipped: false });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'no-tap-summary');
+});
+
+test('parseChildEvidence: latency stage with valid RELEASE_METRICS -> both gates pass', () => {
+  const stdout = '# pass 1\n# fail 0\nRELEASE_METRICS {"warm_p95_ms": 1.5, "max_route_ms": 4.5}\n';
+  const result = parseChildEvidence({ stdout, stage: 'latency', gate_ids: ['warm-p95', 'hard-route-ceiling'], error: null, skipped: false });
+  assert.equal(result.gate_results.length, 2);
+  assert.equal(result.gate_results[0].id, 'warm-p95');
+  assert.equal(result.gate_results[0].pass, true);
+  assert.equal(result.gate_results[1].id, 'hard-route-ceiling');
+  assert.equal(result.gate_results[1].pass, true);
+  assert.equal(result.measurements.warm_p95_ms, 1.5);
+  assert.equal(result.measurements.max_route_ms, 4.5);
+});
+
+test('parseChildEvidence: latency stage without RELEASE_METRICS -> fail closed with reason metrics-missing', () => {
+  const stdout = '# pass 1\n# fail 0\n';
+  const result = parseChildEvidence({ stdout, stage: 'latency', gate_ids: ['warm-p95', 'hard-route-ceiling'], error: null, skipped: false });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'metrics-missing');
+});
+
+test('parseChildEvidence: latency stage with warm_p95_ms over threshold -> warm-p95 gate fails', () => {
+  const stdout = '# pass 1\n# fail 0\nRELEASE_METRICS {"warm_p95_ms": 30, "max_route_ms": 4.5}\n';
+  const result = parseChildEvidence({ stdout, stage: 'latency', gate_ids: ['warm-p95', 'hard-route-ceiling'], error: null, skipped: false });
+  assert.equal(result.gate_results.length, 2);
+  const warm = result.gate_results.find(g => g.id === 'warm-p95');
+  assert.equal(warm.pass, false);
+  assert.equal(warm.reason_code, 'threshold');
+  const ceiling = result.gate_results.find(g => g.id === 'hard-route-ceiling');
+  assert.equal(ceiling.pass, true);
+});
+
+test('parseChildEvidence: child error -> fail closed with reason child-error', () => {
+  const stdout = '';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: { code: 1 }, skipped: false });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'child-error');
+});
+
+test('parseChildEvidence: skipped stage -> empty gate_results, no fail reason', () => {
+  const stdout = 'ok 1 - a # SKIP\n# pass 0\n# fail 0\n# skipped 1\n';
+  const result = parseChildEvidence({ stdout, stage: 'regression', gate_ids: ['regression'], error: null, skipped: true });
+  assert.deepEqual(result.gate_results, []);
+  assert.equal(result.reason_code, 'skipped');
+});
+
+test('runRelease fails closed with parsed reason when execute returns fail-closed gate_results', async () => {
+  // Simulates executeChild parsing a child with no TAP summary: gate_results empty, reason_code set.
+  const execute = async request => ({
+    status: 'passed', exit_code: 0, skipped: false,
+    gate_results: [],
+    reason_code: 'no-tap-summary',
+    ...(request.stage === 'latency' ? { measurements: { warm_p95_ms: 1, max_route_ms: 2 } } : {}),
+  });
+  await assert.rejects(runRelease({ execute, publish: false }), /no-tap-summary/);
 });
