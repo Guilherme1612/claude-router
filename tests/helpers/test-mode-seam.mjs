@@ -26,9 +26,30 @@ export function inProcessControllerLauncher(runners, holder = {}) {
   return (binary, args, spawnOptions) => {
     const configIndex = args.indexOf('--config');
     const configPath = configIndex >= 0 ? args[configIndex + 1] : null;
+    let killed = false;
+    let pendingClose = null;
     const child = {
       exitCode: null, error: null,
-      kill() { try { handle?.close(); } catch { /* already closed */ } },
+      // kill() returns a promise that resolves once the controller's async close() finishes
+      // (clearing heartbeat/control intervals + publish('stopped')). Callers can await it to
+      // guarantee no async activity races with subsequent filesystem teardown.
+      kill() {
+        killed = true;
+        const closeHandle = () => {
+          try { return handle ? handle.close() : Promise.resolve(); }
+          catch { return Promise.resolve(); /* already closed */ }
+        };
+        if (handle) { pendingClose = closeHandle(); return pendingClose; }
+        // handle not ready: poll until runRegistryWatcher resolves, then close.
+        pendingClose = new Promise(resolve => {
+          const poll = () => {
+            if (handle) { try { handle.close().then(resolve, resolve); } catch { resolve(); } }
+            else setTimeout(poll, 5);
+          };
+          poll();
+        });
+        return pendingClose;
+      },
     };
     holder.child = child;
     let handle = null;
@@ -38,6 +59,10 @@ export function inProcessControllerLauncher(runners, holder = {}) {
         const config = JSON.parse(readFileSync(configPath, 'utf8'));
         config.verification_runners = runners;
         handle = await runRegistryWatcher({ config });
+        // If kill() was called while we were still awaiting runRegistryWatcher, handle was null
+        // and the earlier close() was a no-op. Close now so heartbeat/control intervals clear and
+        // no async activity leaks after the test ends.
+        if (killed) { try { handle.close(); } catch { /* already closed */ } }
       } catch (error) {
         child.exitCode = 1;
         child.error = error;
