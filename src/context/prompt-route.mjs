@@ -109,6 +109,19 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
     };
     return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
   }
+  // Phase 19 D-03 (TOK-02 hot-path closure): observe the baked dispatch_eligible flag from the
+  // budget sibling. Required-overflow baked at publish -> bakedBudget.dispatch_eligible === false
+  // -> synthesize the existing blocked resolution here, before any capsule mutation. Lazy read:
+  // only paid when a dispatch-eligible projection exists (Pitfall #5, REL-01 p95 <25ms preserved).
+  const bakedBudget = compiledIndex.budget?.by_workflow?.[workflowId];
+  if (resolution.dispatch_eligible && projection && bakedBudget && bakedBudget.dispatch_eligible === false) {
+    const blockedResolution = {
+      outcome: 'blocked', dispatch_eligible: false,
+      reason_code: bakedBudget.reason_code || 'required_context_overflow',
+      diagnostic: 'Baked budget declared this workflow non-dispatchable at publish time.',
+    };
+    return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
+  }
   let save = null;
   if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
   if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
@@ -122,6 +135,13 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
       ...(compiledIndex.tuple_version_id ? { tuple_version_id: compiledIndex.tuple_version_id, registry_version_id: compiledIndex.registry_version_id } : {}),
       workflow_id: projection.workflow_id, transition_id: projection.transition_id,
       reason_code: projection.reason_code,
+      // Phase 19 D-01/D-02: read-only projection of baked siblings. The three keys ride on
+      // the additive loadCompiledIndex return (Plan 02). ?? null defends a legacy tuple whose
+      // by_workflow map is missing this workflow_id. Gated by `projection ?` so blocked routes
+      // do NOT read siblings (Pitfall #5, REL-01 p95 <25ms preserved).
+      closure: compiledIndex.closure?.by_workflow?.[workflowId] ?? null,
+      budget: compiledIndex.budget?.by_workflow?.[workflowId] ?? null,
+      summaryIndex: compiledIndex.summaryIndex?.by_workflow?.[workflowId] ?? null,
     } } : {}),
     ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}),
   };
