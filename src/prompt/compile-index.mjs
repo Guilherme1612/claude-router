@@ -2,11 +2,18 @@ import { createHash } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 
-export const COMPILED_INDEX_SCHEMA_VERSION = 1;
+// CONTEXT_CONTRACT_VERSION inlined to avoid pulling src/orchestrator/* into the
+// hook import graph (Phase 19 D-08). Keep in sync with src/orchestrator/budget.mjs:4.
+const CONTEXT_CONTRACT_VERSION = 'workflow-context-contract-v1';
+
+export const COMPILED_INDEX_SCHEMA_VERSION = 2;
 export const COMPILED_INDEX_COMPATIBILITY = Object.freeze({
   router_contract: 'prompt-route-v1',
   policy_version: 'workflow-transitions-v1',
   capsule_schema_version: 1,
+  // Phase 19 D-04: schema 1->2 invalidates prior tuples; watcher re-publishes.
+  orchestrator_contract_version: 'workflow-first-v1',
+  context_contract_version: CONTEXT_CONTRACT_VERSION,
 });
 export const COMPILED_INDEX_LIMITS = Object.freeze({
   pointer_bytes: 4 * 1024,
@@ -15,6 +22,11 @@ export const COMPILED_INDEX_LIMITS = Object.freeze({
   payload_bytes: 64 * 1024,
   known_good_versions: 8,
   maximum_age_ms: 30 * 24 * 60 * 60 * 1000,
+  // Phase 19 Pitfall #5: independent sibling bounds so blocked routes don't
+  // pay the closure/budget/summary-index read cost.
+  closure_bytes: 64 * 1024,
+  budget_bytes: 32 * 1024,
+  summary_index_bytes: 16 * 1024,
 });
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
@@ -72,7 +84,9 @@ function validRoutes(routes) {
 function compatible(value) {
   return value?.router_contract === COMPILED_INDEX_COMPATIBILITY.router_contract
     && value?.policy_version === COMPILED_INDEX_COMPATIBILITY.policy_version
-    && value?.capsule_schema_version === COMPILED_INDEX_COMPATIBILITY.capsule_schema_version;
+    && value?.capsule_schema_version === COMPILED_INDEX_COMPATIBILITY.capsule_schema_version
+    && value?.orchestrator_contract_version === COMPILED_INDEX_COMPATIBILITY.orchestrator_contract_version
+    && value?.context_contract_version === COMPILED_INDEX_COMPATIBILITY.context_contract_version;
 }
 
 function verifyVersion({ root, versionId, expectedHash, now, io }) {
@@ -116,27 +130,41 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
   const compiledRoot = resolve(root, 'compiled-index');
   const tupleRoot = resolve(root, 'release-tuples');
   const verifyTuple = pointer => {
-    if (pointer?.schema_version !== 1 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
+    if (pointer?.schema_version !== 2 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
     const versionRoot = resolve(tupleRoot, 'versions', pointer.tuple_version_id);
     const manifestRead = boundedJson(resolve(versionRoot, 'manifest.json'), COMPILED_INDEX_LIMITS.metadata_bytes, io);
     const registryRead = boundedJson(resolve(versionRoot, 'registry.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
     const indexRead = boundedJson(resolve(versionRoot, 'index.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
+    const closureRead = boundedJson(resolve(versionRoot, 'closure.json'), COMPILED_INDEX_LIMITS.closure_bytes, io);
+    const budgetRead = boundedJson(resolve(versionRoot, 'budget.json'), COMPILED_INDEX_LIMITS.budget_bytes, io);
+    const summaryIndexRead = boundedJson(resolve(versionRoot, 'summary-index.json'), COMPILED_INDEX_LIMITS.summary_index_bytes, io);
     const manifest = manifestRead?.value;
+    // T-19-01: each sibling must be present and hash-verified against the manifest
+    // payload_sha256. A missing or mismatched sibling causes the tuple to be
+    // rejected and loadCompiledIndex returns blocked() (Phase 17 D-02 fail-closed).
     if (!manifest || manifest.state !== 'verified' || manifest.tuple_version_id !== pointer.tuple_version_id
       || manifest.verification?.disposition !== 'passing' || manifest.verification?.complete !== true
       || !compatible(manifest.compatibility) || manifest.created_at > now || manifest.expires_at < now
       || sha256(registryRead?.bytes || '') !== manifest.registry?.payload_sha256
       || sha256(indexRead?.bytes || '') !== manifest.compiled?.payload_sha256
       || indexRead?.value?.version_id !== manifest.compiled?.version_id
-      || !validRoutes(indexRead?.value?.routes)) return null;
-    return { manifest, registry: registryRead.value, index: indexRead.value };
+      || !validRoutes(indexRead?.value?.routes)
+      || !manifest.closure?.payload_sha256 || sha256(closureRead?.bytes || '') !== manifest.closure.payload_sha256
+      || !manifest.budget?.payload_sha256 || sha256(budgetRead?.bytes || '') !== manifest.budget.payload_sha256
+      || !manifest.summary_index?.payload_sha256 || sha256(summaryIndexRead?.bytes || '') !== manifest.summary_index.payload_sha256) return null;
+    return {
+      manifest, registry: registryRead.value, index: indexRead.value,
+      closure: closureRead.value, budget: budgetRead.value, summaryIndex: summaryIndexRead.value,
+    };
   };
   const tupleActivePath = resolve(tupleRoot, 'active.json');
   if (releaseTuplePointer) {
     const verified = verifyTuple(releaseTuplePointer);
     if (verified) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_recovery_candidate',
       tuple_version_id: releaseTuplePointer.tuple_version_id, version_id: verified.manifest.compiled.version_id,
-      registry_version_id: verified.manifest.registry.version_id, source: 'recovery_candidate', registry: verified.registry, index: verified.index };
+      registry_version_id: verified.manifest.registry.version_id, source: 'recovery_candidate',
+      registry: verified.registry, index: verified.index,
+      closure: verified.closure, budget: verified.budget, summaryIndex: verified.summaryIndex };
     return blocked();
   }
   const tupleActive = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
@@ -144,12 +172,16 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
     const verified = verifyTuple(tupleActive);
     if (verified) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_active',
       tuple_version_id: tupleActive.tuple_version_id, version_id: verified.manifest.compiled.version_id,
-      registry_version_id: verified.manifest.registry.version_id, source: 'active', registry: verified.registry, index: verified.index };
+      registry_version_id: verified.manifest.registry.version_id, source: 'active',
+      registry: verified.registry, index: verified.index,
+      closure: verified.closure, budget: verified.budget, summaryIndex: verified.summaryIndex };
     const knownGood = boundedJson(resolve(tupleRoot, 'known-good.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
     const fallback = verifyTuple(knownGood);
     if (fallback) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_known_good',
       tuple_version_id: knownGood.tuple_version_id, version_id: fallback.manifest.compiled.version_id,
-      registry_version_id: fallback.manifest.registry.version_id, source: 'known_good', registry: fallback.registry, index: fallback.index };
+      registry_version_id: fallback.manifest.registry.version_id, source: 'known_good',
+      registry: fallback.registry, index: fallback.index,
+      closure: fallback.closure, budget: fallback.budget, summaryIndex: fallback.summaryIndex };
     return blocked();
   }
   const active = boundedJson(resolve(compiledRoot, 'active.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
