@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "_meta": {
+    "purpose": "Publish-time orchestrator workflow declarations (Phase 19 D-01). Consumed by publishCompiledIndex via relative path. Keep in sync with the v1.2 workflow set.",
+    "schema_version": 1
+  },
+  "declarations": [
+    {
+      "workflow_id": "brainstorming",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "writing-plans",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "gsd-discuss-phase",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "gsd-plan-phase",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "gsd-execute-phase",
+      "owners": ["router/executor", "router/execute-command"],
+      "requirements": [],
+      "compatible": ["router/executor", "router/execute-command"]
+    },
+    {
+      "workflow_id": "gsd-verify-work",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "gsd-resume-work",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    },
+    {
+      "workflow_id": "gsd-complete-milestone",
+      "owners": [],
+      "requirements": [],
+      "compatible": []
+    }
+  ]
+}

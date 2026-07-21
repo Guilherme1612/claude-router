@@ -1,7 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { stableStringify } from '../registry/schema.mjs';
+import { selectCapabilities } from '../orchestrator/select.mjs';
+import { selectWorkflow, nextValidTransitions, WORKFLOW_TRANSITIONS } from '../orchestrator/transitions.mjs';
+import { planContextLoad, DEFAULT_CONTEXT_CONTRACT } from '../orchestrator/budget.mjs';
 import { COMPILED_INDEX_COMPATIBILITY, COMPILED_INDEX_SCHEMA_VERSION, loadCompiledIndex } from './compile-index.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -55,17 +59,112 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
   const root = resolve(ownedRoot);
   if (!registry || !Array.isArray(registry.records) || !/^v1-[a-f0-9]{16}$/.test(registryVersionId || '')) throw new TypeError('verified registry version required');
   const records = new Map(registry.records.flatMap(record => [record.id, record.canonical_identity, record.name].filter(Boolean).map(key => [key, record])));
+  // Phase 19 D-01: workflow declarations source — static file read via relative
+  // path from publishCompiledIndex. Resolves in both source and deployed modules/
+  // layouts. Fail-closed if the file is missing (not silent).
+  let workflowDeclarations;
+  try {
+    const declarationsPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'orchestrator', 'workflow-declarations.json');
+    workflowDeclarations = JSON.parse(readFileSync(declarationsPath, 'utf8')).declarations;
+  } catch { throw new TypeError('workflow declarations source missing'); }
   const routes = {};
   for (const subject of mapping?.subjects || []) {
     const record = records.get(subject.target_id);
     if (subject.disposition === 'mapped' && record) routes[subject.subject_id] = routeFor(subject, record);
   }
-  if (!Object.keys(routes).length) {
-    for (const record of registry.records.filter(value => value.dispatchable && value.lifecycle === 'ready')) {
-      routes[record.name] = routeFor({ subject_id: record.name, reason_code: 'canonical_record' }, record);
-    }
-  }
+  // Phase 19 D-06: blanket workflow-less fallback deleted. Empty mapping →
+  // throw at the next guard → publish fails closed → no route (ORC-01 closure).
   if (!Object.keys(routes).length) throw new TypeError('compiled index requires at least one dispatch route');
+  // Phase 19 D-01: orchestrator wiring. For each mapped workflow_id, run
+  // nextValidTransitions → selectWorkflow → selectCapabilities → planContextLoad
+  // and bake the per-workflow entry into the three by_workflow maps. Blocked
+  // results bake dispatch_eligible:false with the reason_code (D-03) — never
+  // throw, so a single blocked workflow does not abort the whole publish.
+  const closureByWorkflow = {};
+  const budgetByWorkflow = {};
+  const summaryIndexByWorkflow = {};
+  for (const workflowId of Object.keys(routes)) {
+    const family = workflowId.includes('-') ? workflowId.slice(0, workflowId.indexOf('-')) : workflowId;
+    const evidence = {
+      status: 'active', freshness: 'fresh',
+      position: { family, state: 'planned' },
+      gates: { plan_approved: true }, dependencies_safe: true,
+    };
+    const transitionResult = nextValidTransitions(evidence, WORKFLOW_TRANSITIONS);
+    if (transitionResult.status !== 'candidates_available') {
+      closureByWorkflow[workflowId] = {
+        selected_transition: null, candidates: [], closure: [],
+        invokable_capabilities: [], required_models: [], required_permissions: [],
+        lifecycle_bindings: [], dispatch_eligible: false, reason_code: transitionResult.reason_code,
+      };
+      budgetByWorkflow[workflowId] = { report: null, dispatch_eligible: false, reason_code: transitionResult.reason_code };
+      summaryIndexByWorkflow[workflowId] = null;
+      continue;
+    }
+    const selected = selectWorkflow(transitionResult, undefined);
+    if (selected.status !== 'selected') {
+      closureByWorkflow[workflowId] = {
+        selected_transition: null, candidates: transitionResult.candidates, closure: [],
+        invokable_capabilities: [], required_models: [], required_permissions: [],
+        lifecycle_bindings: [], dispatch_eligible: false, reason_code: selected.reason_code,
+      };
+      budgetByWorkflow[workflowId] = { report: null, dispatch_eligible: false, reason_code: selected.reason_code };
+      summaryIndexByWorkflow[workflowId] = null;
+      continue;
+    }
+    const closureResult = selectCapabilities({
+      workflow: selected, workflowDeclarations, registry,
+      requestedScope: undefined, explicitCapability: undefined,
+    });
+    if (closureResult.status !== 'resolved') {
+      closureByWorkflow[workflowId] = {
+        selected_transition: selected.selection, candidates: transitionResult.candidates,
+        closure: [], invokable_capabilities: [], required_models: [], required_permissions: [],
+        lifecycle_bindings: [], dispatch_eligible: false, reason_code: closureResult.reason_code,
+      };
+      budgetByWorkflow[workflowId] = { report: null, dispatch_eligible: false, reason_code: closureResult.reason_code };
+      summaryIndexByWorkflow[workflowId] = null;
+      continue;
+    }
+    // Phase 19 D-03: planContextLoad with sources:[] + DEFAULT_CONTEXT_CONTRACT.
+    // Per-prompt source descriptors are v2; in v1, required source classes are
+    // missing, so budget blocks with 'required_source_class_missing' — the
+    // dispatch_eligible flag carries that result (TOK-02 closure).
+    // [Rule 1 - Bug] Plan step 4e said `closure: closureResult.closure` (the
+    // facts array), but planContextLoad's safeClosure expects the full closure
+    // result object (with .status/.dispatch_eligible/.workflow_id/.transition_id/
+    // .closure/.lifecycle_bindings). Passing the array made safeClosure return
+    // false and blocked every workflow with 'dependency_closure_not_dispatch_-
+    // eligible'. Fixed to pass `closureResult` (the object).
+    const budgetResult = planContextLoad({
+      workflow: selected, closure: closureResult,
+      contract: DEFAULT_CONTEXT_CONTRACT, sources: [], summaryIndex: null, baseline: undefined,
+    });
+    const dispatchEligible = closureResult.dispatch_eligible && budgetResult.dispatch_eligible === true;
+    const closureReasonCode = closureResult.dispatch_eligible
+      ? (budgetResult.dispatch_eligible === true ? 'resolved' : budgetResult.reason_code)
+      : closureResult.reason_code;
+    closureByWorkflow[workflowId] = {
+      selected_transition: selected.selection,
+      candidates: transitionResult.candidates,
+      closure: closureResult.closure,
+      invokable_capabilities: closureResult.invokable_capabilities,
+      required_models: closureResult.required_models,
+      required_permissions: closureResult.required_permissions,
+      lifecycle_bindings: closureResult.lifecycle_bindings,
+      dispatch_eligible: dispatchEligible,
+      reason_code: closureReasonCode,
+    };
+    budgetByWorkflow[workflowId] = {
+      report: budgetResult.report ?? null,
+      dispatch_eligible: budgetResult.dispatch_eligible === true,
+      reason_code: budgetResult.reason_code,
+    };
+    // Phase 19 D-05: summary-index ref shape present, value null until summaries
+    // are produced (v1). The sibling file is keyed by workflow_id so the route
+    // path's `?.[workflowId]` projection works uniformly across all three siblings.
+    summaryIndexByWorkflow[workflowId] = null;
+  }
   const registryBytes = json(registry);
   const registryHash = sha256(registryBytes);
   const mappingFingerprint = mapping?.policy_fingerprint || sha256(json(mapping || {}));
@@ -82,15 +181,32 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
     mkdirSync(tupleRoot, { recursive: true });
     durableWrite(join(tupleRoot, 'registry.json'), registryBytes);
     durableWrite(join(tupleRoot, 'index.json'), compiledBytes);
+    // Phase 19 D-05: sibling tuple files — per-workflow keyed maps mirroring
+    // routes?.[workflowId]. routes[] stays the compact dispatch contract (D-05).
+    const closureBytes = json({ schema_version: 1, by_workflow: closureByWorkflow });
+    const budgetBytes = json({ schema_version: 1, by_workflow: budgetByWorkflow });
+    const summaryIndexBytes = json({ schema_version: 1, by_workflow: summaryIndexByWorkflow });
+    durableWrite(join(tupleRoot, 'closure.json'), closureBytes);
+    durableWrite(join(tupleRoot, 'budget.json'), budgetBytes);
+    durableWrite(join(tupleRoot, 'summary-index.json'), summaryIndexBytes);
+    // Phase 19 V6 / T-19-01: manifest extended with closure/budget/summary_index
+    // payload_sha256 so verifyTuple can hash-check each sibling (fail-closed on
+    // tamper). Manifest schema_version stays 1 (this is the manifest's own schema,
+    // NOT the compiled-index schema — do NOT bump it).
     const manifest = { schema_version: 1, state: 'verified', tuple_version_id: tupleVersionId,
       registry: { version_id: registryVersionId, payload_sha256: registryHash },
       compiled: { version_id: compiledVersionId, payload_sha256: compiledHash },
+      closure: { payload_sha256: sha256(closureBytes) },
+      budget: { payload_sha256: sha256(budgetBytes) },
+      summary_index: { payload_sha256: sha256(summaryIndexBytes) },
       policy_fingerprint: policyFingerprint || sha256('{}'), mapping_fingerprint: mappingFingerprint,
       compatibility: COMPILED_INDEX_COMPATIBILITY, verification: { disposition: 'passing', complete: true },
       created_at: now, expires_at: now + 30 * 24 * 60 * 60 * 1000 };
     durableWrite(join(tupleRoot, 'manifest.json'), json(manifest));
   }
-  const pointer = { schema_version: 1, tuple_version_id: tupleVersionId };
+  // Phase 19 Decision 8: pointer schema_version bumped 1→2 alongside the tuple
+  // schema bump (compile-index.mjs verifyTuple rejects schema-1 pointers).
+  const pointer = { schema_version: 2, tuple_version_id: tupleVersionId };
   if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
   if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
