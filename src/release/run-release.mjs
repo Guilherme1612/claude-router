@@ -19,6 +19,17 @@ const MODULE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ALLOWED_TOP_KEYS = ['schema_version', 'milestone', 'versions', 'requirements'];
 const ALLOWED_ROW_KEYS = ['id', 'primary', 'secondary'];
 const COMMAND = /^node --test (tests\/router\.[a-z0-9.-]+\.test\.mjs)(?: (tests\/router\.[a-z0-9.-]+\.test\.mjs))*$/;
+const TEST_FILE = /^tests\/router\.[a-z0-9.-]+\.test\.mjs$/;
+// Phase 19 D-09 (Plan 19-04 Task 3): secondary evidence schema is now per-label. The
+// phase-18-cross-cutting label keeps the executable-commands shape (D-10/D-11). The
+// phase-19-live-path label cites the extended Phase 18 E2E test files directly as
+// live-path evidence for ORC-01 + TOK-02, with documentation fields
+// (phase/tests/scope/closure). Both shapes fail closed on malformed entries (T-19-08
+// mitigation preserved: tests must exist and be readable, scope/closure non-empty).
+const SECONDARY_LABEL_SCHEMA = Object.freeze({
+  'phase-18-cross-cutting': Object.freeze(['label', 'commands']),
+  'phase-19-live-path': Object.freeze(['label', 'phase', 'tests', 'scope', 'closure']),
+});
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -64,9 +75,24 @@ export function validateReleaseMatrix(matrix, { repoRoot = MODULE_ROOT } = {}) {
     if (row.secondary !== undefined) {
       if (!Array.isArray(row.secondary)) throw new TypeError('secondary evidence must be an array');
       for (const secondary of row.secondary) {
-        exactKeys(secondary, ['label', 'commands'], `secondary ${row.id}`);
-        if (secondary.label !== 'phase-18-cross-cutting') throw new TypeError('secondary evidence label mismatch');
-        validateCommands(secondary.commands, repoRoot);
+        const allowedKeys = SECONDARY_LABEL_SCHEMA[secondary.label];
+        if (!allowedKeys) throw new TypeError(`secondary ${row.id} has unknown label: ${secondary.label}`);
+        exactKeys(secondary, allowedKeys, `secondary ${row.id}`);
+        if (secondary.label === 'phase-18-cross-cutting') {
+          validateCommands(secondary.commands, repoRoot);
+        } else if (secondary.label === 'phase-19-live-path') {
+          // Phase 19 D-09 live-path evidence: cite concrete E2E test files. Fail closed
+          // if the phase is implausible, tests are missing/invalid, or scope/closure are
+          // empty (T-19-08 tampering mitigation).
+          if (!Number.isInteger(secondary.phase) || secondary.phase < 18) throw new TypeError(`secondary ${row.id} invalid phase`);
+          if (!Array.isArray(secondary.tests) || !secondary.tests.length) throw new TypeError(`secondary ${row.id} missing tests`);
+          for (const file of secondary.tests) {
+            if (typeof file !== 'string' || !TEST_FILE.test(file)) throw new TypeError(`secondary ${row.id} invalid test file: ${file}`);
+            accessSync(resolve(repoRoot, file), constants.R_OK);
+          }
+          if (typeof secondary.scope !== 'string' || !secondary.scope) throw new TypeError(`secondary ${row.id} missing scope`);
+          if (typeof secondary.closure !== 'string' || !secondary.closure) throw new TypeError(`secondary ${row.id} missing closure`);
+        }
       }
     }
   }

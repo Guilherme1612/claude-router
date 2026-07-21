@@ -26,7 +26,10 @@ test('D-10 release matrix has the exact 20 requirements and one inherited primar
   assert.deepEqual(matrix.requirements.map(row => row.id).sort(), [...IDS].sort());
   assert.equal(matrix.requirements.length, 20);
   assert.ok(matrix.requirements.every(row => row.primary.phase !== 18));
-  assert.ok(matrix.requirements.every(row => row.secondary?.every(entry => entry.label === 'phase-18-cross-cutting')));
+  // Phase 19 D-09 (Plan 19-04 Task 3): secondary evidence now carries either the
+  // phase-18-cross-cutting label (executable commands) or the phase-19-live-path
+  // label (live publish→route E2E evidence for ORC-01 + TOK-02).
+  assert.ok(matrix.requirements.every(row => row.secondary?.every(entry => entry.label === 'phase-18-cross-cutting' || entry.label === 'phase-19-live-path')));
   assert.equal(validateReleaseMatrix(matrix).status, 'valid');
 });
 
