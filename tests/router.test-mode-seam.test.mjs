@@ -86,6 +86,21 @@ test('opt-in test_mode lets the installed controller publish via the real watche
     const compiled = loadCompiledIndex({ ownedRoot });
     assert.equal(compiled.dispatch_eligible, true);
     assert.equal(compiled.tuple_version_id, published);
+    // Phase 19 D-09 (D-07 bundle presence): the four new orchestrator module files are
+    // deployed into the bundle and are byte-equal to their source (the moduleNames
+    // extension in router-lifecycle.mjs deploys each entry via the existing moduleValues
+    // loop into both runtime modules/orchestrator/ dirs). The deployed path is under the
+    // owned runtime root; the source path is under src/orchestrator/.
+    for (const name of ['orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs', 'orchestrator/workflow-declarations.json']) {
+      const deployed = join(ownedRoot, 'modules', name);
+      const source = join('src', name);
+      assert.equal(readFileSync(deployed, 'utf8'), readFileSync(source, 'utf8'), `${name} deployed in bundle and byte-equal to source`);
+    }
+    // D-09 (D-01 baked closure): loadCompiledIndex returns the closure sibling for the
+    // published tuple (the orchestrator sequence baked at publish time). In v1 the
+    // closure is blocked (declaration owners not in the test registry, sources:[] hardcoded),
+    // but the sibling IS present and readable from the tuple (the D-01 read-only projection).
+    assert.ok(compiled.closure, 'closure sibling baked by publish-time orchestrator');
     // Controller config on disk carries the opt-in flag (verification_runners is stripped
     // because functions are not JSON-serializable; the in-process launcher reattaches them).
     const config = JSON.parse(readFileSync(installed.controllerConfigPath, 'utf8'));
