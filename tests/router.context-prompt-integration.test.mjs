@@ -29,7 +29,7 @@ function saveCompiledCapsule(root, value) {
   const versionRoot = join(root, 'compiled-index', 'versions', VERSION);
   mkdirSync(versionRoot, { recursive: true });
   const index = {
-    schema_version: 1, version_id: VERSION, policy_version: 'workflow-transitions-v1',
+    schema_version: 2, version_id: VERSION, policy_version: 'workflow-transitions-v1',
     capsule_contract_version: 1,
     routes: { 'gsd-execute-phase': {
       workflow_id: 'gsd-execute-phase', transition_id: 'gsd.execute',
@@ -40,13 +40,13 @@ function saveCompiledCapsule(root, value) {
   const payloadSha = createHash('sha256').update(bytes).digest('hex');
   writeFileSync(join(versionRoot, 'index.json'), bytes);
   writeFileSync(join(versionRoot, 'metadata.json'), stableStringify({
-    schema_version: 1, state: 'verified', version_id: VERSION,
+    schema_version: 2, state: 'verified', version_id: VERSION,
     created_at: Date.now() - 1_000, expires_at: Date.now() + 60_000,
-    compatibility: { router_contract: 'prompt-route-v1', policy_version: 'workflow-transitions-v1', capsule_schema_version: 1 },
+    compatibility: { router_contract: 'prompt-route-v1', policy_version: 'workflow-transitions-v1', capsule_schema_version: 1, orchestrator_contract_version: 'workflow-first-v1', context_contract_version: 'workflow-context-contract-v1' },
     payload_sha256: payloadSha,
   }) + '\n');
   writeFileSync(join(root, 'compiled-index', 'active.json'), stableStringify({
-    schema_version: 1, version_id: VERSION, payload_sha256: payloadSha,
+    schema_version: 2, version_id: VERSION, payload_sha256: payloadSha,
   }) + '\n');
   return saveCapsule({ ownedRoot: root, capsule: value });
 }

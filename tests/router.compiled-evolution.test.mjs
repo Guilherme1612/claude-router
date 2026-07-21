@@ -35,7 +35,7 @@ function publishCompiledFixture(ownedRoot, fixture, now) {
   const versionRoot = join(ownedRoot, 'compiled-index', 'versions', COMPILED_VERSION);
   mkdirSync(versionRoot, { recursive: true });
   const index = {
-    schema_version: 1, version_id: COMPILED_VERSION,
+    schema_version: 2, version_id: COMPILED_VERSION,
     policy_version: 'workflow-transitions-v1', capsule_contract_version: 1,
     routes: {
       'gsd-execute-phase': { workflow_id: 'gsd-execute-phase', transition_id: 'gsd.execute', dispatch_eligible: true, reason_code: 'unique_valid_transition' },
@@ -45,12 +45,12 @@ function publishCompiledFixture(ownedRoot, fixture, now) {
   const payload_sha256 = createHash('sha256').update(bytes).digest('hex');
   writeFileSync(join(versionRoot, 'index.json'), bytes);
   writeFileSync(join(versionRoot, 'metadata.json'), `${stableStringify({
-    schema_version: 1, state: 'verified', version_id: COMPILED_VERSION,
+    schema_version: 2, state: 'verified', version_id: COMPILED_VERSION,
     created_at: now - 1_000, expires_at: now + 60_000,
-    compatibility: { router_contract: 'prompt-route-v1', policy_version: 'workflow-transitions-v1', capsule_schema_version: 1 },
+    compatibility: { router_contract: 'prompt-route-v1', policy_version: 'workflow-transitions-v1', capsule_schema_version: 1, orchestrator_contract_version: 'workflow-first-v1', context_contract_version: 'workflow-context-contract-v1' },
     payload_sha256,
   })}\n`);
-  writeFileSync(join(ownedRoot, 'compiled-index', 'active.json'), `${stableStringify({ schema_version: 1, version_id: COMPILED_VERSION, payload_sha256 })}\n`);
+  writeFileSync(join(ownedRoot, 'compiled-index', 'active.json'), `${stableStringify({ schema_version: 2, version_id: COMPILED_VERSION, payload_sha256 })}\n`);
   assert.equal(saveCapsule({ ownedRoot, capsule: calibrationCapsule(fixture) }).status, 'saved');
 }
 

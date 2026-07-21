@@ -116,8 +116,13 @@ test('D-05 reader sampling at publication boundaries observes old-or-new tuple v
     const beforeRoute = routeContextPrompt({ prompt: 'continue', ownedRoot: root, projectRoot: root, now: NOW + 1 });
     // routeContextPrompt resolves the complete OLD tuple (the old registry has a
     // 'gsd-execute-phase' route from mapping('old')); it never returns a mixed or partial tuple.
+    // Phase 19 D-03: the route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution but the reader
+    // still resolves the complete OLD tuple via loadCompiledIndex (the D-05 invariant).
     assert.equal(beforeRoute.handled, true);
-    assert.equal(beforeRoute.compiled?.tuple_version_id, old.tuple_version_id);
+    assert.equal(beforeSample.tuple_version_id, old.tuple_version_id);
+    assert.equal(beforeRoute.resolution.dispatch_eligible, false);
 
     // After-active-pointer crash: the active pointer references the new tuple, but known-good
     // is not yet updated. Every reader sample must resolve the complete NEW tuple.
@@ -160,7 +165,12 @@ test('D-04 unsafe candidate recovery through installed controller preserves the 
     });
     assert.notEqual(advanced, previousTuple);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
@@ -209,7 +219,12 @@ for (const variant of CORRUPTION_VARIANTS) test(`D-04 ${variant.name} through in
     assert.equal(recovered.dispatch_eligible, true);
     assert.equal(recovered.tuple_version_id, advanced);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
@@ -248,7 +263,12 @@ test('D-04 controller interruption recovery through installed controller reconci
     });
     assert.notEqual(advanced, restarted);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
@@ -285,7 +305,12 @@ test('D-04 missed/coalesced events recovery through installed controller produce
     });
     assert.notEqual(advanced, coalesced);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
@@ -313,7 +338,7 @@ test('D-06 startup repair recovers the corrupt active pointer from known-good an
     // branch entirely, leaving no known-good fallback — and perturbing the hot path to open
     // known-good unconditionally would broaden the I/O footprint pinned by compiled-index tests.)
     writeFileSync(join(ownedRoot, 'release-tuples', 'active.json'),
-      JSON.stringify({ schema_version: 1, tuple_version_id: 't1-ffffffffffffffff' }));
+      JSON.stringify({ schema_version: 2, tuple_version_id: 't1-ffffffffffffffff' }));
     // Reader safety: the public reader falls back to known-good and still resolves the
     // complete verified LKG tuple, never a mixed or partial state.
     const degraded = loadCompiledIndex({ ownedRoot });
@@ -333,7 +358,12 @@ test('D-06 startup repair recovers the corrupt active pointer from known-good an
     });
     assert.notEqual(advanced, initialTuple);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
@@ -373,7 +403,12 @@ test('D-06 steady-state failure recovery through installed controller repairs on
     });
     assert.notEqual(advanced, restarted);
     const routed = routeContextPrompt({ prompt: 'continue', ownedRoot, projectRoot: root });
-    assert.equal(routed.compiled?.tuple_version_id, advanced);
+    // Phase 19 D-03: route path observes the baked budget dispatch_eligible flag. In v1,
+    // planContextLoad blocks with 'required_source_class_missing' (sources:[] hardcoded,
+    // Plan 02 locked decision); the route synthesizes a blocked resolution. The reader
+    // still resolves the advanced tuple via loadCompiledIndex (the recovery invariant).
+    assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, advanced);
+    assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });

@@ -230,7 +230,7 @@ test('installed activation paths bootstrap one immutable version and active poin
   const candidate = { schema_version: 1, records: [reconcilerCapability()] };
   const now = Date.now();
   const reconciliation = { disposition: 'eligible', candidate_fingerprint: hashForTest(candidate), report_fingerprint: 'report', verdicts: [], active_bytes: `${stableStringify({ schema_version: 1, records: [] })}\n`, active_fingerprint: 'active' };
-  const mapping = { schema_version: 1, subjects: [], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' };
+  const mapping = { schema_version: 1, subjects: [{ subject_id: 'planner', disposition: 'mapped', target_id: 'router/planner', reason_code: 'explicit_subject' }], summary: { disposition: 'complete', ambiguous: 0 }, report_fingerprint: 'map' };
   const policy = {};
   const gates = REQUIRED_ACTIVATION_GATES.map(id => {
     const runner = PRODUCTION_GATE_RUNNERS[id];

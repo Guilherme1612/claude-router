@@ -13,17 +13,21 @@ import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
 
 const NOW = 1_800_000_000_000;
 const VERSION = 'v1-0123456789abcdef';
+// Phase 19 D-04: CONTRACT extended with the two new compatibility members so
+// compatible() passes against the post-Plan-02 compile-index schema 2 gate.
 const CONTRACT = Object.freeze({
   router_contract: 'prompt-route-v1',
   policy_version: 'workflow-transitions-v1',
   capsule_schema_version: 1,
+  orchestrator_contract_version: 'workflow-first-v1',
+  context_contract_version: 'workflow-context-contract-v1',
 });
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 
 function projection(versionId = VERSION) {
   return {
-    schema_version: 1,
+    schema_version: 2,
     version_id: versionId,
     policy_version: CONTRACT.policy_version,
     capsule_contract_version: CONTRACT.capsule_schema_version,
@@ -46,7 +50,7 @@ function writeVersion(root, {
   mkdirSync(dir, { recursive: true });
   const bytes = stableStringify(index) + '\n';
   const metadata = {
-    schema_version: 1, state, version_id: versionId, created_at: createdAt,
+    schema_version: 2, state, version_id: versionId, created_at: createdAt,
     expires_at: expiresAt, compatibility, payload_sha256: sha256(bytes),
   };
   writeFileSync(join(dir, 'index.json'), bytes);
@@ -57,14 +61,14 @@ function writeVersion(root, {
 function writePointer(root, versionId = VERSION, payloadSha256) {
   mkdirSync(join(root, 'compiled-index'), { recursive: true });
   writeFileSync(join(root, 'compiled-index', 'active.json'), stableStringify({
-    schema_version: 1, version_id: versionId, payload_sha256: payloadSha256,
+    schema_version: 2, version_id: versionId, payload_sha256: payloadSha256,
   }) + '\n');
 }
 
 function writeKnownGood(root, versions) {
   mkdirSync(join(root, 'compiled-index'), { recursive: true });
   writeFileSync(join(root, 'compiled-index', 'known-good.json'), stableStringify({
-    schema_version: 1, versions,
+    schema_version: 2, versions,
   }) + '\n');
 }
 
@@ -215,6 +219,10 @@ test('live contextual routing consumes the verified projection and selected fres
     assert.deepEqual(result.compiled, {
       version_id: VERSION, source: 'active', workflow_id: 'gsd-execute-phase',
       transition_id: 'gsd.execute', reason_code: 'unique_valid_transition',
+      // Phase 19 D-01/D-02: route path now projects the baked siblings. The legacy
+      // compiled-index path (used by this fixture) has no siblings, so the three
+      // keys fall back to null (defensive ?? null defaults in prompt-route.mjs).
+      closure: null, budget: null, summaryIndex: null,
     });
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
