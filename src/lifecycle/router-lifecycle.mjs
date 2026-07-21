@@ -314,6 +314,8 @@ export async function installRouter(options) {
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
+    'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
+    'orchestrator/workflow-declarations.json',
   ];
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])
