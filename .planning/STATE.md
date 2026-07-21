@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
-current_phase: 18
-status: completed
-stopped_at: context exhaustion at 81% (2026-07-17)
-last_updated: "2026-07-17T19:21:22.690Z"
-last_activity: 2026-07-17
-last_activity_desc: Phase 18 complete
+current_phase: 19
+current_phase_name: close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
+status: executing
+stopped_at: Phase 20 context gathered (20-02 replan pending)
+last_updated: "2026-07-21T22:21:41.738Z"
+last_activity: 2026-07-21
+last_activity_desc: Phase 19 execution resumed (wave continue)
 progress:
   total_phases: 10
   completed_phases: 7
-  total_plans: 41
-  completed_plans: 37
-current_phase_name: autonomous-lifecycle-and-release-gates
+  total_plans: 45
+  completed_plans: 38
 ---
 
 # Project State
@@ -23,16 +23,16 @@ current_phase_name: autonomous-lifecycle-and-release-gates
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** Phase 18 — autonomous-lifecycle-and-release-gates
+**Current focus:** Phase 19 — close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
 
 ## Current Position
 
-Phase: 18
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-07-17 — Phase 18 complete
+Phase: 19 (close-gap-tok-02-orc-01-wire-orchestrator-select-transitions) — EXECUTING
+Plan: 2 of 4
+Status: Ready to execute
+Last activity: 2026-07-21 — Phase 19 execution resumed (wave continue)
 
-Progress: [██████████] 97%
+Progress: [████████░░] 84%
 
 ## Performance Metrics
 
@@ -87,6 +87,7 @@ Progress: [██████████] 97%
 |------|----------|-------|-------|
 | Phase 18 P04 | ~90m | 3 tasks | 7 files |
 | Phase 18 P05 | 120m | 2 tasks | 10 files |
+| Phase 19 P01 | 2min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -144,6 +145,13 @@ Decisions are logged in PROJECT.md and the approved design.
 - [Phase ?]: Opt-in test_mode/verification_runners seam is default-off; production hot path unchanged when seam not engaged
 - [Phase ?]: In-process controller launcher reattaches function-valued verification_runners from on-disk config (functions cannot cross process boundaries via JSON)
 - [Phase ?]: D-06 startup repair uses parseable-but-unverifiable active.json pointer so the release-tuples branch falls back to known-good without broadening the hot-path I/O footprint
+- [Phase ?]: [Phase 19 P01]: workflowDeclarations source = new static file src/orchestrator/workflow-declarations.json read via relative path from publishCompiledIndex (no new param, watcher call site unchanged) [ASSUMED]
+- [Phase ?]: [Phase 19 P01]: Per-workflow synthetic evidence shape {status:active,freshness:fresh,position:{family,state:planned},gates:{plan_approved:true},dependencies_safe:true} copied verbatim from tests/router.workflow-orchestrator.test.mjs:12-21 [ASSUMED]
+- [Phase ?]: [Phase 19 P01]: Bake BOTH nextValidTransitions candidate set AND selectWorkflow selected transition per family; route path filters candidates by live capsule position.state via pure read [ASSUMED]
+- [Phase ?]: [Phase 19 P01]: Sibling tuple shape = {schema_version:1, by_workflow:{<workflow_id>:{...}}} per-workflow keyed maps mirroring routes?.[workflowId] projection surface
+- [Phase ?]: [Phase 19 P01]: Manifest extended with closure/budget/summary_index payload_sha256 (V6 integrity gate); verifyTuple hash-checks siblings to close T-19-01 tampering threat
+- [Phase ?]: [Phase 19 P01]: COMPILED_INDEX_COMPATIBILITY extended with orchestrator_contract_version + context_contract_version; schema 1->2 invalidates prior tuples (watcher re-publishes via recovery)
+- [Phase ?]: [Phase 19 P01]: Per-prompt budget estimation (estimateRoutingTokens on hot path) DEFERRED to v2 per D-03; dispatch_eligible flag baked at publish from planContextLoad result
 
 ### Pending Todos
 
@@ -167,6 +175,6 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-17T19:21:22.682Z
-Stopped at: context exhaustion at 81% (2026-07-17)
-Resume file: .planning/phases/19-close-gap-tok-02-orc-01-wire-orchestrator-select-transitions/19-CONTEXT.md
+Last session: 2026-07-21T22:21:41.730Z
+Stopped at: Phase 20 context gathered (20-02 replan pending)
+Resume file: .planning/phases/20-close-gap-evo-05-add-production-trigger-for-canary-controlle/20-CONTEXT.md
