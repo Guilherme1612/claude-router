@@ -301,9 +301,16 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
   });
   let baseline = acquire(acquisitionOptions);
-  let recovered = false;
 
   const reconcile = async ({ diff }) => {
+    // CR-01: reset `recovered` per reconcile call so the recovery block (and
+    // thus the canary path with its 6 REQUIRED_GATES + evidence sufficiency
+    // gate) runs on EVERY eligible reconcile, not just the first. Previously
+    // declared at factory scope, the flag persisted across calls: after the
+    // first successful recovery set recovered=true, every subsequent
+    // reconcile skipped recovery, knownGood stayed null, and the bootstrap
+    // path bypassed applyCanaryDecision.
+    let recovered = false;
     const next = refresh(baseline, diff, acquisitionOptions);
     const built = assemble(next);
     const active = await readActive();
@@ -334,7 +341,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
     if (config.activation_root) {
       let recoveryReady = recovered || active.authority_status === 'empty';
-      let knownGood = active.authority_status === 'empty' ? null : null;
+      let knownGood = null;
       if (!recovered && active.authority_status !== 'empty') {
         const recoveryResult = await recovery({ ownedRoot: config.activation_root, test_mode: config.test_mode === true });
         if (['healthy', 'recovered'].includes(recoveryResult.recovery_status)) {
