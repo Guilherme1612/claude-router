@@ -336,6 +336,20 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
       if (!candidateFile || !Array.isArray(candidateFile.records)) {
         return { result: canonical('canary promote', false, 'canary_no_candidate', { candidate_staged: !!candidateFile, has_records: !!(candidateFile?.records), next_action: 'wait_for_watcher_eligible_reconcile' }), exitCode: EXIT.invalid };
       }
+      if (!knownGood) {
+        // Mirror the watcher's bootstrap gate (watcher.mjs: if knownGood === null,
+        // take the bootstrap path, bypassing applyCanaryDecision). Promoting a
+        // candidate with no known-good version means there is no rollback target
+        // if the activation breaks something — refuse rather than activate blind.
+        return {
+          result: canonical('canary promote', false, 'no_known_good_version', {
+            known_good_version: null,
+            published_version: canaryActive?.version_id ?? null,
+            next_action: 'run_registry_recovery_or_bootstrap',
+          }),
+          exitCode: EXIT.invalid,
+        };
+      }
       const registry = {
         schema_version: candidateFile.schema_version || 1,
         records: candidateFile.records,
