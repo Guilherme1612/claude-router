@@ -10,6 +10,7 @@ const sourceRoot = resolve(dirname(fileURLToPath(lifecycleUrl)), '..');
 
 const EXPECTED_EVOLUTION_MODULES = [
   'evolution/canary-controller.mjs',
+  'evolution/candidate-calibration-route.mjs',
   'evolution/evidence.mjs',
   'evolution/perf-measure.mjs',
   'evolution/telemetry-bridge.mjs',
