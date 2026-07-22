@@ -12,7 +12,12 @@ const CONFIDENCE_BANDS = new Set(['high', 'medium', 'low', 'trivial', 'user_expl
 const FIXTURE_CLASSES = new Set(['minimal-prompt', 'explicit-override', 'stale-context', 'ambiguity', 'terminal-state', 'dependency', 'context-budget']);
 const VERDICTS = new Set(['success', 'regression']);
 const PRIVACY_GUARDS = new Set(['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected']);
-const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+// D-05/D-06: path-safe token — '/' is excluded so `project_id` (and every other
+// bounded token consumed by `pathFor`) cannot escape the evidence root via
+// `path.join` normalizing '..' segments. All consumers are flat identifiers
+// (route_id, reason_code, candidate_version, policy_version, guard_codes,
+// project_id) — none legitimately contain '/'.
+const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 export const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
 export const MAX_RETENTION_MS = 7 * HALF_LIFE_MS;
