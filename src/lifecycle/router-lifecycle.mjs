@@ -316,6 +316,12 @@ export async function installRouter(options) {
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
     'orchestrator/workflow-declarations.json',
+    // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)
+    // and CLI (Wave 3) canary triggers can import canary-controller / evidence /
+    // perf-measure / telemetry-bridge at runtime. Closes audit line 165
+    // ("Orphaned modules (test-only, not deployed)").
+    'evolution/canary-controller.mjs', 'evolution/evidence.mjs',
+    'evolution/perf-measure.mjs', 'evolution/telemetry-bridge.mjs',
   ];
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])
