@@ -430,6 +430,18 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
       if (!options.execute) {
         return { result: canonical('canary promote', true, 'canary_promote_preview_ready', detail, ['execution_requires_exact_candidate_confirmation']), exitCode: 0 };
       }
+      // CR-02a (gap-closure 20-05): evidence-sufficiency gate BEFORE the confirmation
+      // check and BEFORE applyDecision. Mirrors the watcher's Pitfall 5 behavior
+      // (src/registry/watcher.mjs:394-395): insufficient evidence must PRESERVE, not
+      // roll back. Without this gate, evaluateCandidate returns promotable:false
+      // (canary-controller.mjs:112) and applyCanaryDecision's rollback branch fires
+      // (canary-controller.mjs:176-193) because published_version is non-null — an
+      // operator asking to PROMOTE gets a surprise ROLLBACK to known_good_version.
+      // The gate short-circuits with reason_code='insufficient_evidence_samples'
+      // and does NOT call applyDecision, preserving the safety contract.
+      if (window.sufficient !== true) {
+        return { result: canonical('canary promote', false, 'insufficient_evidence_samples', detail), exitCode: EXIT.invalid };
+      }
       const confirmation = options.confirm ?? String(stdin).replace(/[\r\n]+$/, '');
       if (confirmation !== (candidate?.id ?? '')) {
         return { result: canonical('canary promote', false, 'confirmation_mismatch', detail), exitCode: EXIT.usage };
@@ -484,6 +496,13 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
         ownedRoot: root,
         known_good_version: knownGood,
         published_version: canaryActive?.version_id ?? null,
+        // CR-02b (gap-closure 20-05): pass rollback_reason='canary_rollback' so
+        // applyCanaryDecision (canary-controller.mjs:155) records `reason: 'canary_rollback'`
+        // in the audit trail (line 188: `reason: rollback_reason || 'rollback'`). Without
+        // this param the audit trail records the generic 'rollback', making canary rollback
+        // indistinguishable from registry rollback (20-03 truth 4). The activation.reason
+        // above is a separate field (the activation reason, not the rollback audit reason).
+        rollback_reason: 'canary_rollback',
       });
       const ok = decision.status === 'rolled_back';
       return { result: canonical('canary rollback', ok, ok ? 'canary_rollback_complete' : (decision.reason_code || 'canary_rollback_failed'), { ...detail, decision }), exitCode: ok ? 0 : EXIT.unsafe };
