@@ -297,251 +297,262 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
     if (!['status', 'promote', 'rollback'].includes(subcommand)) {
       return { result: canonical('canary', false, 'invalid_subcommand', { subcommand: subcommand ?? null, usage: usage().trim() }), exitCode: EXIT.usage };
     }
-    const recoverActive = dependencies.recoverActiveVersion || recoverActiveVersion;
-    const recovered = recoverActive({ ownedRoot: root });
-    const knownGood = (recovered.recovery_status === 'healthy' || recovered.recovery_status === 'recovered')
-      ? recovered.version_id : null;
-    const canaryActive = pointer(root);
-
-    if (subcommand === 'status') {
-      const createStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
-      const store = createStore({ root: join(root, 'evidence') });
-      const window = store.window({ project_id: 'global' });
-      return {
-        result: canonical('canary status', true, 'canary_status_ready', {
-          active_version: canaryActive?.version_id ?? null,
-          known_good_version: knownGood,
-          evidence_window: {
-            sufficient: window?.sufficient ?? false,
-            sample_count: window?.sample_count ?? 0,
-            weighted_samples: window?.weighted_samples ?? 0,
-            source_evidence_fingerprint: window?.source_evidence_fingerprint ?? null,
-          },
-        }),
-        exitCode: 0,
-      };
-    }
-
-    if (subcommand === 'promote') {
-      // Load the last-built candidate + reconciliation report from disk (the
-      // watcher writes candidate/registry.json + candidate/report.json on
-      // every eligible reconcile). The candidate file may carry the full
-      // registry (records) or a summary; promote requires the full registry
-      // to rebuild the route fn via the D-04 helper.
-      const candidatePath = join(root, 'candidate', 'registry.json');
-      const reportPath = join(root, 'candidate', 'report.json');
-      let candidateFile = null, reportFile = null;
-      try { candidateFile = JSON.parse(readFileSync(candidatePath, 'utf8')); } catch { /* no candidate staged */ }
-      try { reportFile = JSON.parse(readFileSync(reportPath, 'utf8')); } catch { /* no report staged */ }
-      if (!candidateFile || !Array.isArray(candidateFile.records)) {
-        return { result: canonical('canary promote', false, 'canary_no_candidate', { candidate_staged: !!candidateFile, has_records: !!(candidateFile?.records), next_action: 'wait_for_watcher_eligible_reconcile' }), exitCode: EXIT.invalid };
-      }
-      if (!knownGood) {
-        // Mirror the watcher's bootstrap gate (watcher.mjs: if knownGood === null,
-        // take the bootstrap path, bypassing applyCanaryDecision). Promoting a
-        // candidate with no known-good version means there is no rollback target
-        // if the activation breaks something — refuse rather than activate blind.
+    try {
+      // Canary subcommand body. createPersistentEvidenceStore's mkdirSync and
+      // downstream publication helpers can throw (permission denied, read-only
+      // fs, disk full). Catch here so programmatic callers receive a structured
+      // canonical failure instead of a raw exception propagating through
+      // runRouterControl (the CLI entry point's generic catch at line ~552
+      // otherwise emits 'ROUTER CONTROL FAILED: internal_error' with exit code
+      // 5 (mutation), which is misleading for a read/setup failure).
+      const recoverActive = dependencies.recoverActiveVersion || recoverActiveVersion;
+      const recovered = recoverActive({ ownedRoot: root });
+      const knownGood = (recovered.recovery_status === 'healthy' || recovered.recovery_status === 'recovered')
+        ? recovered.version_id : null;
+      const canaryActive = pointer(root);
+  
+      if (subcommand === 'status') {
+        const createStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
+        const store = createStore({ root: join(root, 'evidence') });
+        const window = store.window({ project_id: 'global' });
         return {
-          result: canonical('canary promote', false, 'no_known_good_version', {
-            known_good_version: null,
-            published_version: canaryActive?.version_id ?? null,
-            next_action: 'run_registry_recovery_or_bootstrap',
+          result: canonical('canary status', true, 'canary_status_ready', {
+            active_version: canaryActive?.version_id ?? null,
+            known_good_version: knownGood,
+            evidence_window: {
+              sufficient: window?.sufficient ?? false,
+              sample_count: window?.sample_count ?? 0,
+              weighted_samples: window?.weighted_samples ?? 0,
+              source_evidence_fingerprint: window?.source_evidence_fingerprint ?? null,
+            },
           }),
-          exitCode: EXIT.invalid,
+          exitCode: 0,
         };
       }
-      const registry = {
-        schema_version: candidateFile.schema_version || 1,
-        records: candidateFile.records,
-        compatibility: candidateFile.compatibility || {},
-      };
-      const mapping = candidateFile.mapping || { schema_version: 1, subjects: [] };
-      // Fail-closed when the watcher's report.json is missing (partial write,
-      // corruption, manual deletion): the watcher always writes both files
-      // atomically together, so a missing report means no safety reconciliation
-      // actually occurred. Fall back to the candidate file's embedded
-      // disposition (the watcher writes `disposition` into candidate/registry.json
-      // at watcher.mjs:325-333); if even that is absent, treat as quarantined so
-      // the safety gate refuses to promote. Never silently default to 'eligible'.
-      const reconciliation = reportFile || {
-        disposition: candidateFile?.disposition === 'eligible' ? 'eligible' : 'quarantined',
-        verdicts: candidateFile?.verdicts || [],
-        candidate_fingerprint: candidateFile?.candidate_fingerprint || 'candidate-unknown',
-      };
-      if (!reportFile && !candidateFile?.disposition) {
-        return {
-          result: canonical('canary promote', false, 'missing_reconciliation_report', {
-            candidate_staged: true,
-            report_staged: false,
-            candidate_disposition: null,
-            next_action: 'wait_for_watcher_eligible_reconcile',
-          }),
-          exitCode: EXIT.invalid,
-        };
-      }
-      const policyFingerprint = reportFile?.policy_fingerprint || 'policy-unknown';
-
-      const createStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
-      const store = createStore({ root: join(root, 'evidence') });
-      const window = store.window({ project_id: 'global' });
-
-      const buildCandidateRoute = dependencies.buildCandidateCalibrationRoute || buildCandidateCalibrationRoute;
-      const buildKnownGoodRoute = dependencies.buildKnownGoodCalibrationRoute || buildKnownGoodCalibrationRoute;
-      const evaluateCorpus = dependencies.evaluateCalibrationCorpus || evaluateCalibrationCorpus;
-      const measure = dependencies.measureRoutes || measureRoutes;
-      const assess = dependencies.assessCalibration || assessCalibration;
-      const compatibleFn = dependencies.compatible || compatible;
-      const propose = dependencies.proposeCandidate || proposeCandidate;
-      const evaluate = dependencies.evaluateCandidate || evaluateCandidate;
-      const applyDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
-
-      let candidateCtx = null, knownGoodCtx = null;
-      let candidate, evaluation, demonstrated_benefit, decision_preview;
-      try {
-        const helperNow = Date.now();
-        candidateCtx = buildCandidateRoute({ registry, mapping, policyFingerprint, now: helperNow, deps: dependencies.helperDeps });
-        knownGoodCtx = knownGood ? buildKnownGoodRoute({ ownedRoot: root, now: helperNow, deps: dependencies.helperDeps }) : null;
-        const versionsBase = { policy: COMPILED_INDEX_COMPATIBILITY.policy_version, corpus: 'router-calibration-v1' };
-        const candidateEvaluation = evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: reconciliation.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
-        const knownGoodEvaluation = knownGoodCtx ? evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: knownGoodCtx.route, versions: { candidate: knownGood, compiled_index: knownGood, ...versionsBase } }) : null;
-        const candidatePerf = measure({ fixtures: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: reconciliation.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
-        const assessed = assess({ evaluation: candidateEvaluation, performance: candidatePerf });
-        const privacyPass = !(window?.observations || []).some((r) => (
-          r?.signal?.confidence_band === 'deny_filtered'
-          || (r?.signal?.guard_codes || []).some((c) => ['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected'].includes(c))
-        ));
-        const gates = {
-          safety: { pass: reconciliation.disposition === 'eligible', reason_code: reconciliation.disposition === 'eligible' ? 'safety_passed' : 'safety_uncertain' },
-          privacy: { pass: privacyPass, reason_code: 'privacy_passed' },
-          quality: candidateEvaluation.quality,
-          context_budget: candidateEvaluation.context_budget,
-          latency: assessed.latency,
-          compatibility: { pass: compatibleFn(registry.compatibility) === true, reason_code: 'compatibility_passed' },
-        };
-        const proposed = propose({
-          source_evidence_fingerprint: window.source_evidence_fingerprint,
-          policy_version: COMPILED_INDEX_COMPATIBILITY.policy_version,
-          compiled_index_version: candidateCtx.versionId || reconciliation.candidate_fingerprint,
-          evaluation_inputs: { corpus: CALIBRATION_CORPUS, gates },
-          proposal: { registry, mapping, reconciliation },
-        });
-        candidate = proposed.candidate;
-        evaluation = evaluate({ candidate, evidence_window: window, gates, known_good_version: knownGood });
-        // D-05 demonstrated_benefit derivation (SAME predicate as the watcher):
-        // strict-improve on quality OR context_budget; latency hard gate;
-        // safety_correction on parity when the report is a safety fix; neutral
-        // otherwise -> preserve (never promote on parity — Phase 17 SC #4).
-        if (!evaluation.promotable) {
-          demonstrated_benefit = null;
-        } else {
-          const strictImproveQuality = candidateEvaluation.quality.pass === true && knownGoodEvaluation?.quality.pass === false;
-          const strictImproveContext = candidateEvaluation.context_budget.pass === true && knownGoodEvaluation?.context_budget.pass === false;
-          const strictImprove = strictImproveQuality || strictImproveContext;
-          const latencyPass = assessed.latency.pass === true;
-          if (strictImprove && latencyPass) {
-            demonstrated_benefit = { status: 'demonstrated', reason_code: strictImproveQuality ? 'quality_improved' : 'context_bytes_reduced' };
-          } else if (!strictImprove && latencyPass && isSafetyFix(reconciliation)) {
-            demonstrated_benefit = { status: 'safety_correction', reason_code: 'safety_fix' };
-          } else {
-            demonstrated_benefit = { status: 'neutral', reason_code: 'no_strict_improvement' };
-          }
+  
+      if (subcommand === 'promote') {
+        // Load the last-built candidate + reconciliation report from disk (the
+        // watcher writes candidate/registry.json + candidate/report.json on
+        // every eligible reconcile). The candidate file may carry the full
+        // registry (records) or a summary; promote requires the full registry
+        // to rebuild the route fn via the D-04 helper.
+        const candidatePath = join(root, 'candidate', 'registry.json');
+        const reportPath = join(root, 'candidate', 'report.json');
+        let candidateFile = null, reportFile = null;
+        try { candidateFile = JSON.parse(readFileSync(candidatePath, 'utf8')); } catch { /* no candidate staged */ }
+        try { reportFile = JSON.parse(readFileSync(reportPath, 'utf8')); } catch { /* no report staged */ }
+        if (!candidateFile || !Array.isArray(candidateFile.records)) {
+          return { result: canonical('canary promote', false, 'canary_no_candidate', { candidate_staged: !!candidateFile, has_records: !!(candidateFile?.records), next_action: 'wait_for_watcher_eligible_reconcile' }), exitCode: EXIT.invalid };
         }
-        decision_preview = {
-          candidate_id: candidate?.id ?? null,
-          promotable: evaluation?.promotable ?? false,
-          demonstrated_benefit: demonstrated_benefit?.status ?? null,
-          evidence_sufficient: window?.sufficient ?? false,
+        if (!knownGood) {
+          // Mirror the watcher's bootstrap gate (watcher.mjs: if knownGood === null,
+          // take the bootstrap path, bypassing applyCanaryDecision). Promoting a
+          // candidate with no known-good version means there is no rollback target
+          // if the activation breaks something — refuse rather than activate blind.
+          return {
+            result: canonical('canary promote', false, 'no_known_good_version', {
+              known_good_version: null,
+              published_version: canaryActive?.version_id ?? null,
+              next_action: 'run_registry_recovery_or_bootstrap',
+            }),
+            exitCode: EXIT.invalid,
+          };
+        }
+        const registry = {
+          schema_version: candidateFile.schema_version || 1,
+          records: candidateFile.records,
+          compatibility: candidateFile.compatibility || {},
         };
-      } finally {
-        // Backstop (T-20-25): cleanup D-04 helper temp ownedRoots on every path.
-        candidateCtx?.cleanup?.();
-        knownGoodCtx?.cleanup?.();
+        const mapping = candidateFile.mapping || { schema_version: 1, subjects: [] };
+        // Fail-closed when the watcher's report.json is missing (partial write,
+        // corruption, manual deletion): the watcher always writes both files
+        // atomically together, so a missing report means no safety reconciliation
+        // actually occurred. Fall back to the candidate file's embedded
+        // disposition (the watcher writes `disposition` into candidate/registry.json
+        // at watcher.mjs:325-333); if even that is absent, treat as quarantined so
+        // the safety gate refuses to promote. Never silently default to 'eligible'.
+        const reconciliation = reportFile || {
+          disposition: candidateFile?.disposition === 'eligible' ? 'eligible' : 'quarantined',
+          verdicts: candidateFile?.verdicts || [],
+          candidate_fingerprint: candidateFile?.candidate_fingerprint || 'candidate-unknown',
+        };
+        if (!reportFile && !candidateFile?.disposition) {
+          return {
+            result: canonical('canary promote', false, 'missing_reconciliation_report', {
+              candidate_staged: true,
+              report_staged: false,
+              candidate_disposition: null,
+              next_action: 'wait_for_watcher_eligible_reconcile',
+            }),
+            exitCode: EXIT.invalid,
+          };
+        }
+        const policyFingerprint = reportFile?.policy_fingerprint || 'policy-unknown';
+  
+        const createStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
+        const store = createStore({ root: join(root, 'evidence') });
+        const window = store.window({ project_id: 'global' });
+  
+        const buildCandidateRoute = dependencies.buildCandidateCalibrationRoute || buildCandidateCalibrationRoute;
+        const buildKnownGoodRoute = dependencies.buildKnownGoodCalibrationRoute || buildKnownGoodCalibrationRoute;
+        const evaluateCorpus = dependencies.evaluateCalibrationCorpus || evaluateCalibrationCorpus;
+        const measure = dependencies.measureRoutes || measureRoutes;
+        const assess = dependencies.assessCalibration || assessCalibration;
+        const compatibleFn = dependencies.compatible || compatible;
+        const propose = dependencies.proposeCandidate || proposeCandidate;
+        const evaluate = dependencies.evaluateCandidate || evaluateCandidate;
+        const applyDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
+  
+        let candidateCtx = null, knownGoodCtx = null;
+        let candidate, evaluation, demonstrated_benefit, decision_preview;
+        try {
+          const helperNow = Date.now();
+          candidateCtx = buildCandidateRoute({ registry, mapping, policyFingerprint, now: helperNow, deps: dependencies.helperDeps });
+          knownGoodCtx = knownGood ? buildKnownGoodRoute({ ownedRoot: root, now: helperNow, deps: dependencies.helperDeps }) : null;
+          const versionsBase = { policy: COMPILED_INDEX_COMPATIBILITY.policy_version, corpus: 'router-calibration-v1' };
+          const candidateEvaluation = evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: reconciliation.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
+          const knownGoodEvaluation = knownGoodCtx ? evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: knownGoodCtx.route, versions: { candidate: knownGood, compiled_index: knownGood, ...versionsBase } }) : null;
+          const candidatePerf = measure({ fixtures: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: reconciliation.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
+          const assessed = assess({ evaluation: candidateEvaluation, performance: candidatePerf });
+          const privacyPass = !(window?.observations || []).some((r) => (
+            r?.signal?.confidence_band === 'deny_filtered'
+            || (r?.signal?.guard_codes || []).some((c) => ['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected'].includes(c))
+          ));
+          const gates = {
+            safety: { pass: reconciliation.disposition === 'eligible', reason_code: reconciliation.disposition === 'eligible' ? 'safety_passed' : 'safety_uncertain' },
+            privacy: { pass: privacyPass, reason_code: 'privacy_passed' },
+            quality: candidateEvaluation.quality,
+            context_budget: candidateEvaluation.context_budget,
+            latency: assessed.latency,
+            compatibility: { pass: compatibleFn(registry.compatibility) === true, reason_code: 'compatibility_passed' },
+          };
+          const proposed = propose({
+            source_evidence_fingerprint: window.source_evidence_fingerprint,
+            policy_version: COMPILED_INDEX_COMPATIBILITY.policy_version,
+            compiled_index_version: candidateCtx.versionId || reconciliation.candidate_fingerprint,
+            evaluation_inputs: { corpus: CALIBRATION_CORPUS, gates },
+            proposal: { registry, mapping, reconciliation },
+          });
+          candidate = proposed.candidate;
+          evaluation = evaluate({ candidate, evidence_window: window, gates, known_good_version: knownGood });
+          // D-05 demonstrated_benefit derivation (SAME predicate as the watcher):
+          // strict-improve on quality OR context_budget; latency hard gate;
+          // safety_correction on parity when the report is a safety fix; neutral
+          // otherwise -> preserve (never promote on parity — Phase 17 SC #4).
+          if (!evaluation.promotable) {
+            demonstrated_benefit = null;
+          } else {
+            const strictImproveQuality = candidateEvaluation.quality.pass === true && knownGoodEvaluation?.quality.pass === false;
+            const strictImproveContext = candidateEvaluation.context_budget.pass === true && knownGoodEvaluation?.context_budget.pass === false;
+            const strictImprove = strictImproveQuality || strictImproveContext;
+            const latencyPass = assessed.latency.pass === true;
+            if (strictImprove && latencyPass) {
+              demonstrated_benefit = { status: 'demonstrated', reason_code: strictImproveQuality ? 'quality_improved' : 'context_bytes_reduced' };
+            } else if (!strictImprove && latencyPass && isSafetyFix(reconciliation)) {
+              demonstrated_benefit = { status: 'safety_correction', reason_code: 'safety_fix' };
+            } else {
+              demonstrated_benefit = { status: 'neutral', reason_code: 'no_strict_improvement' };
+            }
+          }
+          decision_preview = {
+            candidate_id: candidate?.id ?? null,
+            promotable: evaluation?.promotable ?? false,
+            demonstrated_benefit: demonstrated_benefit?.status ?? null,
+            evidence_sufficient: window?.sufficient ?? false,
+          };
+        } finally {
+          // Backstop (T-20-25): cleanup D-04 helper temp ownedRoots on every path.
+          candidateCtx?.cleanup?.();
+          knownGoodCtx?.cleanup?.();
+        }
+  
+        const detail = {
+          candidate: { id: candidate?.id ?? null },
+          evaluation: { promotable: evaluation?.promotable ?? false, reason_code: evaluation?.reason_code ?? null },
+          decision_preview,
+        };
+        if (!options.execute) {
+          return { result: canonical('canary promote', true, 'canary_promote_preview_ready', detail, ['execution_requires_exact_candidate_confirmation']), exitCode: 0 };
+        }
+        // CR-02a (gap-closure 20-05): evidence-sufficiency gate BEFORE the confirmation
+        // check and BEFORE applyDecision. Mirrors the watcher's Pitfall 5 behavior
+        // (src/registry/watcher.mjs:394-395): insufficient evidence must PRESERVE, not
+        // roll back. Without this gate, evaluateCandidate returns promotable:false
+        // (canary-controller.mjs:112) and applyCanaryDecision's rollback branch fires
+        // (canary-controller.mjs:176-193) because published_version is non-null — an
+        // operator asking to PROMOTE gets a surprise ROLLBACK to known_good_version.
+        // The gate short-circuits with reason_code='insufficient_evidence_samples'
+        // and does NOT call applyDecision, preserving the safety contract.
+        if (window.sufficient !== true) {
+          return { result: canonical('canary promote', false, 'insufficient_evidence_samples', detail), exitCode: EXIT.invalid };
+        }
+        const confirmation = options.confirm ?? String(stdin).replace(/[\r\n]+$/, '');
+        if (confirmation !== (candidate?.id ?? '')) {
+          return { result: canonical('canary promote', false, 'confirmation_mismatch', detail), exitCode: EXIT.usage };
+        }
+        const decision = applyDecision({
+          evaluation,
+          demonstrated_benefit,
+          activation: { ownedRoot: root, candidate: registry, reconciliation, mapping, policy: {}, verification: { policy_fingerprint: policyFingerprint }, reason: 'canary_promote', test_mode: false },
+          ownedRoot: root,
+          known_good_version: knownGood,
+          published_version: canaryActive?.version_id ?? null,
+        });
+        const reasonMap = { promoted: 'canary_promote_complete', preserved: 'canary_preserved', rolled_back: 'canary_rolled_back', recovery_required: 'recovery_required', rejected: 'canary_rejected' };
+        const ok = decision.status === 'promoted';
+        return { result: canonical('canary promote', ok, reasonMap[decision.status] || decision.reason_code || 'canary_decision_failed', { ...detail, decision }), exitCode: ok ? 0 : EXIT.invalid };
       }
-
-      const detail = {
-        candidate: { id: candidate?.id ?? null },
-        evaluation: { promotable: evaluation?.promotable ?? false, reason_code: evaluation?.reason_code ?? null },
-        decision_preview,
-      };
-      if (!options.execute) {
-        return { result: canonical('canary promote', true, 'canary_promote_preview_ready', detail, ['execution_requires_exact_candidate_confirmation']), exitCode: 0 };
+  
+      if (subcommand === 'rollback') {
+        // canary rollback destination is recoverActiveVersion's known_good_version
+        // ONLY — NOT an arbitrary positional (unlike the existing rollback verb at
+        // line 263 which takes positional[1] as the destination). Any extra
+        // positional is ignored. reason='canary_rollback' (in activation) is
+        // distinct from the existing rollback verb's reason='operator_rollback'.
+        if (!knownGood) {
+          return { result: canonical('canary rollback', false, 'no_known_good_version', { known_good_version: null, published_version: canaryActive?.version_id ?? null }), exitCode: EXIT.invalid };
+        }
+        const destination = knownGood;
+        const detail = {
+          destination,
+          known_good_version: knownGood,
+          published_version: canaryActive?.version_id ?? null,
+          mutation: { type: 'canary_rollback_to_known_good', path: 'active.json', reason: 'canary_rollback' },
+        };
+        if (!options.execute) {
+          return { result: canonical('canary rollback', true, 'canary_rollback_preview_ready', detail, ['execution_requires_exact_destination_confirmation']), exitCode: 0 };
+        }
+        const confirmation = options.confirm ?? String(stdin).replace(/[\r\n]+$/, '');
+        if (confirmation !== destination) {
+          return { result: canonical('canary rollback', false, 'confirmation_mismatch', detail), exitCode: EXIT.usage };
+        }
+        // Force the applyCanaryDecision rollback branch: evaluation.promotable=false
+        // with a published_version present triggers the rollback-to-known_good
+        // path (canary-controller.mjs:175-193). Publication mutation flows through
+        // REGISTRY_PUBLICATION -> activate.mjs (previewRollback/executeRollback);
+        // router-control.mjs never writes active.json directly.
+        const evaluation = { promotable: false, candidate_id: null, reason_code: 'operator_canary_rollback', preserve_version: knownGood };
+        const applyDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
+        const decision = applyDecision({
+          evaluation,
+          demonstrated_benefit: null,
+          activation: { ownedRoot: root, reason: 'canary_rollback', candidate: null },
+          ownedRoot: root,
+          known_good_version: knownGood,
+          published_version: canaryActive?.version_id ?? null,
+          // CR-02b (gap-closure 20-05): pass rollback_reason='canary_rollback' so
+          // applyCanaryDecision (canary-controller.mjs:155) records `reason: 'canary_rollback'`
+          // in the audit trail (line 188: `reason: rollback_reason || 'rollback'`). Without
+          // this param the audit trail records the generic 'rollback', making canary rollback
+          // indistinguishable from registry rollback (20-03 truth 4). The activation.reason
+          // above is a separate field (the activation reason, not the rollback audit reason).
+          rollback_reason: 'canary_rollback',
+        });
+        const ok = decision.status === 'rolled_back';
+        return { result: canonical('canary rollback', ok, ok ? 'canary_rollback_complete' : (decision.reason_code || 'canary_rollback_failed'), { ...detail, decision }), exitCode: ok ? 0 : EXIT.unsafe };
       }
-      // CR-02a (gap-closure 20-05): evidence-sufficiency gate BEFORE the confirmation
-      // check and BEFORE applyDecision. Mirrors the watcher's Pitfall 5 behavior
-      // (src/registry/watcher.mjs:394-395): insufficient evidence must PRESERVE, not
-      // roll back. Without this gate, evaluateCandidate returns promotable:false
-      // (canary-controller.mjs:112) and applyCanaryDecision's rollback branch fires
-      // (canary-controller.mjs:176-193) because published_version is non-null — an
-      // operator asking to PROMOTE gets a surprise ROLLBACK to known_good_version.
-      // The gate short-circuits with reason_code='insufficient_evidence_samples'
-      // and does NOT call applyDecision, preserving the safety contract.
-      if (window.sufficient !== true) {
-        return { result: canonical('canary promote', false, 'insufficient_evidence_samples', detail), exitCode: EXIT.invalid };
-      }
-      const confirmation = options.confirm ?? String(stdin).replace(/[\r\n]+$/, '');
-      if (confirmation !== (candidate?.id ?? '')) {
-        return { result: canonical('canary promote', false, 'confirmation_mismatch', detail), exitCode: EXIT.usage };
-      }
-      const decision = applyDecision({
-        evaluation,
-        demonstrated_benefit,
-        activation: { ownedRoot: root, candidate: registry, reconciliation, mapping, policy: {}, verification: { policy_fingerprint: policyFingerprint }, reason: 'canary_promote', test_mode: false },
-        ownedRoot: root,
-        known_good_version: knownGood,
-        published_version: canaryActive?.version_id ?? null,
-      });
-      const reasonMap = { promoted: 'canary_promote_complete', preserved: 'canary_preserved', rolled_back: 'canary_rolled_back', recovery_required: 'recovery_required', rejected: 'canary_rejected' };
-      const ok = decision.status === 'promoted';
-      return { result: canonical('canary promote', ok, reasonMap[decision.status] || decision.reason_code || 'canary_decision_failed', { ...detail, decision }), exitCode: ok ? 0 : EXIT.invalid };
-    }
-
-    if (subcommand === 'rollback') {
-      // canary rollback destination is recoverActiveVersion's known_good_version
-      // ONLY — NOT an arbitrary positional (unlike the existing rollback verb at
-      // line 263 which takes positional[1] as the destination). Any extra
-      // positional is ignored. reason='canary_rollback' (in activation) is
-      // distinct from the existing rollback verb's reason='operator_rollback'.
-      if (!knownGood) {
-        return { result: canonical('canary rollback', false, 'no_known_good_version', { known_good_version: null, published_version: canaryActive?.version_id ?? null }), exitCode: EXIT.invalid };
-      }
-      const destination = knownGood;
-      const detail = {
-        destination,
-        known_good_version: knownGood,
-        published_version: canaryActive?.version_id ?? null,
-        mutation: { type: 'canary_rollback_to_known_good', path: 'active.json', reason: 'canary_rollback' },
-      };
-      if (!options.execute) {
-        return { result: canonical('canary rollback', true, 'canary_rollback_preview_ready', detail, ['execution_requires_exact_destination_confirmation']), exitCode: 0 };
-      }
-      const confirmation = options.confirm ?? String(stdin).replace(/[\r\n]+$/, '');
-      if (confirmation !== destination) {
-        return { result: canonical('canary rollback', false, 'confirmation_mismatch', detail), exitCode: EXIT.usage };
-      }
-      // Force the applyCanaryDecision rollback branch: evaluation.promotable=false
-      // with a published_version present triggers the rollback-to-known_good
-      // path (canary-controller.mjs:175-193). Publication mutation flows through
-      // REGISTRY_PUBLICATION -> activate.mjs (previewRollback/executeRollback);
-      // router-control.mjs never writes active.json directly.
-      const evaluation = { promotable: false, candidate_id: null, reason_code: 'operator_canary_rollback', preserve_version: knownGood };
-      const applyDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
-      const decision = applyDecision({
-        evaluation,
-        demonstrated_benefit: null,
-        activation: { ownedRoot: root, reason: 'canary_rollback', candidate: null },
-        ownedRoot: root,
-        known_good_version: knownGood,
-        published_version: canaryActive?.version_id ?? null,
-        // CR-02b (gap-closure 20-05): pass rollback_reason='canary_rollback' so
-        // applyCanaryDecision (canary-controller.mjs:155) records `reason: 'canary_rollback'`
-        // in the audit trail (line 188: `reason: rollback_reason || 'rollback'`). Without
-        // this param the audit trail records the generic 'rollback', making canary rollback
-        // indistinguishable from registry rollback (20-03 truth 4). The activation.reason
-        // above is a separate field (the activation reason, not the rollback audit reason).
-        rollback_reason: 'canary_rollback',
-      });
-      const ok = decision.status === 'rolled_back';
-      return { result: canonical('canary rollback', ok, ok ? 'canary_rollback_complete' : (decision.reason_code || 'canary_rollback_failed'), { ...detail, decision }), exitCode: ok ? 0 : EXIT.unsafe };
+    } catch (error) {
+      return { result: canonical('canary', false, 'internal_error', { error: error.message }), exitCode: EXIT.mutation };
     }
   }
   return { result: canonical(command || 'usage', false, 'unknown_command', { usage: usage().trim() }), exitCode: EXIT.usage };
