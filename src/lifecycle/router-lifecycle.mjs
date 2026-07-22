@@ -345,6 +345,10 @@ export async function installRouter(options) {
     report_path: p.reportPath,
     activation_root: p.ownedRoot,
     active_path: join(p.ownedRoot, 'active.json'),
+    // EVO-05: the watcher ingests routing telemetry into the canary evidence
+    // store. The hook appends to ~/.claude/router/telemetry.jsonl which equals
+    // join(ownedRoot, 'telemetry.jsonl') for a global install.
+    telemetry_path: join(p.ownedRoot, 'telemetry.jsonl'),
     status_path: p.controllerStatusPath,
     control_path: p.controllerControlPath,
     debounce_ms: options.debounceMs ?? 250,

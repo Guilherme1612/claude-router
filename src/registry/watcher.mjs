@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readFile, mkdir, rename, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
@@ -19,6 +20,7 @@ import { proposeCandidate, evaluateCandidate, applyCanaryDecision, isSafetyFix, 
 import { createPersistentEvidenceStore } from '../evolution/evidence.mjs';
 import { assessCalibration, evaluateCalibrationCorpus, measureRoutes, CALIBRATION_CORPUS } from '../evolution/perf-measure.mjs';
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
+import { telemetryRecordToEvidence } from '../evolution/telemetry-bridge.mjs';
 
 function hash(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -26,6 +28,63 @@ function hash(value) {
 
 function defaultScheduler() {
   return { now: Date.now, setTimeout, clearTimeout };
+}
+
+// EVO-05: ingest telemetry.jsonl into the persistent evidence store before
+// reading the canary window. Cursor-based incremental append avoids duplicate
+// evidence on every reconcile (the watcher reconciles every few seconds; the
+// telemetry file grows monotonically between rotations). The cursor records the
+// last-consumed file size + mtime + line count; if the file is unchanged since
+// the last ingest the call is a no-op. Rotation (file shrank) resets and
+// re-ingests from the start — safe because a rotated file no longer contains
+// the pre-rotation records already stored. Privacy-denied and non-canary-
+// relevant records are skipped by telemetryRecordToEvidence before any append.
+export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId, candidateVersion = null }) {
+  let stat;
+  try {
+    stat = statSync(telemetryPath);
+  } catch {
+    return { ingested: 0, skipped: 'no_telemetry_file' };
+  }
+  let cursor = null;
+  try {
+    cursor = JSON.parse(readFileSync(cursorPath, 'utf8'));
+  } catch {
+    cursor = null;
+  }
+  const size = stat.size;
+  const mtimeMs = stat.mtimeMs;
+  if (cursor && cursor.size === size && cursor.mtimeMs === mtimeMs) {
+    return { ingested: 0, skipped: 'unchanged' };
+  }
+  const lines = readFileSync(telemetryPath, 'utf8').split('\n');
+  let startLine = 0;
+  if (cursor && cursor.size <= size && cursor.lineCount <= lines.length) {
+    startLine = cursor.lineCount;
+  }
+  let ingested = 0;
+  for (let i = startLine; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (line.length === 0) continue;
+    let record;
+    try {
+      record = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const result = telemetryRecordToEvidence(record, { candidate_version: candidateVersion });
+    if (result.status !== 'accepted') continue;
+    const appended = store.append(result.signal, { project_id: projectId });
+    if (appended.status === 'stored') ingested += 1;
+  }
+  try {
+    mkdirSync(dirname(cursorPath), { recursive: true, mode: 0o700 });
+    writeFileSync(cursorPath, JSON.stringify({ size, mtimeMs, lineCount: lines.length }), { mode: 0o600 });
+  } catch {
+    // Cursor persistence is best-effort; a failed write only risks re-ingesting
+    // duplicates next reconcile (bounded by the 7d retention window filter).
+  }
+  return { ingested, skipped: startLine > 0 ? 'incremental' : 'full' };
 }
 
 export function createRegistryWatcher(options) {
@@ -387,6 +446,17 @@ export function createRegistryReconciler(config, dependencies = {}) {
               // measureRoutes), and delegate publication mutation exclusively
               // through applyCanaryDecision -> REGISTRY_PUBLICATION.
               const store = createEvidenceStore({ root: join(config.activation_root, 'evidence') });
+              // EVO-05: populate the evidence store from telemetry.jsonl before
+              // reading the window. Without this the store stays empty, window()
+              // always returns sufficient:false, and the canary promote/rollback
+              // branches are unreachable (the production trigger is starved of
+              // data). Cursor-based ingest is a no-op when the file is unchanged.
+              ingestTelemetryEvidence({
+                store,
+                telemetryPath: config.telemetry_path || join(config.activation_root, 'telemetry.jsonl'),
+                cursorPath: join(config.activation_root, 'evidence', 'ingest-cursor.json'),
+                projectId: config.scope_id || config.scope || 'global',
+              });
               const window = store.window({ project_id: config.scope_id || config.scope || 'global' });
               if (window.sufficient !== true) {
                 activation = { activation_status: 'preserved', reason_code: 'insufficient_evidence_samples' };
