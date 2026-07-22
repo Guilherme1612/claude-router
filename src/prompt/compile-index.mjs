@@ -81,7 +81,7 @@ function validRoutes(routes) {
   ));
 }
 
-function compatible(value) {
+export function compatible(value) {
   return value?.router_contract === COMPILED_INDEX_COMPATIBILITY.router_contract
     && value?.policy_version === COMPILED_INDEX_COMPATIBILITY.policy_version
     && value?.capsule_schema_version === COMPILED_INDEX_COMPATIBILITY.capsule_schema_version
