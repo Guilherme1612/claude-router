@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 // D-05/D-06: only bounded, content-free routing evidence may cross persistence.
 const FIELDS = new Set([
@@ -16,7 +18,7 @@ export const HALF_LIFE_MS = 24 * 60 * 60 * 1000;
 export const MAX_RETENTION_MS = 7 * HALF_LIFE_MS;
 export const MINIMUM_SAMPLES = 30;
 
-function boundedToken(value, max = 128) {
+export function boundedToken(value, max = 128) {
   return typeof value === 'string' && value.length > 0 && value.length <= max && TOKEN.test(value);
 }
 
@@ -45,8 +47,20 @@ export function validateEvidenceEnvelope(input) {
   return { status: 'accepted', signal: Object.freeze({ ...input, guard_codes: Object.freeze([...input.guard_codes]) }) };
 }
 
-function defaultHash(value) {
+export function defaultHash(value) {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+// Shared exponential-half-life-v1 decay math. Used by both the in-memory
+// createEvidenceStore window and createPersistentEvidenceStore window so the
+// two stores cannot silently diverge if the decay policy changes. `observations`
+// is an array of records each carrying `signal.timestamp_ms` (ms epoch).
+export function computeWeightedSamples(observations, { now, halfLifeMs = HALF_LIFE_MS } = {}) {
+  if (!Number.isSafeInteger(now)) throw new TypeError('now must be an integer ms epoch');
+  return observations.reduce((sum, record) => {
+    const age = now - record.signal.timestamp_ms;
+    return sum + (2 ** (-age / halfLifeMs));
+  }, 0);
 }
 
 function deepFreeze(value) {
@@ -130,10 +144,96 @@ export function createEvidenceStore({ now = Date.now, minimum_samples = MINIMUM_
         const age = current - record.signal.timestamp_ms;
         return age >= 0 && age <= MAX_RETENTION_MS && matchesScope(record, options);
       });
-      const weighted_samples = observations.reduce((sum, record) => {
+      const weighted_samples = computeWeightedSamples(observations, { now: current, halfLifeMs: HALF_LIFE_MS });
+      const sufficient = observations.length >= minimum_samples;
+      const envelope = {
+        schema_version: 1,
+        status: 'validated',
+        scope: requestedScope,
+        observations: [...observations],
+        sample_count: observations.length,
+        weighted_samples,
+        minimum_samples,
+        sufficient,
+        weighting_policy: 'exponential-half-life-v1',
+        reason_code: sufficient ? 'evidence_sufficient' : 'insufficient_evidence_samples',
+      };
+      const fingerprint = evidenceWindowFingerprint(envelope);
+      return deepFreeze({ ...envelope, fingerprint, source_evidence_fingerprint: fingerprint });
+    },
+  });
+}
+
+// Disk-backed variant of createEvidenceStore. Appends validated envelopes to
+// scoped JSONL files under `root` (~/.claude/router/evidence/), enforces
+// project+aggregate isolation on disk, and reads windows with the SAME
+// 7d retention / 24h decay / 30-sample floor contract as the in-memory store
+// (Phase 17 D-07/D-08). validateEvidenceEnvelope is the FIRST call in append —
+// forbidden fields are rejected BEFORE any disk write (T-20-02).
+export function createPersistentEvidenceStore({ root, now = Date.now, minimum_samples = MINIMUM_SAMPLES } = {}) {
+  if (typeof now !== 'function') throw new TypeError('now must be a function');
+  if (!Number.isSafeInteger(minimum_samples) || minimum_samples < 1) throw new TypeError('minimum_samples must be a positive integer');
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+
+  function pathFor(scope) {
+    return scope.kind === 'aggregate'
+      ? join(root, 'aggregate.jsonl')
+      : join(root, `project-${scope.project_id}.jsonl`);
+  }
+
+  function scopeFor(options) {
+    if (options.scope === 'aggregate') {
+      if (options.aggregate_eligible !== true) return deny('aggregate_eligibility_required');
+      return { kind: 'aggregate' };
+    }
+    if (!boundedToken(options.project_id, 128)) return deny('invalid_project_scope');
+    return { kind: 'project', project_id: options.project_id };
+  }
+
+  function matchesScope(record, options) {
+    if (options.scope === 'aggregate') return record.scope.kind === 'aggregate';
+    return record.scope.kind === 'project' && record.scope.project_id === options.project_id;
+  }
+
+  return Object.freeze({
+    append(input, options = {}) {
+      const validated = validateEvidenceEnvelope(input);
+      if (validated.status !== 'accepted') return validated;
+      const scope = scopeFor(options);
+      if (scope.status === 'denied') return scope;
+      const current = now();
+      if (!Number.isSafeInteger(current) || validated.signal.timestamp_ms > current) return deny('invalid_evidence_time');
+      const fingerprint = defaultHash(JSON.stringify(validated.signal));
+      const record = Object.freeze({
+        scope: Object.freeze(scope),
+        signal: validated.signal,
+        fingerprint,
+      });
+      appendFileSync(pathFor(scope), `${JSON.stringify(record)}\n`, { flag: 'a', mode: 0o600 });
+      return { status: 'stored', fingerprint };
+    },
+
+    window(options = {}) {
+      const requestedScope = scopeFor(options);
+      if (requestedScope.status === 'denied') return requestedScope;
+      const current = now();
+      const path = pathFor(requestedScope);
+      let records = [];
+      if (existsSync(path)) {
+        const lines = readFileSync(path, 'utf8').split('\n');
+        for (const line of lines) {
+          if (line.length === 0) continue;
+          let record;
+          try { record = JSON.parse(line); } catch { continue; }
+          if (!record || !record.signal || !record.scope) continue;
+          records.push(record);
+        }
+      }
+      const observations = records.filter((record) => {
         const age = current - record.signal.timestamp_ms;
-        return sum + (2 ** (-age / HALF_LIFE_MS));
-      }, 0);
+        return age >= 0 && age <= MAX_RETENTION_MS && matchesScope(record, options);
+      });
+      const weighted_samples = computeWeightedSamples(observations, { now: current, halfLifeMs: HALF_LIFE_MS });
       const sufficient = observations.length >= minimum_samples;
       const envelope = {
         schema_version: 1,
