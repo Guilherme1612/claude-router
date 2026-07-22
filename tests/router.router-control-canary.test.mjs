@@ -257,3 +257,62 @@ test('Test 6: canary rollback destination is known_good_version only (no arbitra
     assert.equal(executed.result.data.destination, KNOWN_GOOD);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+// CR-02a regression: `canary promote --execute` with INSUFFICIENT evidence must NOT
+// surprise-rollback. The watcher gates on window.sufficient; the CLI promote branch
+// must do the same — otherwise evaluateCandidate returns promotable=false and
+// applyCanaryDecision's rollback branch fires (canary-controller.mjs:176-193) because
+// published_version is non-null, rolling an operator's PROMOTE back to known_good.
+// Sufficient floor is 30 samples (makeEvidenceStore default); 5 -> insufficient.
+test('Test 7: canary promote --execute with insufficient evidence returns insufficient_evidence_samples and does NOT call applyCanaryDecision (CR-02a)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-canary-promote-insufficient-'));
+  try {
+    seedOwnedRoot(root);
+    // 5 records -> window.sufficient === false (below the 30-sample floor).
+    const { deps, calls } = makeCanaryDeps({ evidenceStore: makeEvidenceStore(5) });
+    // First run a dry-run to discover the candidate id (proposal still runs; the
+    // gate is only on the --execute path before applyDecision).
+    const dry = runRouterControl({ argv: ['canary', 'promote', '--owned-root', root], dependencies: deps });
+    const candidateId = dry.result.data.candidate.id;
+    assert.ok(candidateId, 'dry-run must still expose candidate.id even when evidence is insufficient');
+    const executed = runRouterControl({
+      argv: ['canary', 'promote', '--execute', '--confirm', candidateId, '--owned-root', root],
+      dependencies: deps,
+    });
+    assert.equal(executed.result.ok, false, 'promote with insufficient evidence must not report ok');
+    assert.equal(
+      executed.result.reason_code,
+      'insufficient_evidence_samples',
+      'must return insufficient_evidence_samples (NOT canary_rolled_back)',
+    );
+    assert.notEqual(executed.result.reason_code, 'canary_rolled_back', 'must NOT surprise-rollback');
+    assert.equal(calls.length, 0, 'applyCanaryDecision must NOT be called when evidence is insufficient (no surprise rollback)');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+// CR-02b regression: `canary rollback --execute` must pass `rollback_reason: 'canary_rollback'`
+// to applyCanaryDecision so the audit trail records `reason: 'canary_rollback'` (canary-controller.mjs:188
+// `reason: rollback_reason || 'rollback'`). Without the param the audit records the generic 'rollback',
+// making canary rollback indistinguishable from registry rollback (20-03 truth 4).
+test('Test 8: canary rollback --execute passes rollback_reason=canary_rollback to applyCanaryDecision (CR-02b)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-canary-rollback-reason-'));
+  try {
+    seedOwnedRoot(root);
+    const { deps, calls } = makeCanaryDeps({ canaryDecisionImpl: rolledBackStub() });
+    const executed = runRouterControl({
+      argv: ['canary', 'rollback', '--execute', '--confirm', KNOWN_GOOD, '--owned-root', root],
+      dependencies: deps,
+    });
+    assert.equal(executed.result.ok, true);
+    assert.equal(executed.result.reason_code, 'canary_rollback_complete');
+    assert.equal(calls.length, 1, 'applyCanaryDecision must be invoked once');
+    const args = calls[0];
+    // The rollback_reason param must be 'canary_rollback' — distinct from the default 'rollback'
+    // that applyCanaryDecision uses when rollback_reason is null/undefined (canary-controller.mjs:188).
+    assert.equal(
+      args.rollback_reason,
+      'canary_rollback',
+      'rollback_reason must be passed as canary_rollback (not undefined, which defaults to rollback)',
+    );
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
