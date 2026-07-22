@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
-current_phase: 19
-current_phase_name: close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
-status: verifying
-stopped_at: Completed 19-04-PLAN.md
-last_updated: "2026-07-21T23:16:41.482Z"
-last_activity: 2026-07-21
-last_activity_desc: Phase 19 execution resumed (wave continue)
+current_phase: 20
+current_phase_name: close-gap-evo-05-add-production-trigger-for-canary-controlle
+status: executing
+stopped_at: Completed 20-01-PLAN.md
+last_updated: "2026-07-22T12:57:17.738Z"
+last_activity: 2026-07-22
+last_activity_desc: Phase 20 execution started
 progress:
   total_phases: 10
   completed_phases: 8
   total_plans: 45
-  completed_plans: 41
+  completed_plans: 42
 ---
 
 # Project State
@@ -23,22 +23,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-14)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** Phase 19 — close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
+**Current focus:** Phase 20 — close-gap-evo-05-add-production-trigger-for-canary-controlle
 
 ## Current Position
 
-Phase: 19 (close-gap-tok-02-orc-01-wire-orchestrator-select-transitions) — EXECUTING
-Plan: 4 of 4
-Status: Phase complete — ready for verification
-Last activity: 2026-07-21 — Phase 19 execution resumed (wave continue)
+Phase: 20 (close-gap-evo-05-add-production-trigger-for-canary-controlle) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 20
+Last activity: 2026-07-22 — Phase 20 execution started
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 37
+- Total plans completed: 41
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -55,6 +55,7 @@ Progress: [█████████░] 91%
 | 16 | 4 | - | - |
 | 17 | 5 | - | - |
 | 18 | 5 | - | - |
+| 19 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -91,6 +92,7 @@ Progress: [█████████░] 91%
 | Phase 19 P02 | 7min | 2 tasks | 5 files |
 | Phase 19 P03 | 4min | 2 tasks | 4 files |
 | Phase 19 P04 | 95min | 4 tasks | 11 files |
+| Phase 20 P01 | ~20min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -162,6 +164,9 @@ Decisions are logged in PROJECT.md and the approved design.
 - [Phase ?]: Flow 11 dispatch_eligible PASS infeasible in v1 (sources:[] hardcoded); v2 backstop documented
 - [Phase ?]: TOK-02 required-overflow E2E variant deferred to Phase 20/v2 (requires per-prompt source descriptors)
 - [Phase ?]: Extended release-matrix validator with per-label secondary evidence schema (Rule 3: plan's verbatim acceptance criteria required both grep and validator pass)
+- [Phase ?]: Privacy-denied telemetry records skipped BEFORE envelope construction (deny_filtered tier OR PRIVACY_GUARDS code in guards_fired) — not just signature-nullied.
+- [Phase ?]: Extracted computeWeightedSamples as shared helper across in-memory + persistent evidence stores to prevent decay-math divergence (D-07/D-08 contract).
+- [Phase ?]: verdict hardcoded to 'success' v1 (telemetry outcome is null; regression detected by calibration gates, not per-record verdicts).
 
 ### Pending Todos
 
@@ -185,6 +190,6 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-21T23:16:41.474Z
-Stopped at: Completed 19-04-PLAN.md
+Last session: 2026-07-22T12:56:16.878Z
+Stopped at: Completed 20-01-PLAN.md
 Resume file: None

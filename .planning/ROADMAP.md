@@ -326,7 +326,7 @@ Plans:
 **Goal:** Wire the already-built orchestrator functions (selectCapabilities, selectWorkflow/nextValidTransitions, planContextLoad) into the publish-time path (publishCompiledIndex in src/prompt/publish-index.mjs) so their output is frozen into the immutable compiled tuple, extend compile-index.mjs (schema 1→2 + compatibility gate + sibling loaders), extend the route path (prompt-route.mjs) as a read-only projection consumer of the frozen tuple, extend the deployed bundle manifest (router-lifecycle.mjs moduleNames +3 + workflow-declarations.json), remove the blanket fallback, and extend the Phase 18 E2E tests with D-09 evidence — closing the live-path gap for ORC-01 and TOK-02 that the Phase 16 traceability marking did not cover.
 **Requirements**: ORC-01, TOK-02
 **Depends on:** Phase 18
-**Plans:** 4/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -350,12 +350,12 @@ Plans:
 **Goal:** Privacy-safe telemetry canary-tests drive canary-controller promotion and rollback from the watcher and operator CLI, closing audit BLOCKER 2 (evolution library no longer orphaned; production trigger wired).
 **Requirements**: EVO-05
 **Depends on:** Phase 19
-**Plans:** 3 plans
+**Plans:** 1/3 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 20-01-PLAN.md — Telemetry→evidence bridge + persistent evidence store + deployed-bundle inclusion (Wave 1 foundation)
+- [x] 20-01-PLAN.md — Telemetry→evidence bridge + persistent evidence store + deployed-bundle inclusion (Wave 1 foundation)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
