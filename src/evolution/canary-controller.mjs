@@ -152,6 +152,7 @@ export function applyCanaryDecision({
   ownedRoot = activation?.ownedRoot,
   known_good_version = null,
   published_version = null,
+  rollback_reason = null,
   publication = REGISTRY_PUBLICATION,
 } = {}) {
   const candidateId = evaluation?.candidate_id ?? null;
@@ -184,7 +185,7 @@ export function applyCanaryDecision({
       ownedRoot,
       preview,
       confirmation: known_good_version,
-      reason: 'rollback',
+      reason: rollback_reason || 'rollback',
     });
     if (rollback.rollback_status !== 'rolled_back') {
       return { status: 'recovery_required', candidate_id: candidateId, reason_code: rollback.reason_code, active_version: recovered.version_id ?? published_version };

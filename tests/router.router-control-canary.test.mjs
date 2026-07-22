@@ -9,8 +9,9 @@ import { createEvidenceStore } from '../src/evolution/evidence.mjs';
 import { COMPILED_INDEX_COMPATIBILITY } from '../src/prompt/compile-index.mjs';
 
 const NOW = 1_750_000_000_000;
-const KNOWN_GOOD = 'v1-known0000000000a';
-const PUBLISHED = 'v1-pub00000000000a';
+// Version IDs must match VERSION_ID = /^v1-[a-f0-9]{16}$/ (router-control.mjs:21)
+const KNOWN_GOOD = 'v1-abcdef0000000000';
+const PUBLISHED = 'v1-1234567890abcdef';
 const CANDIDATE_ID = 'candidate-' + 'b'.repeat(64);
 
 // Pre-populated in-memory evidence store duck-typed as a persistent store
