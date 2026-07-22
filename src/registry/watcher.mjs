@@ -456,6 +456,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
                     ownedRoot: config.activation_root,
                     known_good_version: knownGood,
                     published_version: active.tuple_version_id || active.version_id || null,
+                    rollback_reason: 'canary_rollback',
                   });
                   if (decision.status === 'promoted') {
                     activation = { activation_status: 'activated', version_id: decision.active_version, ...decision };
