@@ -410,7 +410,6 @@ export function createRegistryReconciler(config, dependencies = {}) {
                   const candidateEvaluation = evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: report.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
                   const knownGoodEvaluation = evaluateCorpus({ corpus: CALIBRATION_CORPUS, route: knownGoodCtx.route, versions: { candidate: knownGood, compiled_index: knownGood, ...versionsBase } });
                   const candidatePerf = measure({ fixtures: CALIBRATION_CORPUS, route: candidateCtx.route, versions: { candidate: report.candidate_fingerprint, compiled_index: candidateCtx.versionId, ...versionsBase } });
-                  measure({ fixtures: CALIBRATION_CORPUS, route: knownGoodCtx.route, versions: { candidate: knownGood, compiled_index: knownGood, ...versionsBase }, baseline: null });
                   const assessed = assess({ evaluation: candidateEvaluation, performance: candidatePerf });
                   const privacyPass = !(window.observations || []).some((r) => (
                     r?.signal?.confidence_band === 'deny_filtered'
