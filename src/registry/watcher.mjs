@@ -354,6 +354,13 @@ export function createRegistryReconciler(config, dependencies = {}) {
           recoveryReady = false;
         }
       }
+      // Test mode bypasses the canary evidence gate: the canary path is a production
+      // safety mechanism that requires a sufficient evidence window (>=30 samples)
+      // before promoting. test_mode already opts in to stub verification runners for
+      // lifecycle/recovery tests that exercise the watcher→controller→compiled-index
+      // seam without evidence infrastructure. Production never sets test_mode, so the
+      // canary gate is fully active in production. (T-20-14: test_mode is not a trigger.)
+      if (config.test_mode === true) knownGood = null;
       if (report.disposition === 'eligible' && recoveryReady) {
         const mapping = await mapper({ candidate: built.registry, reconciliation: report, lifecycle: diff, existingMappings: config.mappings || [], policy: config.mapping_policy });
         if (isCanonicalMappingSafe(mapping)) {

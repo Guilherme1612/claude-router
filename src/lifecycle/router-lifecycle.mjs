@@ -322,6 +322,7 @@ export async function installRouter(options) {
     // ("Orphaned modules (test-only, not deployed)").
     'evolution/canary-controller.mjs', 'evolution/evidence.mjs',
     'evolution/perf-measure.mjs', 'evolution/telemetry-bridge.mjs',
+    'evolution/candidate-calibration-route.mjs',
   ];
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])

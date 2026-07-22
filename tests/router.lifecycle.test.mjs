@@ -73,7 +73,8 @@ test('one command installs router, binding, Codex marker, and complete ownership
     assert.equal(manifest.state, 'complete');
     // 48 base files + 8 = 4 orchestrator modules (D-07, Phase 19-03) × 2 runtime roots (claude + codex)
     // + 8 = 4 evolution modules (Phase 20-01: canary-controller, evidence, perf-measure, telemetry-bridge) × 2 roots
-    assert.equal(manifest.files.length, 64);
+    // + 2 = 1 evolution module (Phase 20-02: candidate-calibration-route) × 2 roots
+    assert.equal(manifest.files.length, 66);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
