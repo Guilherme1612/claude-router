@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
 current_phase: 20
-current_phase_name: close-gap-evo-05-add-production-trigger-for-canary-controlle
-status: executing
-stopped_at: Completed 20-01-PLAN.md
-last_updated: "2026-07-22T12:57:17.738Z"
+status: completed
+stopped_at: context exhaustion at 75% (2026-07-22)
+last_updated: "2026-07-22T16:15:12.898Z"
 last_activity: 2026-07-22
-last_activity_desc: Phase 20 execution started
+last_activity_desc: Phase 20 complete
 progress:
   total_phases: 10
-  completed_phases: 8
+  completed_phases: 9
   total_plans: 45
-  completed_plans: 42
+  completed_plans: 44
+current_phase_name: close-gap-evo-05-add-production-trigger-for-canary-controlle
 ---
 
 # Project State
@@ -27,18 +27,18 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 
 ## Current Position
 
-Phase: 20 (close-gap-evo-05-add-production-trigger-for-canary-controlle) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 20
-Last activity: 2026-07-22 — Phase 20 execution started
+Phase: 20
+Plan: Not started
+Status: All phases complete
+Last activity: 2026-07-22 — Phase 20 complete
 
-Progress: [█████████░] 93%
+Progress: [██████████] 96%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 41
+- Total plans completed: 44
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -56,6 +56,7 @@ Progress: [█████████░] 93%
 | 17 | 5 | - | - |
 | 18 | 5 | - | - |
 | 19 | 4 | - | - |
+| 20 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -93,6 +94,8 @@ Progress: [█████████░] 93%
 | Phase 19 P03 | 4min | 2 tasks | 4 files |
 | Phase 19 P04 | 95min | 4 tasks | 11 files |
 | Phase 20 P01 | ~20min | 3 tasks | 6 files |
+| Phase 20 P02 | ~25min | 3 tasks | 5 files |
+| Phase 20 P02 | 36min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -167,6 +170,10 @@ Decisions are logged in PROJECT.md and the approved design.
 - [Phase ?]: Privacy-denied telemetry records skipped BEFORE envelope construction (deny_filtered tier OR PRIVACY_GUARDS code in guards_fired) — not just signature-nullied.
 - [Phase ?]: Extracted computeWeightedSamples as shared helper across in-memory + persistent evidence stores to prevent decay-math divergence (D-07/D-08 contract).
 - [Phase ?]: verdict hardcoded to 'success' v1 (telemetry outcome is null; regression detected by calibration gates, not per-record verdicts).
+- [Phase ?]: test_mode bypasses canary evidence gate so lifecycle tests exercise the real seam without evidence infrastructure; production canary gate fully active.
+- [Phase ?]: D-05 demonstrated_benefit derived via evaluateCalibrationCorpus on candidate + known-good; strict-improve on quality OR context_budget; latency hard gate; never promote on parity.
+- [Phase ?]: 20-02: Watcher eligible-activation routes through canary-controller with D-04 helper + D-05 derivation + D-06 compatible() export (EVO-05 production trigger; audit BLOCKER 2 closed for watcher surface).
+- [Phase ?]: 20-02: test_mode bypasses the canary evidence gate (production never sets test_mode; fail-closed contract preserved in production) so lifecycle/recovery seam tests exercise the watcher->controller->compiled-index path.
 
 ### Pending Todos
 
@@ -190,6 +197,6 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-22T12:56:16.878Z
-Stopped at: Completed 20-01-PLAN.md
+Last session: 2026-07-22T16:15:12.887Z
+Stopped at: context exhaustion at 75% (2026-07-22)
 Resume file: None

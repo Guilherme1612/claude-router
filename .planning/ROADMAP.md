@@ -350,7 +350,7 @@ Plans:
 **Goal:** Privacy-safe telemetry canary-tests drive canary-controller promotion and rollback from the watcher and operator CLI, closing audit BLOCKER 2 (evolution library no longer orphaned; production trigger wired).
 **Requirements**: EVO-05
 **Depends on:** Phase 19
-**Plans:** 1/3 plans executed
+**Plans:** 3/3 plans complete
 
 Plans:
 **Wave 1**
@@ -359,11 +359,11 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 20-02-PLAN.md — Watcher canary trigger wiring (Wave 2 automatic trigger)
+- [x] 20-02-PLAN.md — Watcher canary trigger wiring (Wave 2 automatic trigger)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 20-03-PLAN.md — CLI canary subcommands status/promote/rollback (Wave 3 operator trigger)
+- [x] 20-03-PLAN.md — CLI canary subcommands status/promote/rollback (Wave 3 operator trigger)
 
 ---
 *Roadmap initialized: 2026-07-14 for v1.2 Autonomous Dual-Runtime Control Plane*
