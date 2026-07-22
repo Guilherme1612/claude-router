@@ -290,6 +290,34 @@ test('Test 6: D-04 helper buildCandidateCalibrationRoute wraps routeContextPromp
   for (const dir of created) assert.equal(existsSync(dir), false, `tempdir ${dir} must be removed by cleanup`);
 });
 
+test('Test 8: canary path runs on EVERY eligible reconcile (multi-reconcile regression — CR-01)', async () => {
+  const root = ownedRoot();
+  try {
+    const store = makeEvidenceStore(30);
+    const { deps, canaryCalls } = makeCanaryDeps('promote', store, () => ({
+      status: 'promoted', reason_code: 'quality_improved', active_version: 'v1-new0000000000a',
+    }));
+    const reconcile = createTestRegistryReconciler(baseConfig(root), deps);
+    const diff = { events: [], diagnostics: [] };
+    // First reconcile: recovery runs, knownGood populated, canary path runs.
+    await reconcile({ diff });
+    assert.equal(canaryCalls.length, 1, 'first reconcile must invoke applyCanaryDecision');
+    assert.notEqual(reconcile.lastReconciliation.activation_reason, 'watcher',
+      'first reconcile must NOT take the bootstrap path');
+    // Second reconcile: CR-01 — recovered flag must reset so the recovery block
+    // runs again, knownGood is re-populated, and the canary path runs again
+    // (NOT the bootstrap path which bypasses applyCanaryDecision).
+    await reconcile({ diff });
+    assert.equal(canaryCalls.length, 2,
+      'applyCanaryDecision must be invoked on BOTH reconciles (CR-01: canary path dead after first reconcile)');
+    assert.notEqual(reconcile.lastReconciliation.activation_reason, 'watcher',
+      'second reconcile must NOT take the bootstrap path (canary decision expected)');
+    // The activation must reflect a canary decision, not the bootstrap activator.
+    assert.ok(['activated', 'preserved', 'rolled_back', 'recovery_required'].includes(reconcile.lastReconciliation.activation_status),
+      `second reconcile activation_status must be a canary decision, got ${reconcile.lastReconciliation.activation_status}`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('Test 7: D-06 compatible() is exported from compile-index.mjs and imported by name in watcher.mjs', async () => {
   const compileUrl = new URL('../src/prompt/compile-index.mjs', import.meta.url);
   const mod = await import(compileUrl);

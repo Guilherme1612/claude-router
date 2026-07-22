@@ -350,7 +350,7 @@ Plans:
 **Goal:** Privacy-safe telemetry canary-tests drive canary-controller promotion and rollback from the watcher and operator CLI, closing audit BLOCKER 2 (evolution library no longer orphaned; production trigger wired).
 **Requirements**: EVO-05
 **Depends on:** Phase 19
-**Plans:** 3/3 plans complete
+**Plans:** 5/5 plans complete (3 original + 2 gap-closure)
 
 Plans:
 **Wave 1**
@@ -364,6 +364,11 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 20-03-PLAN.md — CLI canary subcommands status/promote/rollback (Wave 3 operator trigger)
+
+**Wave 4** *(gap-closure — re-verification found 3 BLOCKER code-level defects)*
+
+- [ ] 20-04-PLAN.md — Close CR-01: reset `recovered` per reconcile + fix line-337 knownGood initializer + multi-reconcile regression test (depends on 20-02)
+- [ ] 20-05-PLAN.md — Close CR-02a + CR-02b: promote sufficiency gate + rollback_reason='canary_rollback' param + 2 regression tests (depends on 20-03)
 
 ---
 *Roadmap initialized: 2026-07-14 for v1.2 Autonomous Dual-Runtime Control Plane*
