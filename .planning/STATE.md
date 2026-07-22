@@ -4,16 +4,16 @@ milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
 current_phase: 19
 current_phase_name: close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
-status: executing
-stopped_at: Phase 20 context gathered (20-02 replan pending)
-last_updated: "2026-07-21T22:21:41.738Z"
+status: verifying
+stopped_at: Completed 19-04-PLAN.md
+last_updated: "2026-07-21T23:16:41.482Z"
 last_activity: 2026-07-21
 last_activity_desc: Phase 19 execution resumed (wave continue)
 progress:
   total_phases: 10
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 45
-  completed_plans: 38
+  completed_plans: 41
 ---
 
 # Project State
@@ -28,11 +28,11 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 ## Current Position
 
 Phase: 19 (close-gap-tok-02-orc-01-wire-orchestrator-select-transitions) — EXECUTING
-Plan: 2 of 4
-Status: Ready to execute
+Plan: 4 of 4
+Status: Phase complete — ready for verification
 Last activity: 2026-07-21 — Phase 19 execution resumed (wave continue)
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 91%
 
 ## Performance Metrics
 
@@ -88,6 +88,9 @@ Progress: [████████░░] 84%
 | Phase 18 P04 | ~90m | 3 tasks | 7 files |
 | Phase 18 P05 | 120m | 2 tasks | 10 files |
 | Phase 19 P01 | 2min | 2 tasks | 4 files |
+| Phase 19 P02 | 7min | 2 tasks | 5 files |
+| Phase 19 P03 | 4min | 2 tasks | 4 files |
+| Phase 19 P04 | 95min | 4 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -152,6 +155,13 @@ Decisions are logged in PROJECT.md and the approved design.
 - [Phase ?]: [Phase 19 P01]: Manifest extended with closure/budget/summary_index payload_sha256 (V6 integrity gate); verifyTuple hash-checks siblings to close T-19-01 tampering threat
 - [Phase ?]: [Phase 19 P01]: COMPILED_INDEX_COMPATIBILITY extended with orchestrator_contract_version + context_contract_version; schema 1->2 invalidates prior tuples (watcher re-publishes via recovery)
 - [Phase ?]: [Phase 19 P01]: Per-prompt budget estimation (estimateRoutingTokens on hot path) DEFERRED to v2 per D-03; dispatch_eligible flag baked at publish from planContextLoad result
+- [Phase ?]: Plan 02 implemented 19-ORCHESTRATOR-INPUT-DECISION.md verbatim: compile-index schema 1->2 with sibling hash verification (T-19-01), publish-index orchestrator wiring baking closure/budget/summary-index siblings, D-06 fallback deletion (ORC-01), D-03 dispatch_eligible baking (TOK-02)
+- [Phase ?]: [Rule 1] Fixed plan step 4e bug: planContextLoad closure arg was closureResult.closure (array) instead of closureResult (object); safeClosure expected the object shape
+- [Phase ?]: Phase 19 P03: bundle manifest ships orchestrator/select.mjs+transitions.mjs+budget.mjs+workflow-declarations.json (D-07); prompt-route.mjs is read-only sibling projection (D-01/D-02) with baked dispatch_eligible gate (D-03 TOK-02 hot-path closure); D-08 preserved (no new hook imports)
+- [Phase ?]: Phase 19 P03: sibling read shape = compiledIndex.<sibling>?.by_workflow?.[workflowId] (sibling files are {schema_version, by_workflow:{...}} objects per Decision 4; route path must dereference by_workflow to project per-workflow)
+- [Phase ?]: Flow 11 dispatch_eligible PASS infeasible in v1 (sources:[] hardcoded); v2 backstop documented
+- [Phase ?]: TOK-02 required-overflow E2E variant deferred to Phase 20/v2 (requires per-prompt source descriptors)
+- [Phase ?]: Extended release-matrix validator with per-label secondary evidence schema (Rule 3: plan's verbatim acceptance criteria required both grep and validator pass)
 
 ### Pending Todos
 
@@ -175,6 +185,6 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-21T22:21:41.730Z
-Stopped at: Phase 20 context gathered (20-02 replan pending)
-Resume file: .planning/phases/20-close-gap-evo-05-add-production-trigger-for-canary-controlle/20-CONTEXT.md
+Last session: 2026-07-21T23:16:41.474Z
+Stopped at: Completed 19-04-PLAN.md
+Resume file: None
