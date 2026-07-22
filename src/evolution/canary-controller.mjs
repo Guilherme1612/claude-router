@@ -51,6 +51,43 @@ function validToken(value) {
   return typeof value === 'string' && TOKEN.test(value);
 }
 
+// D-05 safety_correction predicate: a reconciliation report indicates a
+// safety/recovery fix when its verdicts carry a safety reason_code. Used to
+// decide whether a perf-neutral candidate still promotes (safety_correction)
+// or preserves (neutral) — Phase 17 success criterion #4. Shared by the CLI
+// promote path (router-control.mjs) and the watcher canary path (watcher.mjs)
+// so the two promotion surfaces cannot diverge on the safety-fix definition.
+export function isSafetyFix(report) {
+  return Array.isArray(report?.verdicts) && report.verdicts.some((verdict) => (
+    typeof verdict?.reason_code === 'string' && verdict.reason_code.startsWith('safety_')
+  ));
+}
+
+// D-05 demonstrated_benefit derivation — the single source of truth shared by
+// the CLI promote path (router-control.mjs) and the watcher canary path
+// (watcher.mjs). strict-improve on quality OR context_budget; latency hard
+// gate; safety_correction on parity when the report is a safety fix; neutral
+// otherwise -> preserve (never promote on parity — Phase 17 SC #4).
+// `knownGoodEvaluation` is optional because the CLI historically tolerated a
+// null known-good (now gated by WR-02, but the helper remains defensive):
+// `knownGoodEvaluation?.quality.pass ?? true` treats a missing known-good
+// evaluation as "passing" so strict-improve only fires when the candidate
+// genuinely beats a failing known-good.
+export function deriveDemonstratedBenefit({ evaluation, candidateEvaluation, knownGoodEvaluation, assessed, reconciliation }) {
+  if (!evaluation?.promotable) return null;
+  const strictImproveQuality = candidateEvaluation.quality.pass === true && (knownGoodEvaluation?.quality.pass ?? true) === false;
+  const strictImproveContext = candidateEvaluation.context_budget.pass === true && (knownGoodEvaluation?.context_budget.pass ?? true) === false;
+  const strictImprove = strictImproveQuality || strictImproveContext;
+  const latencyPass = assessed.latency.pass === true;
+  if (strictImprove && latencyPass) {
+    return { status: 'demonstrated', reason_code: strictImproveQuality ? 'quality_improved' : 'context_bytes_reduced' };
+  }
+  if (!strictImprove && latencyPass && isSafetyFix(reconciliation)) {
+    return { status: 'safety_correction', reason_code: 'safety_fix' };
+  }
+  return { status: 'neutral', reason_code: 'no_strict_improvement' };
+}
+
 export function proposeCandidate(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { status: 'denied', reason_code: 'invalid_candidate' };
   const allowed = new Set(['source_evidence_fingerprint', 'policy_version', 'compiled_index_version', 'evaluation_inputs', 'proposal']);

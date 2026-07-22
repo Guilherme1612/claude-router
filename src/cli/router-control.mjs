@@ -6,23 +6,11 @@ import { executeRollback, previewRollback, recoverActiveVersion, verifyVersion }
 import { stableStringify } from '../registry/schema.mjs';
 import { loadCapsule, saveCapsule } from '../context/capsule.mjs';
 import { resolveContextAction } from '../context/resolve.mjs';
-import { proposeCandidate, evaluateCandidate, applyCanaryDecision } from '../evolution/canary-controller.mjs';
+import { proposeCandidate, evaluateCandidate, applyCanaryDecision, isSafetyFix, deriveDemonstratedBenefit } from '../evolution/canary-controller.mjs';
 import { createPersistentEvidenceStore } from '../evolution/evidence.mjs';
 import { assessCalibration, CALIBRATION_CORPUS, evaluateCalibrationCorpus, measureRoutes } from '../evolution/perf-measure.mjs';
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-index.mjs';
-
-// D-05 safety_correction predicate: a reconciliation report indicates a
-// safety/recovery fix when its verdicts carry a safety reason_code. Used to
-// decide whether a perf-neutral candidate still promotes (safety_correction)
-// or preserves (neutral) — Phase 17 success criterion #4. Mirrors the
-// isSafetyFix helper in src/registry/watcher.mjs:35-39 so the CLI promote path
-// derives demonstrated_benefit with the SAME predicate as the watcher.
-function isSafetyFix(report) {
-  return Array.isArray(report?.verdicts) && report.verdicts.some((verdict) => (
-    typeof verdict?.reason_code === 'string' && verdict.reason_code.startsWith('safety_')
-  ));
-}
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -435,25 +423,10 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
           });
           candidate = proposed.candidate;
           evaluation = evaluate({ candidate, evidence_window: window, gates, known_good_version: knownGood });
-          // D-05 demonstrated_benefit derivation (SAME predicate as the watcher):
-          // strict-improve on quality OR context_budget; latency hard gate;
-          // safety_correction on parity when the report is a safety fix; neutral
-          // otherwise -> preserve (never promote on parity — Phase 17 SC #4).
-          if (!evaluation.promotable) {
-            demonstrated_benefit = null;
-          } else {
-            const strictImproveQuality = candidateEvaluation.quality.pass === true && knownGoodEvaluation?.quality.pass === false;
-            const strictImproveContext = candidateEvaluation.context_budget.pass === true && knownGoodEvaluation?.context_budget.pass === false;
-            const strictImprove = strictImproveQuality || strictImproveContext;
-            const latencyPass = assessed.latency.pass === true;
-            if (strictImprove && latencyPass) {
-              demonstrated_benefit = { status: 'demonstrated', reason_code: strictImproveQuality ? 'quality_improved' : 'context_bytes_reduced' };
-            } else if (!strictImprove && latencyPass && isSafetyFix(reconciliation)) {
-              demonstrated_benefit = { status: 'safety_correction', reason_code: 'safety_fix' };
-            } else {
-              demonstrated_benefit = { status: 'neutral', reason_code: 'no_strict_improvement' };
-            }
-          }
+          // D-05 demonstrated_benefit derivation is shared with the watcher canary
+          // path via deriveDemonstratedBenefit (evolution/canary-controller.mjs) so
+          // the CLI and watcher cannot diverge on the promotion predicate.
+          demonstrated_benefit = deriveDemonstratedBenefit({ evaluation, candidateEvaluation, knownGoodEvaluation, assessed, reconciliation: reconciliation });
           decision_preview = {
             candidate_id: candidate?.id ?? null,
             promotable: evaluation?.promotable ?? false,

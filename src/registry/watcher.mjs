@@ -15,7 +15,7 @@ import { activateCandidate, recoverActiveVersion } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 import { publishCompiledIndex } from '../prompt/publish-index.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY, loadCompiledIndex } from '../prompt/compile-index.mjs';
-import { proposeCandidate, evaluateCandidate, applyCanaryDecision } from '../evolution/canary-controller.mjs';
+import { proposeCandidate, evaluateCandidate, applyCanaryDecision, isSafetyFix, deriveDemonstratedBenefit } from '../evolution/canary-controller.mjs';
 import { createPersistentEvidenceStore } from '../evolution/evidence.mjs';
 import { assessCalibration, evaluateCalibrationCorpus, measureRoutes, CALIBRATION_CORPUS } from '../evolution/perf-measure.mjs';
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
@@ -26,16 +26,6 @@ function hash(value) {
 
 function defaultScheduler() {
   return { now: Date.now, setTimeout, clearTimeout };
-}
-
-// D-05 safety_correction predicate: a reconciliation report indicates a
-// safety/recovery fix when its verdicts carry a safety reason_code. Used to
-// decide whether a perf-neutral candidate still promotes (safety_correction)
-// or preserves (neutral) — Phase 17 success criterion #4.
-function isSafetyFix(report) {
-  return Array.isArray(report?.verdicts) && report.verdicts.some((verdict) => (
-    typeof verdict?.reason_code === 'string' && verdict.reason_code.startsWith('safety_')
-  ));
 }
 
 export function createRegistryWatcher(options) {
@@ -432,22 +422,11 @@ export function createRegistryReconciler(config, dependencies = {}) {
                   });
                   const candidate = proposed.candidate;
                   const evaluation = evaluateCandidate({ candidate, evidence_window: window, gates, known_good_version: knownGood });
-                  let demonstrated_benefit;
-                  if (!evaluation.promotable) {
-                    demonstrated_benefit = null;
-                  } else {
-                    const strictImproveQuality = candidateEvaluation.quality.pass === true && knownGoodEvaluation.quality.pass === false;
-                    const strictImproveContext = candidateEvaluation.context_budget.pass === true && knownGoodEvaluation.context_budget.pass === false;
-                    const strictImprove = strictImproveQuality || strictImproveContext;
-                    const latencyPass = assessed.latency.pass === true;
-                    if (strictImprove && latencyPass) {
-                      demonstrated_benefit = { status: 'demonstrated', reason_code: strictImproveQuality ? 'quality_improved' : 'context_bytes_reduced' };
-                    } else if (!strictImprove && latencyPass && isSafetyFix(report)) {
-                      demonstrated_benefit = { status: 'safety_correction', reason_code: 'safety_fix' };
-                    } else {
-                      demonstrated_benefit = { status: 'neutral', reason_code: 'no_strict_improvement' };
-                    }
-                  }
+                  // D-05 demonstrated_benefit derivation is shared with the CLI
+                  // promote path via deriveDemonstratedBenefit
+                  // (evolution/canary-controller.mjs) so the watcher and CLI cannot
+                  // diverge on the promotion predicate.
+                  const demonstrated_benefit = deriveDemonstratedBenefit({ evaluation, candidateEvaluation, knownGoodEvaluation, assessed, reconciliation: report });
                   const decision = canaryDecision({
                     evaluation,
                     demonstrated_benefit,
