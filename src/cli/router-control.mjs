@@ -356,7 +356,29 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
         compatibility: candidateFile.compatibility || {},
       };
       const mapping = candidateFile.mapping || { schema_version: 1, subjects: [] };
-      const reconciliation = reportFile || { disposition: 'eligible', verdicts: [], candidate_fingerprint: 'candidate-unknown' };
+      // Fail-closed when the watcher's report.json is missing (partial write,
+      // corruption, manual deletion): the watcher always writes both files
+      // atomically together, so a missing report means no safety reconciliation
+      // actually occurred. Fall back to the candidate file's embedded
+      // disposition (the watcher writes `disposition` into candidate/registry.json
+      // at watcher.mjs:325-333); if even that is absent, treat as quarantined so
+      // the safety gate refuses to promote. Never silently default to 'eligible'.
+      const reconciliation = reportFile || {
+        disposition: candidateFile?.disposition === 'eligible' ? 'eligible' : 'quarantined',
+        verdicts: candidateFile?.verdicts || [],
+        candidate_fingerprint: candidateFile?.candidate_fingerprint || 'candidate-unknown',
+      };
+      if (!reportFile && !candidateFile?.disposition) {
+        return {
+          result: canonical('canary promote', false, 'missing_reconciliation_report', {
+            candidate_staged: true,
+            report_staged: false,
+            candidate_disposition: null,
+            next_action: 'wait_for_watcher_eligible_reconcile',
+          }),
+          exitCode: EXIT.invalid,
+        };
+      }
       const policyFingerprint = reportFile?.policy_fingerprint || 'policy-unknown';
 
       const createStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
