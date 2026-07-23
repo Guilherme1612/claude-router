@@ -90,6 +90,29 @@ test('full outer join classifies valid pairs and both orphan directions without 
   assert.equal(orphanBinding.verdicts[0].code, 'hook_orphan_binding');
 });
 
+test('orphan binding relaxes to advisory when target hook script exists on disk (gate 6 fix)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hook-advisory-'));
+  try {
+    mkdirSync(join(root, 'hooks'), { recursive: true });
+    writeFileSync(join(root, 'hooks', 'router.mjs'), '// hook\n');
+    const result = reconcileHookInventory([hookBinding()], { runtimeRoots: { claude: root } });
+    assert.deepEqual(result.classifications.map(value => value.classification), ['binding_without_descriptor']);
+    assert.equal(result.verdicts[0].code, 'hook_binding_without_descriptor');
+    assert.equal(result.verdicts[0].dispatchable, true);
+    assert.equal(result.verdicts[0].severity, 'dispatch-advisory');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('orphan binding stays corrective when target hook script is absent (gate 6 fix safety)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'hook-missing-'));
+  try {
+    const result = reconcileHookInventory([hookBinding()], { runtimeRoots: { claude: root } });
+    assert.deepEqual(result.classifications.map(value => value.classification), ['orphan_binding']);
+    assert.equal(result.verdicts[0].code, 'hook_orphan_binding');
+    assert.equal(result.verdicts[0].dispatchable, false);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('duplicates mismatch malformed escape runtime and scope isolation fail closed deterministically', () => {
   const cases = [
     { code: 'hook_ambiguous', observations: [hookFile(), hookFile({ source_fingerprint: 'sha:duplicate' }), hookBinding()] },

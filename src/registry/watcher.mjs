@@ -369,6 +369,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
       lifecycle: diff,
       aliases: config.aliases || [],
       mappings: config.mappings || [],
+      runtimeRoots: { claude: config.claude_root, codex: config.codex_root },
       ...(config.scope ? { scope: config.scope } : {}),
     });
     const candidatePublication = report.disposition === 'eligible'

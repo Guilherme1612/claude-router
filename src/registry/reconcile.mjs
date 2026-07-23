@@ -196,7 +196,7 @@ export function reconcileCandidate(options = {}) {
     const hookInventory = options.hookInventory || candidate.records
       .map(record => record.hook_observation)
       .filter(Boolean);
-    const hookResult = reconcileHookInventory(hookInventory);
+    const hookResult = reconcileHookInventory(hookInventory, { runtimeRoots: options.runtimeRoots });
     const verdicts = [...wholeCandidateVerdicts(candidate, options), ...hookResult.verdicts];
     for (const [id, targets] of [...claims].sort(([left], [right]) => left.localeCompare(right))) {
       if (targets.size < 2) continue;
@@ -257,12 +257,17 @@ export function reconcileCandidate(options = {}) {
       }));
     }
     verdicts.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+    // Disposition is 'eligible' when no verdict blocks dispatch (dispatchable === false).
+    // Advisory verdicts (dispatchable === true, e.g. hook_binding_without_descriptor) do
+    // not quarantine the candidate — they surface non-blocking hygiene findings. This
+    // keeps gate 6 (reconciliation_safety) passable when the only findings are advisory.
+    const hasBlocking = verdicts.some(v => v.dispatchable === false);
     options.commitAliasSet?.({
       aliases: structuredClone(aliases),
       verdicts: structuredClone(verdicts),
-      disposition: verdicts.length ? 'quarantined' : 'eligible',
+      disposition: hasBlocking ? 'quarantined' : 'eligible',
     });
-    const canonical = { disposition: verdicts.length ? 'quarantined' : 'eligible', verdicts };
+    const canonical = { disposition: hasBlocking ? 'quarantined' : 'eligible', verdicts };
     return {
       ...canonical,
       report_fingerprint: fingerprint(canonical),

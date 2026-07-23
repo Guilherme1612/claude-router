@@ -317,6 +317,7 @@ export async function installRouter(options) {
     candidate: built.registry,
     active: { registry: emptyActiveRegistry, bytes: activeBytes, fingerprint: fingerprint(activeBytes) },
     lifecycle: { events: [], diagnostics: [] },
+    runtimeRoots: { claude: p.claudeRoot, codex: p.codexRoot },
   });
   const candidatePublication = reconciliation.disposition === 'eligible'
     ? { ...built.registry, disposition: 'eligible', activated: false, candidate_fingerprint: reconciliation.candidate_fingerprint }

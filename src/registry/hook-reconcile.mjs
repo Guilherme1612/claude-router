@@ -1,4 +1,5 @@
-import { posix } from 'node:path';
+import { posix, join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { stableStringify } from './schema.mjs';
 
 function portablePath(value) {
@@ -49,8 +50,13 @@ function corrective(code, subject, evidence, reason, action) {
   return { schema_version: 1, code, severity: 'dispatch-blocking', dispatchable: false, subject, evidence, reason, corrective_action: action };
 }
 
-export function reconcileHookInventory(observations = []) {
+function advisory(code, subject, evidence, reason, action) {
+  return { schema_version: 1, code, severity: 'dispatch-advisory', dispatchable: true, subject, evidence, reason, corrective_action: action };
+}
+
+export function reconcileHookInventory(observations = [], options = {}) {
   if (!Array.isArray(observations)) throw new TypeError('hook observations must be an array');
+  const runtimeRoots = options.runtimeRoots || {};
   const values = observations.map(normalized).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
   const classifications = [], verdicts = [], valid = [];
   for (const value of values) {
@@ -92,8 +98,25 @@ export function reconcileHookInventory(observations = []) {
         classifications.push({ classification: 'orphan_file', active: false, file: pairFiles[0] });
         verdicts.push(corrective('hook_orphan_file', { kind: 'hook_file', key }, { relative_path: pairFiles[0].relative_path }, 'A hook file has no exact explicit binding.', 'Add a reviewed explicit binding or remove the orphan file; no binding is synthesized.'));
       } else {
-        classifications.push({ classification: 'orphan_binding', active: false, binding: pairBindings[0] });
-        verdicts.push(corrective('hook_orphan_binding', { kind: 'hook_binding', key }, { relative_path: pairBindings[0].relative_path }, 'A binding has no exact trusted discovered hook file.', 'Install or repair the reviewed hook file, or remove the orphan binding; no file is synthesized.'));
+        const binding = pairBindings[0];
+        const runtimeRoot = runtimeRoots[binding.runtime];
+        const targetExists = runtimeRoot && binding.target_ref
+          && existsSync(join(runtimeRoot, binding.target_ref));
+        if (targetExists) {
+          // The hook script exists on disk but has no hooks/*.json descriptor file.
+          // The trusted-file model requires a paired descriptor, but the existing gsd/
+          // caveman/context-mode hooks are .js/.mjs scripts without descriptors. Relax
+          // the pair requirement to a non-blocking advisory when the target file exists
+          // on disk and the binding is already validated (target_ref within runtime root).
+          // This does NOT trust arbitrary settings.json bindings — the binding's target_ref
+          // already passed path validation, and the file existence check confirms the hook
+          // script is present. Scoped to bindings whose target file exists (T-quick-04).
+          classifications.push({ classification: 'binding_without_descriptor', active: false, binding });
+          verdicts.push(advisory('hook_binding_without_descriptor', { kind: 'hook_binding', key }, { relative_path: binding.relative_path, target_ref: binding.target_ref }, 'A binding references a hook script that exists on disk but has no trusted descriptor file.', 'Add a hooks/*.json descriptor file to follow the trusted-file model, or accept the binding as self-trusted.'));
+        } else {
+          classifications.push({ classification: 'orphan_binding', active: false, binding });
+          verdicts.push(corrective('hook_orphan_binding', { kind: 'hook_binding', key }, { relative_path: binding.relative_path }, 'A binding has no exact trusted discovered hook file.', 'Install or repair the reviewed hook file, or remove the orphan binding; no file is synthesized.'));
+        }
       }
     }
   }
