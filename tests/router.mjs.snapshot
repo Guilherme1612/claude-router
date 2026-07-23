@@ -20,7 +20,7 @@
 // no injection, no cache, no telemetry. Subsequent plans slot routing logic
 // into a pipeline that is already provably non-blocking and coexistence-safe.
 
-import { readFileSync, writeFileSync, existsSync, statSync, renameSync, appendFileSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -2792,7 +2792,7 @@ function runCli(argv) {
   if (cmd === 'inspect' || cmd === 'preview') {
     const prompt = cliPrompt(args);
     if (!prompt) {
-      process.stdout.write(JSON.stringify({
+      writeSync(1, JSON.stringify({
         status: 'error',
         error: 'missing_prompt',
         command: cmd,
@@ -2822,7 +2822,7 @@ function runCli(argv) {
         emitted_to_hook: false,
       };
     }
-    process.stdout.write(JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'proposals' || cmd === 'proposal' || cmd === 'evolve-proposals') {
@@ -2833,34 +2833,34 @@ function runCli(argv) {
       evolutionStatePath: process.env.ROUTER_TEST_EVOLUTION_STATE_PATH || EVOLUTION_STATE,
       triggerPath: process.env.ROUTER_TEST_EVOLVE_TRIGGER_PATH || TRIGGER,
     });
-    process.stdout.write(JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(out, null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'explain-last') {
-    process.stdout.write(JSON.stringify(explainLastDecision(), null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(explainLastDecision(), null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'routes') {
-    process.stdout.write(JSON.stringify(listRoutes(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(listRoutes(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'unmapped') {
-    process.stdout.write(JSON.stringify(listUnmapped(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(listUnmapped(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'coverage') {
-    process.stdout.write(JSON.stringify(summarizeCoverage(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(summarizeCoverage(loadManifest() || {}, loadModeMap() || {}), null, args.includes('--json') ? 0 : 2));
     return true;
   }
   if (cmd === 'doctor' || cmd === 'health') {
-    process.stdout.write(JSON.stringify(diagnoseRouterState(), null, args.includes('--json') ? 0 : 2));
+    writeSync(1,JSON.stringify(diagnoseRouterState(), null, args.includes('--json') ? 0 : 2));
     return true;
   }
   return false;
 }
 
 function emit(additionalContext) {
-  process.stdout.write(JSON.stringify({
+  writeSync(1,JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext,

@@ -30,7 +30,8 @@ function withTempDir(fn) {
 
 // --- graphifyHeuristic (replaced body; signature preserved D-18) -----------
 
-test('graphifyHeuristic: fires regex + has real graph → ok status, non-empty symbols, boostIds Set', () => {
+test('graphifyHeuristic: fires regex + has real graph → ok status, non-empty symbols, boostIds Set', (t) => {
+  if (!existsSync(REAL_GRAPH_PATH)) { t.skip('requires AutomaticTrading graphify-out/graph.json (env-dependent)'); return; }
   const r = graphifyHeuristic('how does the memo writer work', REAL_GRAPH_DIR);
   assert.equal(r.queried, true, 'queried stays true whenever the regex fires (D-18)');
   assert.equal(r.status, 'ok');

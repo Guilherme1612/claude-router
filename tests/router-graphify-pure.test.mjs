@@ -4,7 +4,7 @@
 // used for the ok-path tests; synthetic minimal-shape graphs drive the edge cases.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync, statSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -28,7 +28,8 @@ function writeGraph(dir, graphObj) {
 
 // --- graphifyQuery ---------------------------------------------------------
 
-test('graphifyQuery: "ok" status on real AutomaticTrading graph with overlapping prompt', () => {
+test('graphifyQuery: "ok" status on real AutomaticTrading graph with overlapping prompt', (t) => {
+  if (!existsSync(join(REAL_GRAPH_DIR, 'graphify-out', 'graph.json'))) { t.skip('requires AutomaticTrading graphify-out/graph.json (env-dependent)'); return; }
   const r = graphifyQuery('how does the memo writer work', REAL_GRAPH_DIR, 8);
   assert.equal(r.graph_status, 'ok');
   assert.equal(r.graph_queried, true);
