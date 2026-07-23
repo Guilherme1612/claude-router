@@ -102,6 +102,18 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
       continue;
     }
     const selected = selectWorkflow(transitionResult, undefined);
+    // WR-01 (latent v2 bug): position.state is hardcoded to 'planned' for every
+    // workflow regardless of its actual lifecycle state. The v1.2 audit recommends
+    // asserting selected.selection.workflow_id === workflowId here and deriving
+    // position.state from the selected transition's target state (selected.selection.to)
+    // rather than hardcoding 'planned'. Changing this today would alter the evidence
+    // fed to nextValidTransitions, changing the published index bytes — too risky for
+    // v1 which only wires gsd-execute-phase. The assertion below is the defensive
+    // guard; the hardcoded 'planned' stays until v2 derives position.state from the
+    // workflow declaration / selected transition. TODO(v2): position.state = selected.selection.to.
+    if (selected.status === 'selected' && selected.selection.workflow_id !== workflowId) {
+      throw new TypeError(`workflow_id mismatch: route=${workflowId} selected=${selected.selection.workflow_id}`);
+    }
     if (selected.status !== 'selected') {
       closureByWorkflow[workflowId] = {
         selected_transition: null, candidates: transitionResult.candidates, closure: [],

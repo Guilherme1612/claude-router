@@ -1,3 +1,7 @@
 .planning/
 .worktrees/
 release/v1.2-report.json
+.DS_Store
+docs/.DS_Store
+.tmp-verifier-instructions/
+graphify-out/
