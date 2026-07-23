@@ -25,10 +25,18 @@ function diagnostic(code, runtime, logicalRoot, path, reason, severity = 'build-
 }
 function walk(root) {
   const files = [];
+  // Prune dependency trees and VCS metadata: these never carry router-relevant
+  // capabilities, and descending into them makes the scanner parse JSONC
+  // tsconfig.json files inside plugin package caches as strict JSON, which
+  // dispatch-blocks the whole registry candidate.
+  const PRUNE = new Set(['node_modules', '.git', 'tests', 'fixtures']);
   function visit(path) {
     const stat = lstatSync(path);
     if (stat.isFile() || stat.isSymbolicLink()) files.push(path);
-    else if (stat.isDirectory()) for (const name of readdirSync(path).sort()) visit(join(path, name));
+    else if (stat.isDirectory()) for (const name of readdirSync(path).sort()) {
+      if (PRUNE.has(name)) continue;
+      visit(join(path, name));
+    }
   }
   try { visit(root); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
   return files;
@@ -137,7 +145,13 @@ function toml(bytes) {
     if (line.startsWith('#')) continue;
     const header = line.match(/^\[([A-Za-z0-9_.-]+)\]$/);
     if (header) { section = assignPath(data, header[1].split('.')); continue; }
-    const pair = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*(.*)$/);
+    // Tolerate table headers the bounded parser does not model — quoted or
+    // dotted keys (`[plugins."name@scope"]`) and array-of-tables (`[[x]]`) —
+    // by diverting into a scratch section so following key=value lines neither
+    // throw nor pollute the root table. expandConfig only reads top-level
+    // scalars/inline collections, which sit above any such header.
+    if (/^\[+.+\]$/.test(line)) { section = {}; continue; }
+    const pair = line.match(/^("[^"]+"|[A-Za-z0-9_.-]+)\s*=\s*(.*)$/);
     if (!pair) throw new Error(`unsupported TOML line: ${raw}`);
     let value = pair[2].trim();
     const delimiter = value.startsWith('"""') ? '"""' : value.startsWith("'''") ? "'''" : null;
@@ -152,8 +166,9 @@ function toml(bytes) {
       }
       value = chunks.join('\n').replace(/^\n/, '');
     } else value = scalar(value);
-    const keys = pair[1].split('.'); const target = keys.length > 1 ? assignPath(section, keys.slice(0, -1)) : section; const key = keys.at(-1);
-    if (Object.hasOwn(target, key)) throw new Error(`duplicate key: ${pair[1]}`);
+    const rawKey = pair[1].startsWith('"') ? pair[1].slice(1, -1) : pair[1];
+    const keys = rawKey.split('.'); const target = keys.length > 1 ? assignPath(section, keys.slice(0, -1)) : section; const key = keys.at(-1);
+    if (Object.hasOwn(target, key)) throw new Error(`duplicate key: ${rawKey}`);
     target[key] = value;
   }
   if (!data.mcp_servers) data.mcp_servers = {};
@@ -161,6 +176,11 @@ function toml(bytes) {
 }
 
 function claudeLayout(rel) {
+  // Marketplace metadata subtrees hold registry indexes and test fixtures, not
+  // installed capabilities. Installed plugin skills live under
+  // `plugins/cache/<id>/<ver>/...` (still scanned) or `plugins/<id>/...`; the
+  // recognized plugin metadata path is `plugins/<id>/plugin.json`.
+  if (rel.startsWith('plugins/marketplaces/')) return null;
   if (rel === 'settings.json') return { type: 'settings', format: 'json' };
   if (/^skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'skill', format: 'markdown' };
   if (/^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(rel)
@@ -184,22 +204,47 @@ function invocation(data, name, type) {
   return { command: data.command || name, args: Array.isArray(data.args) ? data.args : [] };
 }
 
-function portableTarget(value) {
+function portableTarget(value, rootPath) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const normalized = value.trim().replaceAll('\\', '/');
-  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) return null;
+  // Absolute path: Claude Code settings.json hooks reference scripts by
+  // absolute path. Accept it only when it resolves within the runtime root,
+  // expressing it as a portable relative ref; anything else is an escape.
+  if (normalized.startsWith('/') || /^[A-Za-z]:\//.test(normalized)) {
+    if (!rootPath) return null;
+    const root = rootPath.replaceAll('\\', '/').replace(/\/$/, '');
+    if (normalized === root) return '';
+    if (normalized.startsWith(`${root}/`)) return normalized.slice(root.length + 1);
+    return null;
+  }
   const parts = normalized.split('/');
   if (parts.includes('..')) return null;
   return normalized.replace(/^\.\//, '');
 }
 
-function commandReference(command) {
+// Tokenize a shell-style command string, respecting single/double quotes and
+// stripping them from each token, so quoted absolute paths in settings.json
+// hook commands are accepted instead of failing the command-form check.
+function splitShellTokens(text) {
+  const tokens = []; let current = ''; let quote = null;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (quote) { if (ch === quote) quote = null; else current += ch; }
+    else if (ch === '"' || ch === "'") quote = ch;
+    else if (/\s/.test(ch)) { if (current) { tokens.push(current); current = ''; } }
+    else current += ch;
+  }
+  if (current) tokens.push(current);
+  return tokens;
+}
+
+function commandReference(command, rootPath) {
   if (typeof command !== 'string' || !command.trim()) return { valid: false, reason: 'unsupported_command_form' };
-  if (!/^[A-Za-z0-9_./:$@+\-]+(?:\s+[A-Za-z0-9_./:$@+\-]+)*$/.test(command.trim())) {
+  const tokens = splitShellTokens(command.trim());
+  if (!tokens.length || tokens.some((token) => !/^[A-Za-z0-9_./:$@+\-]*$/.test(token))) {
     return { valid: false, reason: 'unsupported_command_form' };
   }
-  const tokens = command.trim().split(/\s+/);
-  const target = portableTarget(tokens.at(-1));
+  const target = portableTarget(tokens.at(-1), rootPath);
   return target ? { valid: true, target_ref: target, command: tokens[0], args: tokens.slice(1) }
     : { valid: false, reason: 'path_escape' };
 }
@@ -213,20 +258,30 @@ function nestedBindingCommands(value, output = []) {
   return output;
 }
 
-function hookObservation(nativeRecord, nativeInvocation, scope) {
+function hookObservation(nativeRecord, nativeInvocation, scope, rootPath) {
   if (!['hook', 'binding'].includes(nativeRecord.type)) return null;
   let references;
   if (nativeRecord.type === 'binding' && nativeInvocation?.bindings !== undefined) {
-    references = nestedBindingCommands(nativeInvocation.bindings).map(commandReference);
+    references = nestedBindingCommands(nativeInvocation.bindings).map((command) => commandReference(command, rootPath));
   } else {
     const args = Array.isArray(nativeInvocation?.args) ? nativeInvocation.args.map(String) : [];
-    const target = portableTarget(nativeRecord.data.target_ref || args.at(-1) || nativeInvocation?.command);
+    const target = portableTarget(nativeRecord.data.target_ref || args.at(-1) || nativeInvocation?.command, rootPath);
     references = target
       ? [{ valid: true, target_ref: target, command: String(nativeInvocation?.command || ''), args }]
       : [{ valid: false, reason: 'path_escape' }];
   }
   if (!references.length) references = [{ valid: false, reason: 'malformed_binding' }];
-  const valid = references.length === 1 && references[0].valid;
+  // A Claude Code settings event legitimately fans out to several hook entries
+  // (distinct matchers/scripts). A binding with multiple DISTINCT references is
+  // valid; only a true duplicate — the same command+args referenced twice — is
+  // 'duplicate_reference'. The single-reference model would quarantine every
+  // normal multi-hook event.
+  const allValid = references.length > 0 && references.every((item) => item.valid);
+  const refKeys = references.map((item) => (item.valid ? `${item.command}\0${JSON.stringify(item.args)}` : null));
+  const present = refKeys.filter((value) => value !== null);
+  const hasDuplicate = new Set(present).size !== present.length;
+  const valid = allValid && !hasDuplicate;
+  const invalidReason = references.find((item) => !item.valid)?.reason;
   return {
     schema_version: 1,
     kind: nativeRecord.type === 'hook' ? 'file' : 'binding',
@@ -240,8 +295,8 @@ function hookObservation(nativeRecord, nativeInvocation, scope) {
     command: valid ? references[0].command : null,
     args: valid ? references[0].args : [],
     valid,
-    ...(valid ? {} : { reason: references.find(item => !item.valid)?.reason || 'duplicate_reference' }),
-    ...(references.length > 1 ? { references, reason: 'duplicate_reference' } : {}),
+    ...(valid ? {} : { reason: hasDuplicate ? 'duplicate_reference' : (invalidReason || 'malformed_binding') }),
+    ...(references.length > 1 ? { references } : {}),
   };
 }
 
@@ -299,11 +354,11 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     return base;
   }
 
-  function normalizeArtifact(nativeRecord) {
+  function normalizeArtifact(nativeRecord, rootPath) {
     if (!nativeRecord?.data) throw new TypeError('normalizeArtifact requires a parsed artifact');
     const scope = nativeRecord.scope || { kind: 'global' };
     const nativeInvocation = nativeRecord.data.native_invocation || invocation(nativeRecord.data, nativeRecord.name, nativeRecord.type);
-    const normalizedHook = hookObservation(nativeRecord, nativeInvocation, scope);
+    const normalizedHook = hookObservation(nativeRecord, nativeInvocation, scope, rootPath);
     const declared = Array.isArray(nativeRecord.data.dependencies);
     const items = declared ? nativeRecord.data.dependencies.map((entry) => ({ id: String(entry.id), available: entry.available === true })) : [];
     const command = nativeInvocation.command || nativeRecord.name;
@@ -340,7 +395,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
         const parsed = parseArtifact(path, { root: canonicalRoot, logicalRoot: spec.logicalRoot, scope: spec.scope });
         if (parsed.diagnostic) diagnostics.push(parsed.diagnostic);
         if (parsed.partial) observations.push(normalizePartial(parsed.partial));
-        else for (const record of parsed.records || (parsed.data ? [parsed] : [])) observations.push(normalizeArtifact(record));
+        else for (const record of parsed.records || (parsed.data ? [parsed] : [])) observations.push(normalizeArtifact(record, canonicalRoot));
       }
     }
     const key = (v) => `${v.type || v.code}:${v.name || ''}:${v.logical_root || v.provenance?.[0]?.logical_root}:${v.relative_path || v.provenance?.[0]?.relative_path}`;

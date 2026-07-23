@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as claude from '../src/adapters/claude.mjs';
@@ -220,5 +220,56 @@ test('malformed nested native syntax remains deterministic and non-dispatchable'
     assert.equal(first.observations.length, 2);
     assert.ok(first.observations.every((entry) => !entry.dispatchable && entry.lifecycle === 'invalid'));
     assert.equal(first.diagnostics.filter((entry) => entry.code === 'malformed_artifact').length, 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('real-world settings.json hooks: node_modules excluded, quoted TOML headers parse, multi-hook absolute-path bindings are valid', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-adapters-realworld-'));
+  const claudeRoot = join(root, 'claude');
+  const codexRoot = join(root, 'codex');
+  try {
+    // (a) JSONC tsconfig inside a plugin cache node_modules tree — must be pruned
+    // by walk() so it is never parsed as strict JSON (which would dispatch-block
+    // the registry candidate with a malformed_artifact diagnostic).
+    put(join(claudeRoot, 'plugins/cache/x/y/1.0.0/node_modules/pkg/tsconfig.json'),
+      '{"compilerOptions":{"a":1,}//comment\n}');
+
+    // (b) config.toml with quoted/dotted table headers the bounded TOML parser
+    // does not strictly model — the tolerant header path diverts them to a
+    // scratch section so following key=value lines neither throw nor pollute root.
+    put(join(codexRoot, 'config.toml'),
+      'model = "gpt-5.5"\n[plugins."claude-md-management@claude-plugins-official"]\nenabled = true\n[mcp_servers."foo"]\ncommand = "ctx"\n');
+
+    // (c) settings.json with two distinct PostToolUse hook entries, each binding a
+    // quoted absolute node + quoted absolute script under claudeRoot/hooks/. The
+    // scripts really exist so the absolute targets resolve within the runtime root.
+    put(join(claudeRoot, 'hooks/a.mjs'), "export default function () {}\n");
+    put(join(claudeRoot, 'hooks/b.mjs'), "export default function () {}\n");
+    const claudeRootReal = realpathSync(claudeRoot);
+    const nodeBin = process.execPath;
+    put(join(claudeRoot, 'settings.json'), {
+      schema_version: 1,
+      hooks: {
+        PostToolUse: [
+          { matcher: '*', hooks: [{ type: 'command', command: `"${nodeBin}" "${join(claudeRootReal, 'hooks/a.mjs')}"` }] },
+          { matcher: 'Edit', hooks: [{ type: 'command', command: `"${nodeBin}" "${join(claudeRootReal, 'hooks/b.mjs')}"` }] },
+        ],
+      },
+    });
+
+    const cr = claude.discoverRoots({ claudeRoot });
+    const xr = codex.discoverRoots({ codexRoot });
+
+    // (a) the JSONC tsconfig under node_modules is pruned — no malformed_artifact.
+    assert.equal(cr.diagnostics.some((d) => d.code === 'malformed_artifact' && /tsconfig\.json/.test(d.relative_path)), false);
+
+    // (b) the tolerant TOML header path parses config.toml — no `unsupported TOML line`.
+    assert.equal(xr.diagnostics.some((d) => d.relative_path === 'config.toml' && /unsupported TOML line/.test(d.reason || '')), false);
+
+    // (c) the multi-hook PostToolUse binding is valid with no duplicate_reference / path_escape.
+    const binding = cr.observations.find((o) => o.name === 'settings:PostToolUse');
+    assert.ok(binding, 'PostToolUse binding not observed');
+    assert.equal(binding.hook_observation.valid, true);
+    assert.equal(binding.hook_observation.reason, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
