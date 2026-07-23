@@ -423,6 +423,18 @@ export async function installRouter(options) {
     report_path: p.reportPath,
     activation_root: p.ownedRoot,
     active_path: join(p.ownedRoot, 'active.json'),
+    // mode-map.json is the router's workflow brain (task-signal → mode/skills/agents).
+    // The registry build stamps per-record `mapping.explicit_subjects` from it so
+    // mapCandidateRegistry seeds dispatch subjects → publishCompiledIndex can emit
+    // routes. Not in ownedValues (not deployed/overwritten): like telemetry.jsonl,
+    // it is a user-reviewed/mutation data file that pre-exists at ownedRoot.
+    mode_map_path: join(p.ownedRoot, 'mode-map.json'),
+    // workflow-declarations.json is the orchestrator's declared-workflow contract
+    // (deployed to modules/orchestrator/). The registry build stamps declared
+    // workflow_ids onto matching records so the compiled index has routes for every
+    // orchestrator-declared workflow (e.g. gsd-execute-phase), which the calibration
+    // quality gate requires.
+    workflow_declarations_path: join(p.ownedRoot, 'modules', 'orchestrator', 'workflow-declarations.json'),
     // EVO-05: the watcher ingests routing telemetry into the canary evidence
     // store. The hook appends to ~/.claude/router/telemetry.jsonl which equals
     // join(ownedRoot, 'telemetry.jsonl') for a global install.
@@ -449,9 +461,11 @@ export async function installRouter(options) {
   const { verification_runners: _strippedRunners, ...serializableConfig } = controllerConfig;
   const controllerConfigValue = stableStringify(serializableConfig) + '\n';
   const configurationFingerprint = fingerprint(stableStringify(serializableConfig));
+  const readinessValues = [
+    ...moduleValues, ...gateFixtureValues, [p.controllerConfigPath, controllerConfigValue],
+  ];
   const ownedValues = [
-    ...moduleValues, ...gateFixtureValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
-    [p.controllerConfigPath, controllerConfigValue],
+    ...readinessValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
   ];
   for (const [file] of ownedValues) {
     const owned = existingManifest?.files?.some(entry => entry.path === file);
@@ -587,7 +601,10 @@ export async function installRouter(options) {
       && fileMatches(p.codexRouterPath, sourceFingerprint)
       && (!deployEvolve || fileMatches(p.codexEvolvePath, evolveFingerprint))
       && fileMatches(p.codexMarkerPath, markerFingerprint)
-      && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
+      // candidate/report are controller-owned mutable state after startup. The first
+      // reconcile can legitimately replace their installer seed bytes before the
+      // controller publishes `ready`; only immutable deployment inputs belong here.
+      && readinessValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
     return {

@@ -311,6 +311,16 @@ export function createRegistryReconciler(config, dependencies = {}) {
     claudeRoot: config.claude_root,
     codexRoot: config.codex_root,
     ...(config.project_root ? { projectRoot: config.project_root, scopeId: config.scope_id } : {}),
+    // modeMapPath flows through to buildFullRegistry/buildIncrementalRegistry inside
+    // the incremental_full_equivalence gate, so the gate's rebuilt registries get the
+    // SAME mode-map stamping as the candidate. Without it the candidate (stamped) and
+    // the rebuilt incremental/full (un-stamped) differ → bytes mismatch → gate fails.
+    ...(config.mode_map_path ? { modeMapPath: config.mode_map_path } : {}),
+    // workflowDeclarationsPath: the orchestrator's declared workflow_ids are stamped
+    // onto matching records so the compiled index has routes for every declared
+    // workflow (e.g. gsd-execute-phase). Without this the calibration quality gate
+    // fails (the corpus routes through gsd-execute-phase) and the canary rolls back.
+    ...(config.workflow_declarations_path ? { workflowDeclarationsPath: config.workflow_declarations_path } : {}),
   };
   const acquire = dependencies.acquireRegistry || acquireRegistry;
   const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;
@@ -388,7 +398,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
       next = refresh(baseline, diff, acquisitionOptions);
       equivalenceDiff = diff;
     }
-    const built = assemble(next);
+    const built = assemble(next, acquisitionOptions);
     const active = await readActive();
     const report = evaluate({
       candidate: built.registry,

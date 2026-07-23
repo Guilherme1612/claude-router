@@ -6,9 +6,10 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
-import { installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
+import { spawn, spawnSync } from 'node:child_process';
+import { fingerprint, installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { buildFullRegistry } from '../src/registry/build.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = join(REPO_ROOT, 'install-router.mjs');
@@ -147,6 +148,41 @@ test('post-mutation failure restores exact fresh-install state', async () => {
     await assert.rejects(installRouter({ ...f.options, afterMutation() { throw new Error('injected readiness failure'); } }), /injected readiness failure/);
     assert.deepEqual(snapshot(f.root), before);
   } finally { await cleanup(f); }
+});
+
+test('readiness accepts controller-owned candidate and report mutations', async () => {
+  const f = fixture();
+  let child;
+  try {
+    const candidatePath = join(f.options.claudeRoot, 'router', 'candidate', 'registry.json');
+    const reportPath = join(f.options.claudeRoot, 'router', 'candidate', 'report.json');
+    const statusPath = join(f.options.claudeRoot, 'router', 'controller', 'status.json');
+    const result = await installRouter({
+      ...f.options,
+      afterMutation() {
+        writeFileSync(candidatePath, '{"records":[{"id":"runtime"}],"schema_version":1}\n');
+        writeFileSync(reportPath, '{"runtime_reconciliation":true}\n');
+      },
+      launchController(_binary, args) {
+        child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+        const configPath = args[args.indexOf('--config') + 1];
+        const config = JSON.parse(readFileSync(configPath, 'utf8'));
+        writeFileSync(statusPath, JSON.stringify({
+          schema_version: 1,
+          state: 'ready',
+          instance_id: 'mutable-state-test',
+          pid: child.pid,
+          heartbeat: Date.now(),
+          configuration_fingerprint: fingerprint(stableStringify(config)),
+        }) + '\n');
+        return child;
+      },
+    });
+    assert.equal(result.ready, true);
+  } finally {
+    child?.kill('SIGTERM');
+    await cleanup(f);
+  }
 });
 
 test('post-mutation repair failure restores every owned byte and manifest', async () => {

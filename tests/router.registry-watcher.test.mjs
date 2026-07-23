@@ -187,12 +187,20 @@ function reconcilerCapability(overrides = {}) {
 }
 
 test('installed reconciliation publishes eligible inactive candidate and deterministic report without activation', async () => {
-  const writes = [], activations = [];
+  const writes = [], activations = [], assemblyOptions = [];
   const activeBytes = '{"active":true}\n';
-  const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+  const reconcile = createRegistryReconciler({
+    candidate_path: '/candidate',
+    report_path: '/report',
+    mode_map_path: '/owned/mode-map.json',
+    workflow_declarations_path: '/owned/workflow-declarations.json',
+  }, {
     acquireRegistry: () => ({ generation: 0 }),
     refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
-    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } }),
+    assembleRegistry: (_next, options) => {
+      assemblyOptions.push(options);
+      return { registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } };
+    },
     readActive: async () => ({ bytes: activeBytes, fingerprint: createHash('sha256').update(activeBytes).digest('hex') }),
     activate: value => activations.push(value),
     writeJson: async (path, value) => writes.push({ path, value }),
@@ -204,6 +212,8 @@ test('installed reconciliation publishes eligible inactive candidate and determi
   assert.equal(writes[1].value.active_bytes, activeBytes);
   assert.deepEqual(activations, []);
   assert.equal(reconcile.lastReconciliation.disposition, 'eligible');
+  assert.equal(assemblyOptions[0].modeMapPath, '/owned/mode-map.json');
+  assert.equal(assemblyOptions[0].workflowDeclarationsPath, '/owned/workflow-declarations.json');
 });
 
 test('eligible watcher pipeline maps then verifies then activates, including safe unmapped', async () => {

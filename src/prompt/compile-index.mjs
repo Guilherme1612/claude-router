@@ -20,6 +20,14 @@ export const COMPILED_INDEX_LIMITS = Object.freeze({
   known_good_bytes: 16 * 1024,
   metadata_bytes: 8 * 1024,
   payload_bytes: 64 * 1024,
+  // The registry sibling (registry.json) embedded in a release tuple carries the
+  // full candidate registry — 257+ records, ~256KB in production. The 64KB
+  // payload_bytes bound (sized for the compact compiled index.json) rejected it,
+  // so verifyTuple failed at the registry hash check and publishCompiledIndex
+  // threw tuple_validation_failed on every activation. A dedicated 1MB bound
+  // accommodates the registry with headroom for growth without unbounding the
+  // compact index.json read (which stays at payload_bytes).
+  registry_bytes: 1024 * 1024,
   known_good_versions: 8,
   maximum_age_ms: 30 * 24 * 60 * 60 * 1000,
   // Phase 19 Pitfall #5: independent sibling bounds so blocked routes don't
@@ -133,7 +141,7 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
     if (pointer?.schema_version !== 2 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
     const versionRoot = resolve(tupleRoot, 'versions', pointer.tuple_version_id);
     const manifestRead = boundedJson(resolve(versionRoot, 'manifest.json'), COMPILED_INDEX_LIMITS.metadata_bytes, io);
-    const registryRead = boundedJson(resolve(versionRoot, 'registry.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
+    const registryRead = boundedJson(resolve(versionRoot, 'registry.json'), COMPILED_INDEX_LIMITS.registry_bytes, io);
     const indexRead = boundedJson(resolve(versionRoot, 'index.json'), COMPILED_INDEX_LIMITS.payload_bytes, io);
     const closureRead = boundedJson(resolve(versionRoot, 'closure.json'), COMPILED_INDEX_LIMITS.closure_bytes, io);
     const budgetRead = boundedJson(resolve(versionRoot, 'budget.json'), COMPILED_INDEX_LIMITS.budget_bytes, io);

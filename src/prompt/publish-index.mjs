@@ -108,11 +108,27 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
     // position.state from the selected transition's target state (selected.selection.to)
     // rather than hardcoding 'planned'. Changing this today would alter the evidence
     // fed to nextValidTransitions, changing the published index bytes — too risky for
-    // v1 which only wires gsd-execute-phase. The assertion below is the defensive
-    // guard; the hardcoded 'planned' stays until v2 derives position.state from the
-    // workflow declaration / selected transition. TODO(v2): position.state = selected.selection.to.
+    // v1 which only wires gsd-execute-phase. The hardcoded 'planned' stays until v2
+    // derives position.state from the workflow declaration / selected transition.
+    // TODO(v2): position.state = selected.selection.to.
+    //
+    // When the orchestrator selects a declared workflow that does NOT match the
+    // route's workflow_id (e.g. a route for 'gsd-debug' — a real workflow not yet
+    // in the 8 declared workflow-declarations — selects 'gsd-execute-phase' because
+    // they share the 'gsd' family), bake the route as blocked and continue instead
+    // of throwing. Throwing aborted the entire publish on a single undeclared route,
+    // which blocked activation whenever the mode-map stamped any workflow_id outside
+    // the declared set. Graceful degradation is consistent with the existing
+    // blocked-workflow pattern below; the declared workflows still wire fully.
     if (selected.status === 'selected' && selected.selection.workflow_id !== workflowId) {
-      throw new TypeError(`workflow_id mismatch: route=${workflowId} selected=${selected.selection.workflow_id}`);
+      closureByWorkflow[workflowId] = {
+        selected_transition: null, candidates: transitionResult.candidates, closure: [],
+        invokable_capabilities: [], required_models: [], required_permissions: [],
+        lifecycle_bindings: [], dispatch_eligible: false, reason_code: 'workflow_id_mismatch',
+      };
+      budgetByWorkflow[workflowId] = { report: null, dispatch_eligible: false, reason_code: 'workflow_id_mismatch' };
+      summaryIndexByWorkflow[workflowId] = null;
+      continue;
     }
     if (selected.status !== 'selected') {
       closureByWorkflow[workflowId] = {
