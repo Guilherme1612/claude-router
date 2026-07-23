@@ -343,6 +343,7 @@ export async function installRouter(options) {
   const candidateValue = stableStringify(candidatePublication) + '\n';
   const reportValue = stableStringify({ ...reconciliation, diagnostics: built.diagnostics, summary: { ...built.summary, activated: false } }) + '\n';
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const repoRoot = resolve(sourceRoot, '..');
   const moduleNames = [
     'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
@@ -365,6 +366,45 @@ export async function installRouter(options) {
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])
   ));
+  // Blocker-2 fix: deploy the production-verify gate fixtures so the 5 subprocess
+  // gates in PRODUCTION_GATE_RUNNERS (validate.mjs) can run from ownedRoot in
+  // production. The fixtures live in the dev repo under tests/ + repoRoot; the
+  // installer previously deployed modules/ only, so `node --test tests/...` and
+  // `node router.calibrate.mjs` ENOENT'd → verification_non_passing → activation
+  // skipped. Two groups are deployed:
+  //   1. gateEntryNames  — owned at <ownedRoot>/<name> (router.calibrate.mjs +
+  //      calibration-tasks.json). calibrate is the calibration_quality gate
+  //      entrypoint; calibration-tasks.json is read by calibrate AND by the
+  //      registry-map fixture (repoRoot-relative).
+  //   2. gateFixtureNames — owned at <ownedRoot>/tests/<name>. The 10 fixtures
+  //      back the regression_suite (6), privacy (1), latency (1), and
+  //      token_budget (2) gates.
+  // A src/ mirror of modules/ is also deployed because 4 regression fixtures
+  // (registry-schema/adapters/diff/reconcile/map) and router.calibrate.mjs
+  // import `../src/registry/...` / `./src/registry/...` (dev-layout paths);
+  // ownedRoot has modules/ not src/, so the mirror makes those imports resolve
+  // without modifying the dev fixtures. validate.mjs subprocess env now
+  // inherits the real HOME so fixtures find the deployed hook via homedir().
+  const gateEntryNames = ['router.calibrate.mjs', 'calibration-tasks.json'];
+  const gateFixtureNames = [
+    'tests/router.registry-schema.test.mjs',
+    'tests/router.adapters.test.mjs',
+    'tests/router.registry-diff.test.mjs',
+    'tests/router.registry-reconcile.test.mjs',
+    'tests/router.route-targets.test.mjs',
+    'tests/router.registry-map.test.mjs',
+    'tests/router.privacy.test.mjs',
+    'tests/router.perf-evolved.test.mjs',
+    'tests/router-graphify-integration.test.mjs',
+    'tests/router.inject.test.mjs',
+  ];
+  const gateFixtureValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => [
+    ...gateEntryNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
+    ...gateFixtureNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
+    // src/ mirror of modules/ so `../src/...` / `./src/...` imports in the
+    // fixtures and router.calibrate.mjs resolve in production.
+    ...moduleNames.map(name => [join(runtimeRoot, 'src', name), readFileSync(join(sourceRoot, name))]),
+  ]);
   const controllerConfig = {
     schema_version: 1,
     claude_root: p.claudeRoot,
@@ -410,7 +450,7 @@ export async function installRouter(options) {
   const controllerConfigValue = stableStringify(serializableConfig) + '\n';
   const configurationFingerprint = fingerprint(stableStringify(serializableConfig));
   const ownedValues = [
-    ...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
+    ...moduleValues, ...gateFixtureValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
     [p.controllerConfigPath, controllerConfigValue],
   ];
   for (const [file] of ownedValues) {
@@ -516,7 +556,14 @@ export async function installRouter(options) {
         // behind, leaving the owned root non-empty after uninstall.
         join(p.ownedRoot, 'modules'), join(p.codexOwnedRoot, 'modules'),
         ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'modules', name))))],
-        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))]],
+        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))],
+        // Blocker-2: prune the deployed gate-fixture trees. `src` mirrors
+        // modules/ (isomorphic subdir layout) and `tests` holds the 10 gate
+        // fixtures; both must be empty before the owned root can be removed.
+        join(p.ownedRoot, 'src'), join(p.codexOwnedRoot, 'src'),
+        join(p.ownedRoot, 'tests'), join(p.codexOwnedRoot, 'tests'),
+        ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'src', name))))],
+        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'src', name))))]],
       runtime_state_inventory: {
         immutable: { path: join(p.ownedRoot, 'versions'), owned_by_version_manifests: true },
         mutable: [p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'), p.controllerStatusPath, p.controllerControlPath, p.scanStatePath],

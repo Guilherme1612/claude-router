@@ -12,7 +12,7 @@ import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from
 import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
 import { mapCandidateRegistry } from './map.mjs';
 import { isCanonicalMappingSafe, produceActivationVerification, createTestActivationVerifier } from './validate.mjs';
-import { activateCandidate, recoverActiveVersion } from './activate.mjs';
+import { activateCandidate, recoverActiveVersion, rollbackActivation as rollbackActivationExport } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 import { publishCompiledIndex } from '../prompt/publish-index.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY, loadCompiledIndex } from '../prompt/compile-index.mjs';
@@ -319,6 +319,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const mapper = dependencies.mapCandidateRegistry || mapCandidateRegistry;
   const verifier = dependencies.produceActivationVerification || produceActivationVerification;
   const activator = dependencies.activateCandidate || activateCandidate;
+  const rollbackActivation = dependencies.rollbackActivation || rollbackActivationExport;
   const recovery = dependencies.recoverActiveVersion || recoverActiveVersion;
   const publishIndex = dependencies.publishCompiledIndex || publishCompiledIndex;
   const canaryDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
@@ -350,6 +351,18 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
   });
   let baseline = acquire(acquisitionOptions);
+  // Blocker-1 fix: the registry baseline above is module-scope and was previously
+  // NEVER re-acquired. `refreshIncrementalAcquisition` only replaces
+  // dirty-root observations, so small errors accumulate over hours of ~/.claude
+  // churn until hook observations are corrupted (stale file pairing) and the
+  // reconciler quarantines the candidate with `hook_orphan_binding`. Bound the
+  // drift by periodically re-acquiring the FULL registry: every
+  // FULL_REACQUIRE_EVENT_THRESHOLD cumulative lifecycle events, drop the
+  // incremental path and rebuild the baseline from a fresh `acquire()`. The
+  // equivalence gate is fed an empty diff on that reconcile so
+  // incremental(empty)===full===candidate stays coherent.
+  let cumulativeEvents = 0;
+  const FULL_REACQUIRE_EVENT_THRESHOLD = 500;
 
   const reconcile = async ({ diff }) => {
     // CR-01: reset `recovered` per reconcile call so the recovery block (and
@@ -360,7 +373,21 @@ export function createRegistryReconciler(config, dependencies = {}) {
     // reconcile skipped recovery, knownGood stayed null, and the bootstrap
     // path bypassed applyCanaryDecision.
     let recovered = false;
-    const next = refresh(baseline, diff, acquisitionOptions);
+    cumulativeEvents += (diff?.events?.length || 0);
+    const doFullAcquire = cumulativeEvents >= FULL_REACQUIRE_EVENT_THRESHOLD;
+    let next;
+    let equivalenceDiff;
+    if (doFullAcquire) {
+      baseline = acquire(acquisitionOptions);
+      next = baseline;
+      // Empty lifecycle for the equivalence gate: refresh(baseline, empty)
+      // returns baseline unchanged, so incremental===full===candidate.
+      equivalenceDiff = { events: [], diagnostics: [] };
+      cumulativeEvents = 0;
+    } else {
+      next = refresh(baseline, diff, acquisitionOptions);
+      equivalenceDiff = diff;
+    }
     const built = assemble(next);
     const active = await readActive();
     const report = evaluate({
@@ -423,7 +450,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
         if (isCanonicalMappingSafe(mapping)) {
           const verification = await verifier({
             candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {},
-            equivalence: { previous: baseline, diff, options: acquisitionOptions },
+            equivalence: { previous: baseline, diff: equivalenceDiff, options: acquisitionOptions },
           });
           if (verification.disposition === 'passing' && verification.complete === true) {
             if (knownGood === null) {
@@ -432,13 +459,31 @@ export function createRegistryReconciler(config, dependencies = {}) {
               // the known-good; no canary rollback possible — RESEARCH.md:376).
               activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher', test_mode: config.test_mode === true });
               if (activation.activation_status === 'activated' && activation.version_id) {
-                const publication = await publishIndex({
-                  ownedRoot: config.activation_root, registry: built.registry,
-                  registryVersionId: activation.version_id, mapping,
-                  policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
-                });
-                if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
-                activation = { ...activation, ...publication };
+                // Publish can fail closed on a zero-route registry: publishIndex
+                // enforces ORC-01 ('at least one dispatch route') and throws on
+                // an empty mapping (D-06). On a fresh install with no inventory
+                // the bootstrap mapping has zero mapped subjects, so publish
+                // throws. An uncaught throw here propagates through the
+                // controller's `ready` reconcile and crashes the watcher before
+                // it ever publishes a `ready` status. Roll the activation back
+                // to the pre-bootstrap state (no valid history → remove the
+                // active pointer + the just-written orphan version) and report
+                // `preserved` instead of crashing. The controller reaches
+                // `ready`; a later reconcile after inventory appears activates
+                // normally. Unit bootstrap tests stub publishCompiledIndex to
+                // succeed, so this branch is a no-op for them.
+                try {
+                  const publication = await publishIndex({
+                    ownedRoot: config.activation_root, registry: built.registry,
+                    registryVersionId: activation.version_id, mapping,
+                    policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                  });
+                  if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
+                  activation = { ...activation, ...publication };
+                } catch (error) {
+                  await rollbackActivation({ ownedRoot: config.activation_root, versionId: activation.version_id });
+                  activation = { activation_status: 'preserved', reason_code: 'bootstrap_publish_failed', ...(error?.message ? { publish_error: error.message } : {}) };
+                }
               }
             } else {
               // Canary path: eligible + known-good present. Gate on evidence

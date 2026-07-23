@@ -17,9 +17,19 @@ export const REQUIRED_ACTIVATION_GATES = Object.freeze([
 const subprocess = (id, args, timeout, threshold) => Object.freeze({
   id, version: '1', threshold,
   async run() {
+    // Blocker-2 fix: inherit HOME from the watcher process (the real user home)
+    // instead of overriding it to ROOT. The 5 subprocess gate fixtures resolve
+    // the deployed hook via `join(homedir(), '.claude', 'hooks', 'router.mjs')`
+    // and several read/write live state under `~/.claude/router/` (e.g.
+    // perf-evolved mutates LIVE_WEIGHTS). With HOME=ROOT (ownedRoot) the hook
+    // resolves to `<ownedRoot>/.claude/hooks/router.mjs` which does not exist,
+    // so every behavioral gate ENOENTs and the candidate is stuck at
+    // verification_non_passing. Keeping the real HOME makes the fixtures target
+    // the actual production install they are meant to verify. PATH and other
+    // env are inherited too so the hermes node binary on PATH is reachable.
     const result = spawnSync(process.execPath, args, {
       cwd: ROOT, shell: false, encoding: 'utf8', timeout, maxBuffer: 1024 * 1024,
-      env: { PATH: process.env.PATH || '', HOME: ROOT, LANG: 'C', LC_ALL: 'C', NODE_NO_WARNINGS: '1' },
+      env: { ...process.env, LANG: 'C', LC_ALL: 'C', NODE_NO_WARNINGS: '1' },
     });
     return {
       passed: result.status === 0 && !result.error,

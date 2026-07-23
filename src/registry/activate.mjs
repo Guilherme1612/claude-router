@@ -187,6 +187,25 @@ export function activateCandidate(options) {
   } catch (error) { return { activation_status: 'blocked', reason_code: error.code === 'EINVAL' ? 'durability_unsupported' : 'durability_failed' }; }
 }
 
+// Undo a bootstrap activation that committed the active pointer + an immutable
+// version but whose compiled-index publish then failed (e.g. zero-route
+// registry → publishIndex ORC-01 throw). Used by the watcher's bootstrap path
+// so a publish failure reverts to the pre-activation state instead of crashing
+// or leaving active.json pointing at a version with no compiled tuple. Bootstrap
+// only runs when there is no valid history, so the prior pointer is empty —
+// removing the active pointer restores that, and removing the just-written
+// orphan version prevents recoverActiveVersion from re-adopting it on the next
+// reconcile. Best-effort: a failed removal is ignored (next reconcile's recovery
+// will reconcile any residual state).
+export function rollbackActivation({ ownedRoot, versionId }) {
+  const p = paths(ownedRoot);
+  try { rmSync(p.active, { force: true }); } catch { /* best-effort */ }
+  if (validId(versionId)) {
+    try { rmSync(join(p.versions, versionId), { recursive: true, force: true }); } catch { /* best-effort */ }
+  }
+  return { rollback_status: 'rolled_back' };
+}
+
 export function recoverActiveVersion({ ownedRoot, now = Date.now(), test_mode = false }) {
   const p = paths(ownedRoot), current = readPointer(p.active);
   if (current && verifyVersion({ ownedRoot, versionId: current.version_id, expectedFingerprint: current.bundle_fingerprint, now, test_mode }).valid) return { recovery_status: 'healthy', version_id: current.version_id };
