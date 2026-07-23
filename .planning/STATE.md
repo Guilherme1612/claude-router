@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
 status: Awaiting next milestone
-stopped_at: context exhaustion at 75% (2026-07-22)
-last_updated: "2026-07-23T10:45:50.366Z"
+stopped_at: context exhaustion at 77% (2026-07-23)
+last_updated: "2026-07-23T14:13:26.222Z"
 last_activity: 2026-07-23
 last_activity_desc: Milestone v1.2 completed and archived
 progress:
   total_phases: 10
-  completed_phases: 9
-  total_plans: 47
-  completed_plans: 46
+  completed_phases: 10
+  total_plans: 37
+  completed_plans: 37
 current_phase: 20
 current_phase_name: close-gap-evo-05-add-production-trigger-for-canary-controlle
 ---
@@ -30,7 +30,7 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 Phase: Milestone v1.2 complete
 Plan: —
 Status: Awaiting next milestone
-Last activity: 2026-07-23 — Milestone v1.2 completed and archived
+Last activity: 2026-07-23 - Completed quick task 260723-l9s: Codex router binding + v1.2 gate 6 fix + test/snapshot/WR-01/housekeeping/push batch
 
 ## Performance Metrics
 
@@ -187,6 +187,12 @@ None yet.
 
 None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260723-l9s | Codex router binding + v1.2 gate 6 fix + test/snapshot/WR-01/housekeeping/push batch | 2026-07-23 | 9e045a1 | [260723-l9s-codex-wiring-gate6](./quick/260723-l9s-codex-wiring-gate6/) |
+
 ### Roadmap Evolution
 
 - Phase 19 added: Close gap: TOK-02 + ORC-01 — wire orchestrator {select,transitions,budget} into publish-index.mjs + prompt-route.mjs live path and deployed bundle
@@ -201,8 +207,8 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-22T22:28:14.836Z
-Stopped at: context exhaustion at 75% (2026-07-22)
+Last session: 2026-07-23T14:13:26.203Z
+Stopped at: context exhaustion at 77% (2026-07-23)
 Resume file: None
 
 ## Operator Next Steps
