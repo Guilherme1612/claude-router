@@ -1,5 +1,26 @@
 # Milestones
 
+## v1.2 Autonomous Dual-Runtime Control Plane (Shipped: 2026-07-23)
+
+**Phases completed:** 10 phases, 46 plans, 93 tasks
+
+**Key accomplishments:**
+
+- Canonical dual-runtime registry (Claude + Codex) with evidence-gated identities, SHA-256 fingerprints, bounded native YAML/TOML parsing, and versioned plugin-cache discovery — one stable runtime-neutral inventory. (Phase 11)
+- Incremental change detection: portable Merkle-style fingerprint tree + single-flight watcher drive inactive reconciliation with deterministic repair/restart/rollback; incremental builds byte-identical to clean full builds. (Phase 12)
+- Target safety + hook reconciliation via exact portable full-outer-join; unsafe alias sets invalidated atomically; shared inactive quarantine boundary never touches last-known-good active state. (Phase 13)
+- Deterministic mapping, frozen eight-gate verifier, atomic version-pointer activation, cross-process CAS, crash-recoverable rollback journal; prod-verifier E2E exercised. (Phase 14)
+- Privacy-safe bounded context capsules recover authoritative workflow state; minimal referential prompts resume exactly one active workflow, clarify ambiguity, honor explicit overrides. (Phase 15)
+- Workflow-first orchestration resolves the next valid transition before any capability; pure workflow-gated context planner enforces hard byte ceilings, versioned token estimates, three-witness summary reuse. (Phase 16)
+- Compiled prompt routing + safe canary evolution: SHA-256 verified immutable projections gate the live seam; REL-01 latency gates pass (warm p95 15.63ms <25, max route 22.98ms <100). (Phase 17)
+- Autonomous lifecycle + release gates: five-verb coexistence (install/upgrade/reinstall/disable+enable/uninstall), D-04/05/06 recovery matrix, release-runner gate_results; one command proves all 20 v1.2 requirements from executable evidence. (Phase 18)
+- ORC-01/TOK-02 live-path closure: orchestrator {select, transitions, budget} baked into publish-index as per-workflow sibling tuples (schema 1→2); prompt-route.mjs read-only projection with dispatch_eligible gate; blanket ORC-01 fallback removed. (Phase 19)
+- EVO-05 production trigger: telemetry→evidence bridge drives canary promote/rollback via watcher (primary), router-control CLI, and release-runner; CR-01 path-traversal + CR-02 rollback-reason defects closed. (Phase 20)
+
+**Verification:** 20/20 requirements satisfied and WIRED end-to-end; 5/5 E2E flows COMPLETE; cross-phase integration 20/20. Audit passed (re-audit HEAD 9868298). Tech debt: v2 per-prompt source descriptors deferred, WR-01 latent v2 publish-index bug, parallel-install-test flakiness (serialize with --test-concurrency=1), stale installed hook snapshot (re-run install-router.mjs).
+
+---
+
 ## v1.1 Inspectable Routing Control Layer (Shipped: 2026-07-14)
 
 **Phases completed:** 6 phases, 23 plans, 30 tasks

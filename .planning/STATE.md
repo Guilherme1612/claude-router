@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
-current_phase: 20
-status: completed
+status: Awaiting next milestone
 stopped_at: context exhaustion at 75% (2026-07-22)
-last_updated: "2026-07-22T16:15:12.898Z"
-last_activity: 2026-07-22
-last_activity_desc: Phase 20 complete
+last_updated: "2026-07-23T10:45:50.366Z"
+last_activity: 2026-07-23
+last_activity_desc: Milestone v1.2 completed and archived
 progress:
   total_phases: 10
   completed_phases: 9
-  total_plans: 45
-  completed_plans: 44
+  total_plans: 47
+  completed_plans: 46
+current_phase: 20
 current_phase_name: close-gap-evo-05-add-production-trigger-for-canary-controlle
 ---
 
@@ -27,18 +27,16 @@ See: .planning/PROJECT.md (updated 2026-07-14)
 
 ## Current Position
 
-Phase: 20
-Plan: Not started
-Status: All phases complete
-Last activity: 2026-07-22 — Phase 20 complete
-
-Progress: [██████████] 96%
+Phase: Milestone v1.2 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-23 — Milestone v1.2 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 44
+- Total plans completed: 46
 - Average duration: -
 - Total execution time: 0 hours
 
@@ -56,7 +54,7 @@ Progress: [██████████] 96%
 | 17 | 5 | - | - |
 | 18 | 5 | - | - |
 | 19 | 4 | - | - |
-| 20 | 3 | - | - |
+| 20 | 5 | - | - |
 
 **Recent Trend:**
 
@@ -96,6 +94,8 @@ Progress: [██████████] 96%
 | Phase 20 P01 | ~20min | 3 tasks | 6 files |
 | Phase 20 P02 | ~25min | 3 tasks | 5 files |
 | Phase 20 P02 | 36min | 3 tasks | 6 files |
+| Phase 20 P04 | ~2min | 1 tasks | 2 files |
+| Phase 20 P05 | 8min | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -174,6 +174,10 @@ Decisions are logged in PROJECT.md and the approved design.
 - [Phase ?]: D-05 demonstrated_benefit derived via evaluateCalibrationCorpus on candidate + known-good; strict-improve on quality OR context_budget; latency hard gate; never promote on parity.
 - [Phase ?]: 20-02: Watcher eligible-activation routes through canary-controller with D-04 helper + D-05 derivation + D-06 compatible() export (EVO-05 production trigger; audit BLOCKER 2 closed for watcher surface).
 - [Phase ?]: 20-02: test_mode bypasses the canary evidence gate (production never sets test_mode; fail-closed contract preserved in production) so lifecycle/recovery seam tests exercise the watcher->controller->compiled-index path.
+- [Phase ?]: CR-01 closed: reset recovered flag per reconcile call (moved declaration into reconcile body) so the watcher's production canary trigger runs on EVERY eligible reconcile, not just the first.
+- [Phase ?]: Replaced the dead-code line-337 ternary (both branches null) with a plain let knownGood = null; initializer — the recovery block populates knownGood correctly.
+- [Phase ?]: Added Test 8 multi-reconcile regression test: calls reconcile() TWICE and asserts applyCanaryDecision runs on both calls — the canonical CR-01 guard that single-call tests cannot catch.
+- [Phase ?]: 20-05: CR-02a canary promote --execute gates on window.sufficient before applyDecision (insufficient evidence preserves, no surprise rollback); CR-02b passes rollback_reason='canary_rollback' to applyCanaryDecision so audit trail distinguishes canary rollback from registry rollback
 
 ### Pending Todos
 
@@ -197,6 +201,10 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-22T16:15:12.887Z
+Last session: 2026-07-22T22:28:14.836Z
 Stopped at: context exhaustion at 75% (2026-07-22)
 Resume file: None
+
+## Operator Next Steps
+
+- Start the next milestone with /gsd-new-milestone

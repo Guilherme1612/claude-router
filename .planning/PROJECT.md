@@ -10,32 +10,20 @@ The user can write the minimum useful prompt and still get the best available wo
 
 ## Current State
 
-**v1.1 shipped and verified on 2026-07-14.** The router now provides expanded route coverage, inspect/preview/explain commands, health and coverage diagnostics, practical codebase calibration, privacy-preserving evolution proposals, and executable safety/coexistence release gates.
+**v1.2 shipped and verified on 2026-07-23.** The router is now a guarded dual-runtime control plane: a canonical Claude + Codex capability registry with evidence-gated SHA-256 identities; incremental change detection via a portable Merkle-style fingerprint tree and single-flight watcher; fail-closed target safety, hook reconciliation, and inactive quarantine; deterministic mapping through a frozen eight-gate verifier into atomic version-pointer activation with cross-process CAS and crash-recoverable rollback; privacy-safe bounded context capsules that recover authoritative workflow state; workflow-first orchestration that resolves the next valid transition before selecting capabilities and loads only least-sufficient bounded context; compiled prompt routing with safe canary evolution; and an end-to-end autonomous lifecycle proving safe propagation, recovery, coexistence, and a full release matrix tying all 20 v1.2 requirements to executable evidence.
 
-**Phase 11 complete and verified on 2026-07-14.** The v1.2 control plane now has a deterministic canonical capability registry with native Claude and Codex adapters, bounded installed-runtime parsing, provenance, diagnostics, and rollback-safe versioning.
-
-**Phases 12–14 complete and verified on 2026-07-16.** The control plane now detects incremental changes, reconciles and quarantines candidates safely, produces deterministic mappings, authenticates behavioral verification evidence, and performs atomic activation, compatible recovery, and durable rollback without changing active authority on failure.
-
-**Phase 15 complete and verified on 2026-07-16.** Privacy-safe bounded context capsules now recover authoritative workflow state, refresh stale evidence, resume uniquely identifiable work, and let explicit instructions override stale or conflicting context without reviving terminal work.
-
-**Phases 16–18 complete and verified on 2026-07-17.** Workflow-first orchestration selects the workflow before capabilities and loads only least-sufficient bounded context; compiled prompt routing connects the hot path to safe evolution with canary-gated improvements; and the autonomous lifecycle proves safe add/edit/rename/move/disable/dependency/delete propagation, crash/corrupt/missed-event recovery to a last-known-good active version, install/upgrade/reinstall/disable/uninstall coexistence preserving unrelated state, and a full release matrix tying every v1.2 requirement to executable evidence. The opt-in test_mode seam keeps the production hot path untouched while letting lifecycle tests drive the real watcher→controller→publishCompiledIndex flow.
-
-**Milestone v1.2 complete: all 8 phases (11–18) verified.** The dual-runtime control plane is end-to-end verified across regression, calibration, privacy, coexistence, recovery, context-token, and latency gates (647/647 tests pass; release run all 7 stages pass).
-
-## Current Milestone: v1.2 Autonomous Dual-Runtime Control Plane
-
-**Goal:** Automatically reconcile additions, edits, moves, disables, dependency changes, and deletions across `.claude` and `.codex`; then select the best workflow and least-sufficient context from prompt intent plus authoritative workflow state.
-
-**Success means:** safe inventory changes propagate without intervention, unsafe candidates are quarantined without changing active state, minimal prompts resume the correct workflow when uniquely identifiable, and warm routing stays below the existing hard latency gate with materially lower context usage.
+**All 10 phases (11–20) verified.** Phases 19–20 closed the two audit BLOCKERs surfaced in re-verification: ORC-01/TOK-02 live-path wiring (orchestrator baked into publish-index as per-workflow sibling tuples, schema 1→2, prompt-route.mjs read-only projection, blanket fallback removed) and EVO-05 production trigger (telemetry→evidence bridge drives canary promote/rollback via watcher, router-control CLI, and release-runner; CR-01 path-traversal and CR-02 rollback-reason defects closed). Milestone audit passed: 20/20 requirements satisfied and WIRED end-to-end, 5/5 E2E flows COMPLETE, REL-01 latency gates pass (warm p95 15.63ms <25, max route 22.98ms <100).
 
 ## Next Milestone Goals
 
-- Build one canonical registry across `.claude` and `.codex`, with runtime-specific adapters.
-- Detect capability additions, removals, and edits automatically outside the prompt hot path.
-- Reconcile maps and hook registrations safely, with validation, quarantine, rollback, and last-known-good state.
-- Recover project, phase, and task state so short prompts such as `continue` select the correct workflow.
-- Compile compact context capsules and enforce token budgets before injection.
-- Learn from outcomes through bounded, reversible changes that cannot silently weaken safety.
+v1.3 not yet planned. Run `/gsd-new-milestone` to define the next milestone.
+
+Candidate backlog from v1.2 tech debt (not committed):
+
+- v2 per-prompt source descriptors (Phase 19 deferred — `dispatch_eligible` carries the blocked result in v1).
+- WR-01: `publish-index.mjs:87-92` hardcodes `position.state='planned'` — latent v2 data-integrity bug; v1 only wires gsd-execute-phase.
+- Serialize parallel install/lifecycle test suites (concurrency races; `--test-concurrency=1` workaround).
+- Re-sync stale installed hook snapshot (`~/.claude/hooks/router.mjs`, Jul 16) via `install-router.mjs`.
 
 ## Requirements
 
@@ -48,18 +36,19 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Inspect, preview, explain-last, doctor, routes, unmapped, and coverage commands — v1.1
 - ✓ Codebase routing calibration with preserved core fixtures — v1.1
 - ✓ Missing-MCP safety, hook coexistence, and executable release gates — v1.1
-- ✓ Canonical registry and native Claude/Codex runtime adapters — validated in Phase 11
-- ✓ Incremental change detection and watcher publication — validated in Phase 12
-- ✓ Target safety, hook reconciliation, and quarantine — validated in Phase 13
-- ✓ Deterministic mapping, atomic activation, compatible recovery, and durable rollback — validated in Phase 14
-- ✓ Bounded context capsules and deterministic workflow-state recovery — validated in Phase 15
+- ✓ Canonical registry and native Claude/Codex runtime adapters — v1.2 (Phase 11)
+- ✓ Incremental change detection and watcher publication — v1.2 (Phase 12)
+- ✓ Target safety, hook reconciliation, and quarantine — v1.2 (Phase 13)
+- ✓ Deterministic mapping, atomic activation, compatible recovery, and durable rollback — v1.2 (Phase 14)
+- ✓ Bounded context capsules and deterministic workflow-state recovery — v1.2 (Phase 15)
+- ✓ Autonomous dual-runtime registry reconciliation — v1.2 (Phases 11–18)
+- ✓ Workflow-first capability selection and least-sufficient context budgets — v1.2 (Phases 16, 19)
+- ✓ Guarded automatic map updates and reversible self-evolution — v1.2 (Phases 17, 20)
+- ✓ Measured token, latency, safety, and routing-quality improvements — v1.2 (Phase 17, REL-01 gates: warm p95 15.63ms, max route 22.98ms)
 
 ### Active
 
-- [ ] Autonomous dual-runtime registry reconciliation.
-- [ ] Workflow-first capability selection and least-sufficient context budgets.
-- [ ] Guarded automatic map updates and reversible self-evolution.
-- [ ] Measured token, latency, safety, and routing-quality improvements.
+(None — v1.3 not yet planned. Run `/gsd-new-milestone`.)
 
 ### Out of Scope
 
@@ -94,9 +83,9 @@ The approved design and implementation plan are:
 | Keep the prompt hook deterministic and read-only | Protect latency and reliability | ✓ Good |
 | Reuse existing workflow and discovery primitives | Avoid duplicate orchestration engines | ✓ Good |
 | Treat missing MCP dependencies as warnings, never auto-dispatch targets | Prevent predictable runtime failures | ✓ Good |
-| Use one canonical registry with runtime adapters | Prevent `.claude`/`.codex` mapping drift | — Pending |
+| Use one canonical registry with runtime adapters | Prevent `.claude`/`.codex` mapping drift | ✓ Good |
 | Use workflow state plus prompt intent for selection | Short prompts require more than lexical context | ✓ Good |
-| Permit only bounded, validated, reversible evolution | Automation must not silently degrade safety | — Pending |
+| Permit only bounded, validated, reversible evolution | Automation must not silently degrade safety | ✓ Good |
 
 ---
-*Last updated: 2026-07-17 after Phase 18 verification and v1.2 milestone completion*
+*Last updated: 2026-07-23 after v1.2 milestone completion*
