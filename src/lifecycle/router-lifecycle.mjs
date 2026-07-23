@@ -68,13 +68,21 @@ export function resolveInstallGeneration(options, { repair = true } = {}) {
 }
 
 function updateManagedBinding(p, options, enabled) {
-  const settings = validatedSettings(p.settingsPath);
-  const groups = settings.hooks.UserPromptSubmit || [];
-  const filtered = groups.filter(group => !isRouterEntry(group, p.routerPath));
-  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, p.routerPath));
-  if (filtered.length) settings.hooks.UserPromptSubmit = filtered;
-  else delete settings.hooks.UserPromptSubmit;
-  durableAtomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
+  updateBindingAt(p.settingsPath, 'UserPromptSubmit', p.routerPath, options, enabled, 5);
+}
+
+function updateCodexBinding(p, options, enabled) {
+  updateBindingAt(p.codexHooksPath, 'UserPromptSubmit', p.codexRouterPath, options, enabled, 10);
+}
+
+function updateBindingAt(settingsPath, event, routerPath, options, enabled, timeout) {
+  const settings = validatedSettings(settingsPath);
+  const groups = settings.hooks[event] || [];
+  const filtered = groups.filter(group => !isRouterEntry(group, routerPath));
+  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, routerPath, timeout));
+  if (filtered.length) settings.hooks[event] = filtered;
+  else delete settings.hooks[event];
+  durableAtomicWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n');
 }
 
 export async function upgradeRouter(options) {
@@ -102,7 +110,10 @@ export async function upgradeRouter(options) {
   durableAtomicWrite(p.knownGoodGenerationPath, JSON.stringify({ schema_version: 1, generation_id: generationId }) + '\n');
   mkdirSync(dirname(p.routerPath), { recursive: true });
   durableAtomicWrite(p.routerPath, `import ${JSON.stringify(new URL(`file://${join(finalRoot, 'router.mjs')}`).href)};\n`);
+  mkdirSync(dirname(p.codexRouterPath), { recursive: true });
+  durableAtomicWrite(p.codexRouterPath, `import ${JSON.stringify(new URL(`file://${join(finalRoot, 'router.mjs')}`).href)};\n`);
   updateManagedBinding(p, options, true);
+  updateCodexBinding(p, options, true);
   durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: true, generation_id: generationId }) + '\n');
   return { status: 'upgraded', generationId, activePath: p.activeGenerationPath };
 }
@@ -112,6 +123,7 @@ export async function disableRouter(options) {
   const lifecycle = readJson(p.lifecyclePath, { enabled: true });
   if (lifecycle.enabled === false) return { status: 'already-disabled', generationId: generation.generationId };
   updateManagedBinding(p, options, false);
+  updateCodexBinding(p, options, false);
   durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: false, generation_id: generation.generationId }) + '\n');
   return { status: 'disabled', generationId: generation.generationId };
 }
@@ -121,6 +133,7 @@ export async function enableRouter(options) {
   const lifecycle = readJson(p.lifecyclePath, { enabled: false });
   if (lifecycle.enabled === true) return { status: 'already-enabled', generationId: generation.generationId };
   updateManagedBinding(p, options, true);
+  updateCodexBinding(p, options, true);
   durableAtomicWrite(p.lifecyclePath, JSON.stringify({ schema_version: 1, enabled: true, generation_id: generation.generationId }) + '\n');
   return { status: 'enabled', generationId: generation.generationId };
 }
@@ -134,9 +147,9 @@ function readJson(file, fallback, label = file) {
   }
 }
 
-function routerEntry(nodeBinary, routerPath) {
+function routerEntry(nodeBinary, routerPath, timeout = 5) {
   return {
-    hooks: [{ type: 'command', command: `"${nodeBinary}" "${routerPath}"`, timeout: 5 }],
+    hooks: [{ type: 'command', command: `"${nodeBinary}" "${routerPath}"`, timeout }],
   };
 }
 
@@ -159,6 +172,8 @@ function paths(options) {
     sourceRouter: resolve(options.sourceRouter),
     settingsPath: resolve(options.settingsPath || join(claudeRoot, 'settings.json')),
     routerPath: resolve(options.routerPath || join(claudeRoot, 'hooks', 'router.mjs')),
+    codexHooksPath: resolve(options.codexHooksPath || join(codexRoot, 'hooks.json')),
+    codexRouterPath: resolve(options.codexRouterPath || join(codexRoot, 'hooks', 'router.mjs')),
     codexMarkerPath: resolve(options.codexMarkerPath || join(codexRoot, 'router', 'installed.json')),
     manifestPath: resolve(options.manifestPath || join(claudeRoot, 'router', 'install-manifest.json')),
     ownedRoot,
@@ -277,16 +292,20 @@ export async function installRouter(options) {
   const sourceBytes = readFileSync(p.sourceRouter);
   const sourceFingerprint = fingerprint(sourceBytes);
   const settings = validatedSettings(p.settingsPath);
+  const codexSettings = validatedSettings(p.codexHooksPath);
   const existingManifest = readJson(p.manifestPath, null, 'ownership manifest');
   if (existingManifest && existingManifest.schema_version !== MANIFEST_SCHEMA_VERSION) {
     throw new Error('ownership manifest has an unsupported schema version');
   }
-  if (!existingManifest && (existsSync(p.routerPath) || existsSync(p.codexMarkerPath))) {
+  if (!existingManifest && (existsSync(p.routerPath) || existsSync(p.codexRouterPath) || existsSync(p.codexMarkerPath))) {
     throw new Error('existing router artifact is not owned by this installer; refusing to overwrite it');
   }
   const groups = settings.hooks.UserPromptSubmit || [];
   const bindingExists = groups.some((group) => isRouterEntry(group, p.routerPath));
+  const codexGroups = codexSettings.hooks.UserPromptSubmit || [];
+  const codexBindingExists = codexGroups.some((group) => isRouterEntry(group, p.codexRouterPath));
   const routerHealthy = fileMatches(p.routerPath, sourceFingerprint);
+  const codexRouterHealthy = fileMatches(p.codexRouterPath, sourceFingerprint);
   const markerValue = JSON.stringify({ schema_version: 1, managed_by: 'claude-router' }, null, 2) + '\n';
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
@@ -382,7 +401,7 @@ export async function installRouter(options) {
   if (options.dryRun) return { status: 'dry-run', ready: false, manifestPath: p.manifestPath,
     changes: ownedValues.filter(([file, value]) => !fileMatches(file, fingerprint(value))).map(([file]) => file) };
   const created = [];
-  const transactionFiles = [p.settingsPath, p.routerPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file),
+  const transactionFiles = [p.settingsPath, p.routerPath, p.codexHooksPath, p.codexRouterPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file),
     p.controllerStatusPath, p.controllerControlPath, p.scanStatePath, p.manifestPath];
   const transactionDirectories = transactionFiles.flatMap(file => {
     const entries = []; let directory = dirname(file);
@@ -404,6 +423,13 @@ export async function installRouter(options) {
       renameSync(temporary, p.routerPath);
       created.push(p.routerPath);
     }
+    if (!codexRouterHealthy) {
+      mkdirSync(dirname(p.codexRouterPath), { recursive: true });
+      const codexTemporary = `${p.codexRouterPath}.tmp.${process.pid}`;
+      copyFileSync(p.sourceRouter, codexTemporary);
+      renameSync(codexTemporary, p.codexRouterPath);
+      created.push(p.codexRouterPath);
+    }
     if (!markerHealthy) {
       const wasPresent = existsSync(p.codexMarkerPath);
       atomicWrite(p.codexMarkerPath, markerValue);
@@ -416,6 +442,13 @@ export async function installRouter(options) {
       ];
       atomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
     }
+    if (!codexBindingExists) {
+      codexSettings.hooks.UserPromptSubmit = [
+        ...codexGroups,
+        routerEntry(options.nodeBinary || process.execPath, p.codexRouterPath, 10),
+      ];
+      atomicWrite(p.codexHooksPath, JSON.stringify(codexSettings, null, 2) + '\n');
+    }
     for (const [file, value] of ownedValues) {
       if (!fileMatches(file, fingerprint(value))) { atomicWrite(file, value); created.push(file); }
     }
@@ -426,6 +459,7 @@ export async function installRouter(options) {
       roots: { claude: p.claudeRoot, codex: p.codexRoot },
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
+        { path: p.codexRouterPath, fingerprint: sourceFingerprint },
         { path: p.codexMarkerPath, fingerprint: markerFingerprint },
         ...ownedValues.map(([file, value]) => ({ path: file, fingerprint: fingerprint(value) })),
         { path: p.controllerStatusPath, fingerprint: 'mutable', mutable: true },
@@ -439,7 +473,7 @@ export async function installRouter(options) {
         // after its subdirs (the prior layout) left the root non-empty when it was checked, so
         // it was never removed even after its subdirs were pruned.
         p.ownedRoot, p.codexOwnedRoot,
-        dirname(p.routerPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
+        dirname(p.routerPath), dirname(p.codexRouterPath), dirname(p.codexMarkerPath), dirname(p.candidatePath),
         dirname(p.controllerConfigPath), dirname(p.manifestPath),
         // The `modules` parents come before their subdirs in the list so that after reverse,
         // the subdirs are pruned before their parents. Listing only `modules/cli` left
@@ -452,7 +486,10 @@ export async function installRouter(options) {
         immutable: { path: join(p.ownedRoot, 'versions'), owned_by_version_manifests: true },
         mutable: [p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'), p.controllerStatusPath, p.controllerControlPath, p.scanStatePath],
       },
-      bindings: [{ settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath }],
+      bindings: [
+        { settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath },
+        { settings_path: p.codexHooksPath, event: 'UserPromptSubmit', router_path: p.codexRouterPath },
+      ],
     };
     atomicWrite(p.manifestPath, JSON.stringify(manifest, null, 2) + '\n');
     if (typeof options.afterMutation === 'function') options.afterMutation();
@@ -464,12 +501,13 @@ export async function installRouter(options) {
       catch (error) { child.kill?.('SIGTERM'); throw error; }
     }
     const ready = fileMatches(p.routerPath, sourceFingerprint)
+      && fileMatches(p.codexRouterPath, sourceFingerprint)
       && fileMatches(p.codexMarkerPath, markerFingerprint)
       && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
     return {
-      status: existingManifest && routerHealthy && markerHealthy && bindingExists && created.length === 0
+      status: existingManifest && routerHealthy && codexRouterHealthy && markerHealthy && bindingExists && codexBindingExists && created.length === 0
         ? 'already-installed'
         : existingManifest ? 'repaired' : 'installed',
       ready,
@@ -529,7 +567,7 @@ export async function uninstallRouter(options) {
   // Detect pointer files (the upgradeRouter format) and remove them despite the fingerprint
   // mismatch so uninstall completes and reinstall can proceed after an upgrade.
   const isPointerFile = (filePath) => {
-    if (filePath !== p.routerPath) return false;
+    if (filePath !== p.routerPath && filePath !== p.codexRouterPath) return false;
     try {
       const content = readFileSync(filePath, 'utf8');
       return /^import "file:\/\/[^"]*\/generations\/g1-[a-f0-9]+\/router\.mjs";\n$/.test(content);

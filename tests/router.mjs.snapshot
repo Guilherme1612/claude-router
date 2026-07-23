@@ -2678,8 +2678,9 @@ export function inspectDecision(prompt, options = {}) {
 function main(payload) {
   const startNs = process.hrtime.bigint();
   if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
-  if (!payload || typeof payload.prompt !== 'string') return;
-  inspectDecision(payload.prompt, {
+  const prompt = payload?.prompt ?? payload?.message;
+  if (!payload || typeof prompt !== 'string') return;
+  inspectDecision(prompt, {
     cwd: process.cwd(),
     mutateCache: true,
     logTelemetry: true,

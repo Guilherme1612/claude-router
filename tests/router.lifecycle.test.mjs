@@ -68,13 +68,23 @@ test('one command installs router, binding, Codex marker, and complete ownership
     assert.equal(settings.hooks.UserPromptSubmit.length, 1);
     assert.match(settings.hooks.UserPromptSubmit[0].hooks[0].command, /router\.mjs/);
     assert.equal(existsSync(join(f.options.codexRoot, 'router', 'installed.json')), true);
+    // Task 260723-l9s: codex router.mjs deployed + codex hooks.json UserPromptSubmit binding
+    const codexRouterPath = join(f.options.codexRoot, 'hooks', 'router.mjs');
+    assert.equal(existsSync(codexRouterPath), true);
+    assert.equal(readFileSync(codexRouterPath, 'utf8'), 'export const router = true;\n');
+    const codexHooks = JSON.parse(readFileSync(join(f.options.codexRoot, 'hooks.json'), 'utf8'));
+    assert.equal(codexHooks.hooks.UserPromptSubmit.length, 1);
+    assert.match(codexHooks.hooks.UserPromptSubmit[0].hooks[0].command, /router\.mjs/);
+    assert.equal(codexHooks.hooks.UserPromptSubmit[0].hooks[0].timeout, 10);
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
     assert.equal(manifest.schema_version, 1);
     assert.equal(manifest.state, 'complete');
+    assert.equal(manifest.bindings.length, 2);
     // 48 base files + 8 = 4 orchestrator modules (D-07, Phase 19-03) × 2 runtime roots (claude + codex)
     // + 8 = 4 evolution modules (Phase 20-01: canary-controller, evidence, perf-measure, telemetry-bridge) × 2 roots
     // + 2 = 1 evolution module (Phase 20-02: candidate-calibration-route) × 2 roots
-    assert.equal(manifest.files.length, 66);
+    // + 1 = codex router.mjs (Task 260723-l9s: codex UserPromptSubmit binding)
+    assert.equal(manifest.files.length, 67);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
