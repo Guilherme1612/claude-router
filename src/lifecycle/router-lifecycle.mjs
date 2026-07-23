@@ -170,10 +170,13 @@ function paths(options) {
     claudeRoot,
     codexRoot,
     sourceRouter: resolve(options.sourceRouter),
+    sourceEvolve: options.sourceEvolve ? resolve(options.sourceEvolve) : '',
     settingsPath: resolve(options.settingsPath || join(claudeRoot, 'settings.json')),
     routerPath: resolve(options.routerPath || join(claudeRoot, 'hooks', 'router.mjs')),
+    evolvePath: resolve(options.evolvePath || join(claudeRoot, 'hooks', 'router.evolve.mjs')),
     codexHooksPath: resolve(options.codexHooksPath || join(codexRoot, 'hooks.json')),
     codexRouterPath: resolve(options.codexRouterPath || join(codexRoot, 'hooks', 'router.mjs')),
+    codexEvolvePath: resolve(options.codexEvolvePath || join(codexRoot, 'hooks', 'router.evolve.mjs')),
     codexMarkerPath: resolve(options.codexMarkerPath || join(codexRoot, 'router', 'installed.json')),
     manifestPath: resolve(options.manifestPath || join(claudeRoot, 'router', 'install-manifest.json')),
     ownedRoot,
@@ -287,17 +290,30 @@ export async function installRouter(options) {
   if (!existsSync(p.sourceRouter) || !statSync(p.sourceRouter).isFile()) {
     throw new Error(`router source missing: ${p.sourceRouter}`);
   }
+  // router.mjs imports ./router.evolve.mjs (Phase-3 evolution primitives) as a hard
+  // sibling dependency — the hook crashes at runtime without it. The installer deploys
+  // this sibling to BOTH runtimes alongside router.mjs when a source is provided. It is
+  // optional in the API so direct callers / unit fixtures that don't supply it skip
+  // evolve deployment (backward compat); the production install-router.mjs entry point
+  // always supplies it.
+  const deployEvolve = !!(p.sourceEvolve && existsSync(p.sourceEvolve) && statSync(p.sourceEvolve).isFile());
+  if (p.sourceEvolve && !deployEvolve) {
+    throw new Error(`router evolve sibling source missing: ${p.sourceEvolve}`);
+  }
 
   // Complete preflight before the first mutation.
   const sourceBytes = readFileSync(p.sourceRouter);
   const sourceFingerprint = fingerprint(sourceBytes);
+  const evolveBytes = deployEvolve ? readFileSync(p.sourceEvolve) : null;
+  const evolveFingerprint = deployEvolve ? fingerprint(evolveBytes) : null;
   const settings = validatedSettings(p.settingsPath);
   const codexSettings = validatedSettings(p.codexHooksPath);
   const existingManifest = readJson(p.manifestPath, null, 'ownership manifest');
   if (existingManifest && existingManifest.schema_version !== MANIFEST_SCHEMA_VERSION) {
     throw new Error('ownership manifest has an unsupported schema version');
   }
-  if (!existingManifest && (existsSync(p.routerPath) || existsSync(p.codexRouterPath) || existsSync(p.codexMarkerPath))) {
+  if (!existingManifest && (existsSync(p.routerPath) || existsSync(p.codexRouterPath) || existsSync(p.codexMarkerPath)
+      || (deployEvolve && (existsSync(p.evolvePath) || existsSync(p.codexEvolvePath))))) {
     throw new Error('existing router artifact is not owned by this installer; refusing to overwrite it');
   }
   const groups = settings.hooks.UserPromptSubmit || [];
@@ -306,6 +322,8 @@ export async function installRouter(options) {
   const codexBindingExists = codexGroups.some((group) => isRouterEntry(group, p.codexRouterPath));
   const routerHealthy = fileMatches(p.routerPath, sourceFingerprint);
   const codexRouterHealthy = fileMatches(p.codexRouterPath, sourceFingerprint);
+  const evolveHealthy = !deployEvolve || fileMatches(p.evolvePath, evolveFingerprint);
+  const codexEvolveHealthy = !deployEvolve || fileMatches(p.codexEvolvePath, evolveFingerprint);
   const markerValue = JSON.stringify({ schema_version: 1, managed_by: 'claude-router' }, null, 2) + '\n';
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
@@ -402,7 +420,7 @@ export async function installRouter(options) {
   if (options.dryRun) return { status: 'dry-run', ready: false, manifestPath: p.manifestPath,
     changes: ownedValues.filter(([file, value]) => !fileMatches(file, fingerprint(value))).map(([file]) => file) };
   const created = [];
-  const transactionFiles = [p.settingsPath, p.routerPath, p.codexHooksPath, p.codexRouterPath, p.codexMarkerPath, ...ownedValues.map(([file]) => file),
+  const transactionFiles = [p.settingsPath, p.routerPath, p.evolvePath, p.codexHooksPath, p.codexRouterPath, p.codexEvolvePath, p.codexMarkerPath, ...ownedValues.map(([file]) => file),
     p.controllerStatusPath, p.controllerControlPath, p.scanStatePath, p.manifestPath];
   const transactionDirectories = transactionFiles.flatMap(file => {
     const entries = []; let directory = dirname(file);
@@ -430,6 +448,20 @@ export async function installRouter(options) {
       copyFileSync(p.sourceRouter, codexTemporary);
       renameSync(codexTemporary, p.codexRouterPath);
       created.push(p.codexRouterPath);
+    }
+    if (!evolveHealthy) {
+      mkdirSync(dirname(p.evolvePath), { recursive: true });
+      const evolveTemporary = `${p.evolvePath}.tmp.${process.pid}`;
+      copyFileSync(p.sourceEvolve, evolveTemporary);
+      renameSync(evolveTemporary, p.evolvePath);
+      created.push(p.evolvePath);
+    }
+    if (!codexEvolveHealthy) {
+      mkdirSync(dirname(p.codexEvolvePath), { recursive: true });
+      const codexEvolveTemporary = `${p.codexEvolvePath}.tmp.${process.pid}`;
+      copyFileSync(p.sourceEvolve, codexEvolveTemporary);
+      renameSync(codexEvolveTemporary, p.codexEvolvePath);
+      created.push(p.codexEvolvePath);
     }
     if (!markerHealthy) {
       const wasPresent = existsSync(p.codexMarkerPath);
@@ -460,7 +492,9 @@ export async function installRouter(options) {
       roots: { claude: p.claudeRoot, codex: p.codexRoot },
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
+        ...(deployEvolve ? [{ path: p.evolvePath, fingerprint: evolveFingerprint }] : []),
         { path: p.codexRouterPath, fingerprint: sourceFingerprint },
+        ...(deployEvolve ? [{ path: p.codexEvolvePath, fingerprint: evolveFingerprint }] : []),
         { path: p.codexMarkerPath, fingerprint: markerFingerprint },
         ...ownedValues.map(([file, value]) => ({ path: file, fingerprint: fingerprint(value) })),
         { path: p.controllerStatusPath, fingerprint: 'mutable', mutable: true },
@@ -502,13 +536,15 @@ export async function installRouter(options) {
       catch (error) { child.kill?.('SIGTERM'); throw error; }
     }
     const ready = fileMatches(p.routerPath, sourceFingerprint)
+      && (!deployEvolve || fileMatches(p.evolvePath, evolveFingerprint))
       && fileMatches(p.codexRouterPath, sourceFingerprint)
+      && (!deployEvolve || fileMatches(p.codexEvolvePath, evolveFingerprint))
       && fileMatches(p.codexMarkerPath, markerFingerprint)
       && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
     return {
-      status: existingManifest && routerHealthy && codexRouterHealthy && markerHealthy && bindingExists && codexBindingExists && created.length === 0
+      status: existingManifest && routerHealthy && (!deployEvolve || evolveHealthy) && codexRouterHealthy && (!deployEvolve || codexEvolveHealthy) && markerHealthy && bindingExists && codexBindingExists && created.length === 0
         ? 'already-installed'
         : existingManifest ? 'repaired' : 'installed',
       ready,

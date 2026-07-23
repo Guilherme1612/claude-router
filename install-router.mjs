@@ -59,6 +59,7 @@ try {
     claudeRoot,
     codexRoot,
     sourceRouter: path.resolve(arg('source-router', path.join(repoRoot, 'tests', 'router.mjs.snapshot'))),
+    sourceEvolve: path.resolve(arg('source-evolve', path.join(repoRoot, 'tests', 'router.evolve.mjs.snapshot'))),
     settingsPath: path.resolve(arg('settings', path.join(claudeRoot, 'settings.json'))),
     routerPath: path.resolve(arg('router', path.join(claudeRoot, 'hooks', 'router.mjs'))),
     manifestPath: path.resolve(arg('manifest', path.join(claudeRoot, 'router', 'install-manifest.json'))),
