@@ -65,6 +65,12 @@ try {
     manifestPath: path.resolve(arg('manifest', path.join(claudeRoot, 'router', 'install-manifest.json'))),
     nodeBinary: path.resolve(arg('node-binary', process.execPath)),
     dryRun: has('dry-run'),
+    // Production first-reconcile scans the full ~/.claude tree and runs the 5
+    // subprocess verify gates (10 `node --test` fixtures), which takes well
+    // past the 5s default. Give the owned controller enough headroom to publish
+    // its first `ready` status before the installer declares readiness failure
+    // and rolls the deploy back.
+    readinessTimeoutMs: 60_000,
     ...(args.includes('--project-root') ? { projectRoot: path.resolve(arg('project-root')) } : {}),
   };
 
