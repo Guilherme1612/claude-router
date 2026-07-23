@@ -3,10 +3,10 @@ gsd_state_version: 1.0
 milestone: v1.2
 milestone_name: Autonomous Dual-Runtime Control Plane
 status: Awaiting next milestone
-stopped_at: context exhaustion at 77% (2026-07-23)
-last_updated: "2026-07-23T14:13:26.222Z"
+stopped_at: context exhaustion at 75% (2026-07-23)
+last_updated: "2026-07-23T15:18:49.722Z"
 last_activity: 2026-07-23
-last_activity_desc: Milestone v1.2 completed and archived
+last_activity_desc: "Completed quick task 260723-l9s: Codex router binding + v1.2 gate 6 fix + test/snapshot/WR-01/housekeeping/push batch"
 progress:
   total_phases: 10
   completed_phases: 10
@@ -207,8 +207,8 @@ None. v1.1 closeout must remain committed before Phase 11 implementation begins.
 
 ## Session Continuity
 
-Last session: 2026-07-23T14:13:26.203Z
-Stopped at: context exhaustion at 77% (2026-07-23)
+Last session: 2026-07-23T15:18:49.706Z
+Stopped at: context exhaustion at 75% (2026-07-23)
 Resume file: None
 
 ## Operator Next Steps
