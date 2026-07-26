@@ -115,8 +115,8 @@ export function deriveRelationships({ records = [], candidates = [] } = {}) {
     stableCapabilityId(record),
     record,
   ]));
-  const bounded = sorted((Array.isArray(candidates) ? candidates : []).map(canonicalCandidate)).slice(0, MAX_EDGES);
-  const evaluated = bounded.map(edge => ({ edge, reasons: reasonsFor(edge, recordsById) }));
+  const evaluated = sorted((Array.isArray(candidates) ? candidates : []).map(canonicalCandidate))
+    .map(edge => ({ edge, reasons: reasonsFor(edge, recordsById) }));
   const cycleIds = cyclicIds(evaluated.filter(value => value.reasons.length === 0).map(value => value.edge));
   const active = [];
   const inactive = [];
@@ -130,11 +130,28 @@ export function deriveRelationships({ records = [], candidates = [] } = {}) {
     };
     (reasonCodes.length ? inactive : active).push(relationship);
   }
+  const safetyFirst = (left, right) => {
+    const priority = value => ['conflict', 'prerequisite'].includes(value.type) ? 0 : 1;
+    return priority(left) - priority(right) || stableStringify(left).localeCompare(stableStringify(right));
+  };
+  const boundedActive = [...active].sort(safetyFirst).slice(0, MAX_EDGES);
+  const boundedInactive = sorted(inactive).slice(0, MAX_EDGES);
+  const reasonCodes = [
+    ...(active.length > MAX_EDGES ? ['relationship_active_overflow'] : []),
+    ...(inactive.length > MAX_EDGES ? ['relationship_inactive_overflow'] : []),
+  ];
   return {
     schema_version: 1,
     policy_version: 'relationship-rules-v1',
-    edges: sorted(active),
-    candidates: sorted(inactive),
+    edges: boundedActive,
+    candidates: boundedInactive,
+    ...(reasonCodes.length ? {
+      overflow: {
+        active: Math.max(0, active.length - MAX_EDGES),
+        inactive: Math.max(0, inactive.length - MAX_EDGES),
+      },
+      reason_codes: reasonCodes,
+    } : {}),
   };
 }
 

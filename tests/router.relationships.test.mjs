@@ -87,10 +87,25 @@ test('[phase22-red:relationships] malformed endpoints, self edges, cycles, and c
       ...Array.from({ length: 140 }, (_, index) => edge('variant', { id: `bounded-${index}` })),
     ],
   });
-  assert.equal(graph.edges.length + graph.candidates.length, 128);
+  assert.ok(graph.edges.length <= 128);
+  assert.ok(graph.candidates.length <= 128);
+  assert.ok(graph.reason_codes.includes('relationship_active_overflow'));
   assert.ok(graph.candidates.some(value => value.reason_codes.includes('relationship_cycle')));
   assert.ok(graph.candidates.some(value => value.reason_codes.includes('relationship_self_edge')));
   assert.ok(graph.candidates.some(value => value.reason_codes.includes('relationship_malformed_endpoint')));
+});
+
+test('[phase22:relationships] invalid candidates cannot crowd out a valid safety conflict', async () => {
+  const { deriveRelationships } = await relationshipsModule;
+  const invalid = Array.from({ length: 128 }, (_, index) => edge('unknown', {
+    id: `000-invalid-${String(index).padStart(3, '0')}`,
+  }));
+  const graph = deriveRelationships({
+    records,
+    candidates: [...invalid, edge('conflict', { id: 'zzz-safety-conflict' })],
+  });
+  assert.ok(graph.edges.some(value => value.id === 'zzz-safety-conflict'));
+  assert.equal(graph.candidates.length, 128);
 });
 
 test('[phase22-red:relationships] graph bytes ignore record candidate evidence and reason input order', async () => {
