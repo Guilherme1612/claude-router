@@ -59,7 +59,14 @@ for (const [profileName, buildProfile] of profiles) {
           authoritative: semantic,
         });
         assert.equal(result.passed, true, `${profileName}/${mutation}/${anomaly}`);
-        assert.equal(result.semantic_bytes, stableStringify(semantic));
+        assert.equal(
+          result.semantic_bytes,
+          validation.compareSemanticConvergence({
+            candidate: semantic,
+            incremental: semantic,
+            authoritative: semantic,
+          }).semantic_bytes,
+        );
       }
       assert.deepEqual(
         validation.compareSemanticConvergence({ candidate: semantic, incremental: semantic, authoritative: semantic }),

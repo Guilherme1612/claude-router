@@ -51,19 +51,71 @@ export function isCanonicalMappingSafe(mapping) {
   return mapping.subjects.every(subject => subject && ['mapped', 'unmapped'].includes(subject.disposition));
 }
 
+const OPERATIONAL_SEMANTIC_KEYS = new Set([
+  'active_generation_id',
+  'candidate_generation_id',
+  'generated_at',
+  'generation_id',
+  'last_complete_reconciliation',
+  'next_recovery_action',
+  'pending_changes',
+  'reason_code',
+  'stale_roots',
+  'state',
+  'trigger',
+  'unreadable_roots',
+]);
+
+function canonicalSemanticValue(value, parentKey = '', depth = 0) {
+  if (Array.isArray(value)) {
+    const values = value.map(item => canonicalSemanticValue(item, parentKey, depth + 1));
+    return ['snapshot', 'records', 'invalidated_ids', 'invalidation_evidence'].includes(parentKey)
+      ? values.sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)))
+      : values;
+  }
+  if (!value || typeof value !== 'object') return value;
+  const output = {};
+  for (const key of Object.keys(value).sort()) {
+    if (depth === 0 && OPERATIONAL_SEMANTIC_KEYS.has(key)) continue;
+    output[key] = canonicalSemanticValue(value[key], key, depth + 1);
+  }
+  return output;
+}
+
+export function compareSemanticConvergence({ candidate, incremental, authoritative } = {}) {
+  const candidateBytes = stableStringify(canonicalSemanticValue(candidate));
+  const incrementalBytes = stableStringify(canonicalSemanticValue(incremental));
+  const authoritativeBytes = stableStringify(canonicalSemanticValue(authoritative));
+  const passed = candidateBytes === incrementalBytes && candidateBytes === authoritativeBytes;
+  return {
+    passed,
+    reason_code: passed ? 'passed' : 'semantic_bytes_mismatch',
+    semantic_bytes: candidateBytes,
+    candidate_fingerprint: hash(candidateBytes),
+    incremental_fingerprint: hash(incrementalBytes),
+    authoritative_fingerprint: hash(authoritativeBytes),
+  };
+}
+
 const incrementalFullEquivalence = Object.freeze({
   id: 'incremental_full_equivalence', version: '1', threshold: { equality: 'exact' },
   async run({ candidate, equivalence } = {}) {
     try {
       const incremental = buildIncrementalRegistry(equivalence.previous, equivalence.diff, equivalence.options || {}).registry;
       const full = buildFullRegistry(equivalence.options || {}).registry;
-      const candidateBytes = stableStringify(candidate);
-      const incrementalBytes = stableStringify(incremental);
-      const fullBytes = stableStringify(full);
-      const passed = candidateBytes === incrementalBytes && candidateBytes === fullBytes;
+      const convergence = compareSemanticConvergence({
+        candidate: { snapshot: candidate, invalidated_ids: equivalence.invalidated_ids || [] },
+        incremental: { snapshot: incremental, invalidated_ids: equivalence.incremental_invalidated_ids || equivalence.invalidated_ids || [] },
+        authoritative: { snapshot: full, invalidated_ids: equivalence.authoritative_invalidated_ids || equivalence.invalidated_ids || [] },
+      });
+      const passed = convergence.passed;
       return {
-        passed, reason_code: passed ? 'passed' : 'registry_bytes_mismatch', threshold: { equality: 'exact' },
-        measured: { candidate_fingerprint: hash(candidateBytes), incremental_fingerprint: hash(incrementalBytes), full_fingerprint: hash(fullBytes) },
+        passed, reason_code: passed ? 'passed' : 'semantic_bytes_mismatch', threshold: { equality: 'exact' },
+        measured: {
+          candidate_fingerprint: convergence.candidate_fingerprint,
+          incremental_fingerprint: convergence.incremental_fingerprint,
+          full_fingerprint: convergence.authoritative_fingerprint,
+        },
       };
     } catch { return { passed: false, reason_code: 'equivalence_build_failed', threshold: { equality: 'exact' }, measured: {} }; }
   },

@@ -108,6 +108,35 @@ export function createRegistryWatcher(options) {
   const dirty = new Set();
   let closed = false, timer = null, repairTimer = null, firstDirtyAt = null;
   let inFlight = null, rerun = false, baseline = null;
+  let pendingTrigger = 'filesystem-event';
+  let generation = 0;
+  let operational = {
+    state: 'reconciling',
+    reason_code: 'startup_reconciliation',
+    active_generation_id: null,
+    candidate_generation_id: 'generation-1',
+    last_complete_reconciliation: null,
+    trigger: 'startup',
+    pending_changes: [...rootNames],
+    stale_roots: [],
+    unreadable_roots: [],
+    next_recovery_action: null,
+    last_complete_fingerprint_state: null,
+    last_complete_semantic_snapshot: null,
+  };
+
+  const AUTHORITATIVE_TRIGGERS = new Set([
+    'startup', 'periodic-repair', 'dropped-events', 'ambiguous-event',
+    'watcher-restart', 'root-replacement', 'fingerprint-mismatch',
+  ]);
+
+  function snapshotOperational() {
+    return structuredClone(operational);
+  }
+
+  function setOperational(state, values = {}) {
+    operational = { ...operational, state, ...values };
+  }
 
   function clearTimer(name) {
     const value = name === 'work' ? timer : repairTimer;
@@ -125,17 +154,75 @@ export function createRegistryWatcher(options) {
     if (closed) return;
     repairTimer = scheduler.setTimeout(() => {
       repairTimer = null;
-      markDirty(rootNames, true);
+      markDirty(rootNames, true, 'periodic-repair');
       scheduleRepair();
     }, repairMs);
   }
 
-  async function reconcileDirty(names) {
-    const current = await scan(roots);
-    const lifecycle = diff(baseline, current);
-    await reconcile({ roots: names, previous: baseline, current, diff: lifecycle });
-    await writeState(current);
-    baseline = current;
+  async function reconcileDirty(names, trigger) {
+    const candidateGenerationId = `generation-${generation + 1}`;
+    setOperational('reconciling', {
+      reason_code: 'reconciliation_in_progress',
+      candidate_generation_id: candidateGenerationId,
+      trigger,
+      pending_changes: [...names].sort(),
+      stale_roots: [],
+      unreadable_roots: [],
+      next_recovery_action: null,
+    });
+    try {
+      const current = await scan(roots);
+      const incompleteRoots = (current.logicalRoots || []).filter(root => root.complete === false);
+      if (incompleteRoots.length) {
+        const unreadableRoots = incompleteRoots
+          .filter(root => (root.diagnosticCodes || []).some(code => ['access_denied', 'read_error', 'scan_error'].includes(code)))
+          .map(root => root.logicalRoot).sort();
+        const staleRoots = incompleteRoots.map(root => root.logicalRoot).sort();
+        setOperational('degraded', {
+          reason_code: 'incomplete_scan',
+          candidate_generation_id: candidateGenerationId,
+          pending_changes: [...names].sort(),
+          stale_roots: staleRoots,
+          unreadable_roots: unreadableRoots,
+          next_recovery_action: 'authoritative-repair',
+        });
+        return;
+      }
+      const lifecycle = diff(baseline, current);
+      const derivedTrigger = (current.logicalRoots || []).some(root => (root.diagnosticCodes || []).includes('root_replaced'))
+        ? 'root-replacement'
+        : (lifecycle.diagnostics || []).some(item => item.code === 'fingerprint_mismatch')
+          ? 'fingerprint-mismatch'
+          : trigger;
+      const result = await reconcile({ roots: names, previous: baseline, current, diff: lifecycle, trigger: derivedTrigger });
+      await writeState(current);
+      baseline = current;
+      generation += 1;
+      setOperational('current', {
+        reason_code: 'reconciliation_complete',
+        active_generation_id: candidateGenerationId,
+        candidate_generation_id: null,
+        last_complete_reconciliation: scheduler.now(),
+        trigger: derivedTrigger,
+        pending_changes: [],
+        stale_roots: [],
+        unreadable_roots: [],
+        next_recovery_action: null,
+        last_complete_fingerprint_state: structuredClone(current),
+        last_complete_semantic_snapshot: result?.semanticSnapshot
+          ? structuredClone(result.semanticSnapshot)
+          : operational.last_complete_semantic_snapshot,
+      });
+    } catch (error) {
+      setOperational('failed', {
+        reason_code: error?.code || 'reconciliation_failed',
+        candidate_generation_id: candidateGenerationId,
+        pending_changes: [...names].sort(),
+        stale_roots: [...names].sort(),
+        next_recovery_action: 'authoritative-repair',
+      });
+      throw error;
+    }
   }
 
   function startWork() {
@@ -143,8 +230,10 @@ export function createRegistryWatcher(options) {
     if (inFlight) { rerun = true; return inFlight; }
     clearTimer('work');
     const names = [...dirty].sort();
+    const trigger = pendingTrigger;
+    pendingTrigger = 'filesystem-event';
     dirty.clear(); firstDirtyAt = null;
-    inFlight = reconcileDirty(names).catch(report).finally(() => {
+    inFlight = reconcileDirty(names, trigger).catch(report).finally(() => {
       inFlight = null;
       if (closed) return;
       if (rerun || dirty.size) {
@@ -155,9 +244,10 @@ export function createRegistryWatcher(options) {
     return inFlight;
   }
 
-  function markDirty(names, immediate = false) {
+  function markDirty(names, immediate = false, trigger = 'filesystem-event') {
     if (closed) return;
     for (const name of names) dirty.add(name);
+    if (AUTHORITATIVE_TRIGGERS.has(trigger) || pendingTrigger === 'filesystem-event') pendingTrigger = trigger;
     const now = scheduler.now();
     if (firstDirtyAt === null) firstDirtyAt = now;
     if (inFlight) { rerun = true; return; }
@@ -188,14 +278,14 @@ export function createRegistryWatcher(options) {
             ));
             return included && !ignored;
           }).map(root => root.logicalRoot);
-          if (matched.length) markDirty(matched);
+          if (matched.length) markDirty(matched, relative === null, relative === null ? 'ambiguous-event' : 'filesystem-event');
         });
         handle.on?.('error', report);
         watchers.push(handle);
       } catch (error) { report(error); }
     }
     scheduleRepair();
-    await reconcileDirty(rootNames);
+    await reconcileDirty(rootNames, 'startup');
   })().catch(error => {
     report(error);
     throw error;
@@ -204,7 +294,14 @@ export function createRegistryWatcher(options) {
   return {
     ready,
     notify(logicalRoot) { markDirty([logicalRoot]); },
-    async repair() { markDirty(rootNames, true); clearTimer('work'); return startWork(); },
+    inspect: snapshotOperational,
+    async authoritative(trigger = 'dropped-events') {
+      if (!AUTHORITATIVE_TRIGGERS.has(trigger)) throw new TypeError(`unsupported authoritative trigger: ${trigger}`);
+      markDirty(rootNames, true, trigger);
+      clearTimer('work');
+      return startWork();
+    },
+    async repair() { markDirty(rootNames, true, 'periodic-repair'); clearTimer('work'); return startWork(); },
     async flush() {
       do {
         const current = inFlight;

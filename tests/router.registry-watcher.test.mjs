@@ -65,14 +65,13 @@ function harness(overrides = {}) {
   return { scheduler, callbacks, scans, writes, errors, controller };
 }
 
-test('duplicate and filename-less hints coalesce while a continuous flood respects maximum latency', async () => {
+test('filename-less hints reconcile immediately while duplicate hints and a continuous flood remain bounded', async () => {
   const h = harness();
   await h.controller.ready;
   assert.equal(h.scans.length, 1, 'startup repair runs immediately');
   const emit = h.callbacks.get('/virtual/claude');
   emit('change'); emit('change', 'same.md'); emit('rename', undefined);
-  await h.scheduler.advance(249); assert.equal(h.scans.length, 1);
-  await h.scheduler.advance(1); assert.equal(h.scans.length, 2);
+  await h.scheduler.advance(0); assert.equal(h.scans.length, 2);
   for (let elapsed = 0; elapsed < 1_500; elapsed += 200) {
     emit('change', 'flood.md');
     await h.scheduler.advance(200);
