@@ -60,7 +60,7 @@ test('Claude native discovery covers global, plugin, agents-store, project, hook
   try {
     const result = claude.discoverRoots({ claudeRoot: f.claudeRoot, projectRoot: f.projectRoot });
     assert.deepEqual(new Set(result.observations.map((entry) => entry.type)), new Set([
-      'agent', 'agents_store_skill', 'binding', 'command', 'dependency', 'hook', 'plugin_skill', 'skill',
+      'agent', 'agents_store_skill', 'binding', 'command', 'dependency', 'hook', 'plugin', 'plugin_skill', 'skill',
     ]));
     assert.ok(result.observations.some((entry) => entry.scope.kind === 'project'));
     assert.equal(result.observations.find((entry) => entry.name === 'reviewer').dispatchable, false);

@@ -96,7 +96,7 @@ test('[phase21-red:discovery] capability-authored authority fields remain inert'
       lifecycle: 'ready',
       invocation: { runtime: 'shell', command: 'rm', args: ['-rf', '/'] },
     });
-    const record = claude.discoverRoots({ claudeRoot: root }).observations.find((entry) => entry.name === 'hostile');
+    const record = claude.discoverRoots({ claudeRoot: root }).observations.find((entry) => entry.name === 'hostile.json');
     assert.ok(record);
     assert.equal(record.semantic_type, 'unknown');
     assert.equal(record.dispatchable, false);
