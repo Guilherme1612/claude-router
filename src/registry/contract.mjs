@@ -178,6 +178,10 @@ function rejection(overlay, reasonCode) {
     overlay_id: OVERLAY_TOKEN.test(overlay?.overlay_id || '') ? overlay.overlay_id : 'invalid-overlay',
     provenance: SAFE_PROVENANCE.has(overlay?.provenance) ? overlay.provenance : 'unknown',
     reason_code: reasonCode,
+    ...(typeof overlay?.target_id === 'string' ? { target_id: overlay.target_id } : {}),
+    ...(overlay?.fields && typeof overlay.fields === 'object'
+      ? { fields: Object.keys(overlay.fields).sort() }
+      : {}),
   };
 }
 
@@ -288,7 +292,31 @@ export function resolveContractOverlays(records, overlays = [], options = {}) {
       ...(carriedOver ? { carried_over: true } : {}),
     });
   }
-  return { accepted: ordered(accepted), rejected: ordered(rejected) };
+  const duplicateIds = new Set(accepted
+    .filter((overlay, index, values) => values.findIndex(other => other.overlay_id === overlay.overlay_id) !== index)
+    .map(overlay => overlay.overlay_id));
+  const corrections = new Map();
+  for (const overlay of accepted) {
+    for (const [field, correction] of Object.entries(overlay.fields)) {
+      const key = `${overlay.target_id}\0${field}`;
+      if (!corrections.has(key)) corrections.set(key, []);
+      corrections.get(key).push({ overlay, value: stableStringify(correction.value) });
+    }
+  }
+  const conflictingIds = new Set([...corrections.values()]
+    .filter(values => new Set(values.map(value => value.value)).size > 1)
+    .flatMap(values => values.map(value => value.overlay.overlay_id)));
+  const resolved = [];
+  for (const overlay of accepted) {
+    if (duplicateIds.has(overlay.overlay_id)) {
+      rejected.push(rejection(overlay, 'overlay_id_duplicate'));
+    } else if (conflictingIds.has(overlay.overlay_id)) {
+      rejected.push(rejection(overlay, 'overlay_correction_conflicting'));
+    } else {
+      resolved.push(overlay);
+    }
+  }
+  return { accepted: ordered(resolved), rejected: ordered(rejected) };
 }
 
 function contractDisposition(fields) {
@@ -303,6 +331,9 @@ function contractDisposition(fields) {
 
 export function applyContractOverlays(records, resolution) {
   const accepted = Array.isArray(resolution?.accepted) ? resolution.accepted : [];
+  const conflicts = Array.isArray(resolution?.rejected)
+    ? resolution.rejected.filter(value => value?.reason_code === 'overlay_correction_conflicting')
+    : [];
   const byTarget = new Map();
   for (const overlay of accepted) {
     if (!byTarget.has(overlay.target_id)) byTarget.set(overlay.target_id, []);
@@ -310,7 +341,8 @@ export function applyContractOverlays(records, resolution) {
   }
   return records.map(record => {
     const overlays = ordered(byTarget.get(stableCapabilityId(record)) || []);
-    if (!overlays.length) return record;
+    const recordConflicts = conflicts.filter(value => value.target_id === stableCapabilityId(record));
+    if (!overlays.length && !recordConflicts.length) return record;
     const contract = structuredClone(record.contract);
     validateCapabilityContract(contract);
     for (const overlay of overlays) {
@@ -332,6 +364,20 @@ export function applyContractOverlays(records, resolution) {
           freshness: 'fresh',
           confidence_basis_points: 10000,
           reason_codes: [`${field}_overlay_accepted`],
+        };
+      }
+    }
+    for (const conflict of recordConflicts) {
+      for (const field of conflict.fields || []) {
+        contract.fields[field] = {
+          state: 'unknown',
+          evidence: [],
+          rejected_evidence: [],
+          provenance: [],
+          policy_version: CONTRACT_POLICY.policy_version,
+          freshness: 'unknown',
+          confidence_basis_points: 0,
+          reason_codes: [`${field}_overlay_conflicting`],
         };
       }
     }

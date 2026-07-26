@@ -93,6 +93,28 @@ test('[phase22-red:overlays] overlay permutations are byte deterministic', () =>
   );
 });
 
+test('[phase22:overlays] conflicting corrections and duplicate IDs are rejected', () => {
+  const record = installed();
+  const high = overlay(record, { overlay_id: 'correction:a', fields: { risk: { value: 'high' } } });
+  const low = overlay(record, { overlay_id: 'correction:z', fields: { risk: { value: 'low' } } });
+  const conflict = resolveContractOverlays([record], [high, low]);
+  assert.equal(conflict.accepted.length, 0);
+  assert.deepEqual(conflict.rejected.map(value => value.reason_code), [
+    'overlay_correction_conflicting',
+    'overlay_correction_conflicting',
+  ]);
+  const applied = applyContractOverlays([record], conflict);
+  assert.equal(applied[0].contract.disposition, 'recommendation-only');
+  assert.equal(applied[0].contract.fields.risk.state, 'unknown');
+
+  const duplicate = resolveContractOverlays([record], [low, low]);
+  assert.equal(duplicate.accepted.length, 0);
+  assert.deepEqual(duplicate.rejected.map(value => value.reason_code), [
+    'overlay_id_duplicate',
+    'overlay_id_duplicate',
+  ]);
+});
+
 test('[phase22-red:overlays] assembler accepts explicit overlays without adding a discovery root', () => {
   const record = installed();
   const acquisition = {
