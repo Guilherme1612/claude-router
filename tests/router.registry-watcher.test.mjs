@@ -136,6 +136,72 @@ test('failed reconcile retains the last valid state and reports the error', asyn
   await h.controller.close();
 });
 
+test('[phase21-red:convergence] watcher exposes complete-baseline authority and four-state operational inspection', async () => {
+  const h = harness();
+  assert.equal(h.controller.inspect().state, 'reconciling');
+  await h.controller.ready;
+  const current = h.controller.inspect();
+  assert.equal(current.state, 'current');
+  assert.equal(current.trigger, 'startup');
+  assert.equal(current.last_complete_fingerprint_state.hash, 'scan-1');
+  assert.match(current.active_generation_id, /^generation-/);
+  assert.equal(current.candidate_generation_id, null);
+  assert.deepEqual(current.pending_changes, []);
+  assert.deepEqual(current.stale_roots, []);
+  assert.deepEqual(current.unreadable_roots, []);
+  assert.equal(current.reason_code, 'reconciliation_complete');
+  assert.equal(current.next_recovery_action, null);
+  assert.ok(['current', 'reconciling', 'degraded', 'failed'].includes(current.state));
+  await h.controller.close();
+});
+
+test('[phase21-red:convergence] authoritative triggers are immediate and periodic repair defaults to five minutes', async () => {
+  const triggers = [];
+  const h = harness({ repairMs: undefined, async reconcile(context) { triggers.push(context.trigger); } });
+  await h.controller.ready;
+  assert.deepEqual(triggers, ['startup']);
+  h.callbacks.get('/virtual/claude')('rename', undefined);
+  await h.scheduler.advance(0);
+  assert.deepEqual(triggers, ['startup', 'ambiguous-event']);
+  await h.scheduler.advance(300_000);
+  assert.equal(triggers.at(-1), 'periodic-repair');
+  await h.controller.authoritative('watcher-restart');
+  assert.equal(triggers.at(-1), 'watcher-restart');
+  await h.controller.authoritative('root-replacement');
+  assert.equal(triggers.at(-1), 'root-replacement');
+  await h.controller.authoritative('fingerprint-mismatch');
+  assert.equal(triggers.at(-1), 'fingerprint-mismatch');
+  await h.controller.close();
+});
+
+test('[phase21-red:convergence] incomplete scan degrades without replacing the last complete fingerprint', async () => {
+  let incomplete = false;
+  const h = harness({
+    async scan() {
+      return incomplete
+        ? {
+            hash: 'partial',
+            roots: ['claude_global', 'codex_home'],
+            logicalRoots: [
+              { logicalRoot: 'claude_global', complete: false, diagnosticCodes: ['read_error'] },
+              { logicalRoot: 'codex_home', complete: true, diagnosticCodes: [] },
+            ],
+          }
+        : { hash: 'complete', roots: ['claude_global', 'codex_home'], logicalRoots: [] };
+    },
+  });
+  await h.controller.ready;
+  incomplete = true;
+  await h.controller.authoritative('dropped-events');
+  const state = h.controller.inspect();
+  assert.equal(state.state, 'degraded');
+  assert.equal(state.reason_code, 'incomplete_scan');
+  assert.deepEqual(state.unreadable_roots, ['claude_global']);
+  assert.equal(state.last_complete_fingerprint_state.hash, 'complete');
+  assert.deepEqual(h.writes, ['complete']);
+  await h.controller.close();
+});
+
 test('deployed reconciler consumes the real lifecycle diff and advances acquisition only after both publications', async () => {
   const initial = { claude: { observations: [], diagnostics: [] }, codex: { observations: [], diagnostics: [] }, generation: 0 };
   const lifecycle = { events: [], diagnostics: [], marker: 'authoritative-diff' };
