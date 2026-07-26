@@ -55,6 +55,30 @@ test('[phase22-red:eligibility] all passed gates are eligible through one evalua
   assert.deepEqual(result.reason_codes, ['eligibility_all_gates_passed']);
 });
 
+test('missing contract safety evidence is recommendation-only [phase22-red:eligibility-gap]', async () => {
+  const complete = safeRecord();
+  const cases = [
+    { ...complete, contract: undefined },
+    {
+      ...complete,
+      contract: {
+        ...complete.contract,
+        fields: Object.fromEntries(
+          Object.entries(complete.contract.fields).filter(([field]) => field !== 'permissions'),
+        ),
+      },
+    },
+  ];
+  for (const record of cases) {
+    const result = await evaluate(record);
+    assert.equal(result.eligible, false);
+    assert.equal(result.recommendation_only, true);
+    assert.ok(!result.reason_codes.includes('eligibility_all_gates_passed'));
+    assert.ok(result.reason_codes.includes('permission_unknown'));
+    assert.ok(result.reason_codes.includes('field_confidence_unknown'));
+  }
+});
+
 test('[phase22-red:eligibility] every gate has passed failed and unknown coverage', async () => {
   const base = safeRecord();
   const id = stableCapabilityId(base);

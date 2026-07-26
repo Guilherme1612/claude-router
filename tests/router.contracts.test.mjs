@@ -8,6 +8,8 @@ import {
   buildUnknownFutureProfile,
   contractEvidence,
 } from './helpers/inventory-fixture.mjs';
+import { assembleRegistry } from '../src/registry/build.mjs';
+import { contentFingerprint, stableCapabilityId } from '../src/registry/identity.mjs';
 import { canonicalizeCapability, stableStringify, validateCapability } from '../src/registry/schema.mjs';
 
 const profiles = [
@@ -16,6 +18,53 @@ const profiles = [
   buildMixedCustomProfile(),
   buildUnknownFutureProfile(),
 ];
+
+test('assembleRegistry constructs and overlays every authoritative contract [phase22-red:assembly-gap]', async () => {
+  const { validateCapabilityContract } = await import('../src/registry/contract.mjs');
+  const observations = buildClaudeHeavyProfile();
+  const acquisition = {
+    claude: { observations, diagnostics: [] },
+    codex: { observations: [], diagnostics: [] },
+  };
+  const plain = assembleRegistry(acquisition);
+  assert.equal(plain.registry.records.length, observations.length);
+  for (const record of plain.registry.records) {
+    assert.equal(validateCapabilityContract(record.contract), true);
+    for (const envelope of Object.values(record.contract.fields)) {
+      assert.equal(envelope.policy_version, 'contract-policy-v1');
+      assert.equal(envelope.freshness, 'fresh');
+      assert.equal(envelope.confidence_basis_points, 10000);
+      assert.ok(envelope.evidence.every(item => item.rule_version.startsWith('adapter-')));
+      assert.ok(envelope.reason_codes.length);
+    }
+  }
+
+  const target = observations[0];
+  const overlay = {
+    schema_version: 1,
+    kind: 'contract-overlay-v1',
+    overlay_id: 'correction:atlas-risk',
+    provenance: 'correction',
+    binding: {
+      stable_id: stableCapabilityId(target),
+      source_fingerprint: contentFingerprint(target),
+      scope: target.scope,
+      runtime: target.invocation.runtime,
+    },
+    fields: { risk: { value: 'low' } },
+  };
+  const enriched = assembleRegistry(acquisition, { overlays: [overlay] });
+  assert.deepEqual(
+    enriched.registry.records.map(record => record.id),
+    plain.registry.records.map(record => record.id),
+  );
+  assert.equal(enriched.registry.records.length, observations.length);
+  assert.equal(enriched.overlays.accepted.length, 1);
+  assert.equal(
+    enriched.registry.records.find(record => record.id === stableCapabilityId(target)).contract.fields.risk.value,
+    'low',
+  );
+});
 
 test('[phase22-red:contracts] every profile receives complete field envelopes', async () => {
   const { CONTRACT_FIELDS, buildCapabilityContract, validateCapabilityContract } = await import('../src/registry/contract.mjs');
