@@ -354,3 +354,40 @@ test('[phase21-red:inspection] inventory summary and detail preserve text JSON p
     assert.deepEqual(snapshot(f.root), before);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
+
+test('[phase21-red:inspection] inventory uses only exact operational states and fails closed on malformed state', async () => {
+  const f = await fixture();
+  try {
+    for (const stateName of ['current', 'reconciling', 'degraded', 'failed']) {
+      const outcome = runRouterControl({
+        argv: ['inventory', '--format', 'json', '--owned-root', f.root],
+        dependencies: {
+          inventoryState: () => ({
+            state: stateName,
+            reason_code: `inventory_${stateName}`,
+            active_generation_id: 'generation-2',
+            candidate_generation_id: stateName === 'current' ? null : 'generation-3',
+            last_complete_reconciliation: 1_785_084_000_000,
+            trigger: 'fixture',
+            pending_changes: stateName === 'current' ? [] : ['fixture_project'],
+            stale_roots: stateName === 'degraded' ? ['fixture_project'] : [],
+            unreadable_roots: [],
+            next_recovery_action: stateName === 'current' ? null : 'authoritative-repair',
+          }),
+        },
+      });
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.ok, true);
+      assert.equal(outcome.result.data.state, stateName);
+    }
+
+    const malformed = runRouterControl({
+      argv: ['inventory', '--owned-root', f.root],
+      dependencies: { inventoryState: () => ({ state: 'healthy' }) },
+    });
+    assert.equal(malformed.exitCode, 4);
+    assert.equal(malformed.result.ok, false);
+    assert.equal(malformed.result.reason_code, 'unsafe_inventory_projection');
+    assert.doesNotMatch(JSON.stringify(malformed), /stack|\/Users\//);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});

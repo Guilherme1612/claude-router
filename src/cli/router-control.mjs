@@ -16,6 +16,20 @@ const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
 const MAX_DIFF = 256;
 const EXIT = Object.freeze({ success: 0, usage: 2, invalid: 3, unsafe: 4, mutation: 5 });
+const INVENTORY_STATES = new Set(['current', 'reconciling', 'degraded', 'failed']);
+const INERT_SEMANTIC_TYPES = new Set(['configuration', 'instruction', 'container', 'unknown']);
+const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:@/+ -]{0,255}$/;
+const INVENTORY_SUMMARY_FIELDS = [
+  'state', 'active_generation_id', 'candidate_generation_id',
+  'last_complete_reconciliation', 'trigger', 'pending_changes', 'stale_roots',
+  'unreadable_roots', 'record_count', 'diagnostics',
+];
+const INVENTORY_RECORD_FIELDS = [
+  'stable_id', 'logical_root', 'relative_path', 'runtime', 'scope', 'native_type',
+  'semantic_type', 'enabled', 'dispatchable', 'lifecycle_role', 'invocation',
+  'fingerprint', 'adapter_version', 'parser_version', 'required_dependencies',
+  'container_id', 'member_ids', 'identity_continuity', 'diagnostics',
+];
 
 function canonical(command, ok, reasonCode, data = {}, warnings = []) {
   return { schema_version: 1, command, ok, reason_code: reasonCode, data, warnings: [...warnings].sort() };
@@ -79,11 +93,217 @@ function mappingRows(mapping) {
   })).sort((a, b) => a.subject_id.localeCompare(b.subject_id));
 }
 
-function boundedResult(values) {
-  const ordered = values.slice(0, MAX_DIFF);
+function boundedResult(values, options = {}) {
+  const limit = options.limit ?? MAX_DIFF;
+  const offset = options.offset ?? 0;
+  const ordered = values.slice(offset, offset + limit);
+  const meta = {
+    total: values.length,
+    returned: ordered.length,
+    truncated: offset + ordered.length < values.length,
+    limit,
+    next_offset: offset + ordered.length < values.length ? offset + ordered.length : null,
+  };
+  if (Object.hasOwn(options, 'offset')) meta.offset = offset;
   return {
     values: ordered,
-    meta: { total: values.length, returned: ordered.length, truncated: values.length > MAX_DIFF, limit: MAX_DIFF, next_offset: values.length > MAX_DIFF ? MAX_DIFF : null },
+    meta,
+  };
+}
+
+function safeToken(value, fallback = 'unknown') {
+  return typeof value === 'string' && SAFE_TOKEN.test(value) && !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
+    ? value
+    : fallback;
+}
+
+function safeRelativePath(value, fallback = 'unavailable') {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 4096) return fallback;
+  const portable = value.replaceAll('\\', '/');
+  if (/^(?:[A-Za-z]:\/|\/|~\/)/u.test(portable) || /[\u0000-\u001f\u007f-\u009f]/u.test(portable)) return fallback;
+  if (portable.split('/').includes('..')) return fallback;
+  return portable;
+}
+
+function safeFingerprint(value) {
+  return typeof value === 'string' && /^[a-f0-9]{12,128}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function safeDiagnostic(item) {
+  if (!item || typeof item !== 'object') return null;
+  const code = safeToken(item.code || item.reason_code, '');
+  if (!code) return null;
+  return {
+    code,
+    logical_root: safeToken(item.logical_root, 'unknown'),
+    relative_path: safeRelativePath(item.relative_path),
+    retained_baseline: item.retained_baseline === true,
+  };
+}
+
+function safeDiagnostics(values) {
+  return (Array.isArray(values) ? values : [])
+    .map(safeDiagnostic)
+    .filter(Boolean)
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)))
+    .slice(0, MAX_VALUE);
+}
+
+function runtimeOf(record) {
+  return safeToken(
+    record?.invocation?.runtime
+      || record?.provenance?.[0]?.runtime
+      || record?.runtime_variants?.[0]?.runtime,
+  );
+}
+
+function scopeOf(record) {
+  return safeToken(record?.scope?.kind || record?.scope || record?.provenance?.[0]?.scope);
+}
+
+function invocationOf(record, dispatchable) {
+  const invocation = record?.invocation;
+  if (!dispatchable || invocation?.availability !== 'available') return 'unavailable';
+  const runtime = safeToken(invocation.runtime, '');
+  const command = safeToken(invocation.command, '');
+  const args = Array.isArray(invocation.args) ? invocation.args.map(value => safeToken(value, '')) : [];
+  if (!runtime || !command || args.some(value => !value)) return 'unavailable';
+  return { availability: 'available', runtime, command, args };
+}
+
+function requiredDependenciesOf(record) {
+  const dependencies = record?.dependencies;
+  if (!dependencies || typeof dependencies !== 'object') return { state: 'unknown', items: [] };
+  return {
+    state: safeToken(dependencies.state, 'unknown'),
+    items: (Array.isArray(dependencies.items) ? dependencies.items : []).map(item => ({
+      id: safeToken(item?.id),
+      available: item?.available === true,
+    })).sort((left, right) => left.id.localeCompare(right.id)).slice(0, MAX_VALUE),
+  };
+}
+
+function identityContinuityOf(record) {
+  const evidence = record?.identity_continuity;
+  if (!evidence || typeof evidence !== 'object') return null;
+  return {
+    status: safeToken(evidence.status, 'unknown'),
+    previous_id: evidence.previous_id ? safeToken(evidence.previous_id) : null,
+    reason_code: evidence.reason_code ? safeToken(evidence.reason_code) : null,
+    evidence_fingerprint: safeFingerprint(evidence.evidence_fingerprint),
+  };
+}
+
+export function inventoryRecordProjection(record) {
+  if (!record || typeof record !== 'object') throw new TypeError('invalid_inventory_record');
+  const provenance = Array.isArray(record.provenance) ? record.provenance[0] : null;
+  const semanticType = safeToken(record.semantic_type, 'unknown');
+  const enabled = record.enabled !== false;
+  const dispatchable = enabled && record.dispatchable === true && !INERT_SEMANTIC_TYPES.has(semanticType);
+  const adapter = record.adapter_evidence?.[0]?.adapter || provenance?.adapter;
+  const parser = record.adapter_evidence?.[0]?.parser || provenance?.parser;
+  const memberIds = Array.isArray(record.member_ids)
+    ? record.member_ids.map(value => safeToken(value)).sort()
+    : [];
+  return {
+    stable_id: safeToken(record.stable_id || record.id || record.name),
+    logical_root: safeToken(provenance?.logical_root || record.logical_root),
+    relative_path: safeRelativePath(provenance?.relative_path || record.relative_path),
+    runtime: runtimeOf(record),
+    scope: scopeOf(record),
+    native_type: safeToken(record.native_type || `${runtimeOf(record)}:${record.type || 'unknown'}`),
+    semantic_type: semanticType,
+    enabled,
+    dispatchable,
+    lifecycle_role: safeToken(record.lifecycle_role || record.lifecycle, 'opaque'),
+    invocation: invocationOf(record, dispatchable),
+    fingerprint: safeFingerprint(provenance?.source_fingerprint || record.fingerprint),
+    adapter_version: safeToken(adapter, 'unknown'),
+    parser_version: safeToken(parser, 'unknown'),
+    required_dependencies: requiredDependenciesOf(record),
+    container_id: record.container_id ? safeToken(record.container_id) : null,
+    member_ids: memberIds,
+    identity_continuity: identityContinuityOf(record),
+    diagnostics: safeDiagnostics(record.diagnostics),
+  };
+}
+
+function inventorySort(left, right) {
+  return left.semantic_type.localeCompare(right.semantic_type)
+    || left.runtime.localeCompare(right.runtime)
+    || left.scope.localeCompare(right.scope)
+    || left.stable_id.localeCompare(right.stable_id)
+    || left.relative_path.localeCompare(right.relative_path);
+}
+
+function operationalProjection(state, recordCount, diagnostics = []) {
+  if (!state || typeof state !== 'object' || !INVENTORY_STATES.has(state.state)) {
+    throw new TypeError('invalid_inventory_state');
+  }
+  return {
+    state: state.state,
+    active_generation_id: state.active_generation_id === null ? null : safeToken(state.active_generation_id),
+    candidate_generation_id: state.candidate_generation_id === null ? null : safeToken(state.candidate_generation_id),
+    last_complete_reconciliation: Number.isFinite(state.last_complete_reconciliation)
+      ? state.last_complete_reconciliation
+      : state.last_complete_reconciliation === null
+        ? null
+        : safeToken(state.last_complete_reconciliation, null),
+    trigger: safeToken(state.trigger, 'unknown'),
+    pending_changes: (Array.isArray(state.pending_changes) ? state.pending_changes : []).map(value => safeToken(value)).sort(),
+    stale_roots: (Array.isArray(state.stale_roots) ? state.stale_roots : []).map(value => safeToken(value)).sort(),
+    unreadable_roots: (Array.isArray(state.unreadable_roots) ? state.unreadable_roots : []).map(value => safeToken(value)).sort(),
+    record_count: recordCount,
+    diagnostics: safeDiagnostics(diagnostics),
+  };
+}
+
+export function inventorySummaryProjection({ records = [], state, diagnostics = [], limit = MAX_DIFF, offset = 0 } = {}) {
+  const projected = records.map(inventoryRecordProjection).sort(inventorySort);
+  const bounded = boundedResult(projected, { limit, offset });
+  return {
+    ...operationalProjection(state, projected.length, diagnostics),
+    total: bounded.meta.total,
+    returned: bounded.meta.returned,
+    truncated: bounded.meta.truncated,
+    limit: bounded.meta.limit,
+    offset: bounded.meta.offset,
+    next_offset: bounded.meta.next_offset,
+    records: bounded.values,
+  };
+}
+
+export function inventoryAvailabilityProjection({
+  records = [], semanticType = null, runtime = null, scope = null, limit = MAX_DIFF, offset = 0,
+} = {}) {
+  const projected = records.map(inventoryRecordProjection).sort(inventorySort).filter(record => (
+    (!semanticType || record.semantic_type === semanticType)
+    && (!runtime || record.runtime === runtime)
+    && (!scope || record.scope === scope)
+  ));
+  const groups = new Map();
+  for (const record of projected) {
+    if (!groups.has(record.semantic_type)) groups.set(record.semantic_type, []);
+    groups.get(record.semantic_type).push({
+      semantic_type: record.semantic_type,
+      runtime: record.runtime,
+      scope: record.scope,
+      stable_id: record.stable_id,
+      enabled: record.enabled,
+      dispatchable: record.dispatchable,
+    });
+  }
+  const all = [...groups].sort(([left], [right]) => left.localeCompare(right))
+    .map(([semantic_type, entries]) => ({ semantic_type, entries }));
+  const bounded = boundedResult(all, { limit, offset });
+  return {
+    availability: bounded.values,
+    total: bounded.meta.total,
+    returned: bounded.meta.returned,
+    truncated: bounded.meta.truncated,
+    limit: bounded.meta.limit,
+    offset: bounded.meta.offset,
+    next_offset: bounded.meta.next_offset,
   };
 }
 
@@ -120,11 +340,12 @@ function parse(argv) {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value.length > 4096) throw new TypeError('argument_too_long');
-    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json') {
+    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope') {
       const next = args[++index];
       if (!next || next.length > 4096) throw new TypeError('missing_option_value');
       options[value.slice(2).replace('-', '_')] = next;
     } else if (value === '--execute') options.execute = true;
+    else if (value === '--availability') options.availability = true;
     else if (value === '--help' || value === '-h') options.help = true;
     else if (value.startsWith('--')) throw new TypeError('unknown_option');
     else positional.push(value);
@@ -142,8 +363,27 @@ function textResult(result) {
   return `${lines.join('\n')}\n`;
 }
 
+function inventoryTextValue(value, key) {
+  if (key === 'fingerprint' && typeof value === 'string') return value.slice(0, 12);
+  return value !== null && typeof value === 'object' ? stableStringify(value) : String(value);
+}
+
+export function renderInventoryText(result) {
+  const lines = [`COMMAND ${result.command}`, `OK ${result.ok}`, `REASON ${result.reason_code}`];
+  const data = result.data || {};
+  const primary = Object.hasOwn(data, 'stable_id') ? INVENTORY_RECORD_FIELDS : INVENTORY_SUMMARY_FIELDS;
+  for (const key of primary) {
+    if (Object.hasOwn(data, key)) lines.push(`${key.toUpperCase()} ${inventoryTextValue(data[key], key)}`);
+  }
+  for (const key of ['total', 'returned', 'truncated', 'limit', 'offset', 'next_offset', 'records', 'availability', 'next_action']) {
+    if (Object.hasOwn(data, key)) lines.push(`${key.toUpperCase()} ${inventoryTextValue(data[key], key)}`);
+  }
+  for (const warning of result.warnings || []) lines.push(`WARNING ${safeToken(warning, 'redacted')}`);
+  return `${lines.join('\n')}\n`;
+}
+
 function usage() {
-  return 'Usage: router-control <status|diff|explain|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
+  return 'Usage: router-control <status|diff|explain|inventory|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -205,6 +445,115 @@ function runContextCommand({ subcommand, root, options }) {
   return { result: canonical(`context ${subcommand}`, ok, resolution.reason_code, { resolution, ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}) }), exitCode: ok ? 0 : EXIT.invalid };
 }
 
+function integerOption(value, fallback, { minimum = 0, maximum = MAX_VALUE } = {}) {
+  if (value === undefined) return fallback;
+  if (!/^\d+$/u.test(value)) throw new TypeError('invalid_pagination');
+  const number = Number(value);
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) {
+    throw new TypeError('invalid_pagination');
+  }
+  return number;
+}
+
+function defaultInventoryState(root, active, version) {
+  try {
+    const state = JSON.parse(readFileSync(join(root, 'inventory-state.json'), 'utf8'));
+    if (state && typeof state === 'object') return state;
+  } catch { /* active immutable inventory remains inspectable without watcher telemetry */ }
+  return {
+    state: 'current',
+    reason_code: 'inventory_current',
+    active_generation_id: active.version_id,
+    candidate_generation_id: null,
+    last_complete_reconciliation: version.manifest?.created_at ?? null,
+    trigger: 'activation',
+    pending_changes: [],
+    stale_roots: [],
+    unreadable_roots: [],
+    next_recovery_action: null,
+  };
+}
+
+function inventoryCommand({ root, active, options, dependencies }) {
+  if (options.id && options.availability) {
+    return { result: canonical('inventory', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  const unsafe = activeSourceFailure('inventory', root, active);
+  if (unsafe) return unsafe;
+  const version = readVersion(root, active.version_id);
+  if (!version.verdict.valid || !Array.isArray(version.registry?.records)) {
+    return {
+      result: canonical('inventory', false, 'invalid_inventory_source', { next_action: 'run_registry_recovery' }),
+      exitCode: EXIT.invalid,
+    };
+  }
+  try {
+    const limit = integerOption(options.limit, MAX_DIFF, { minimum: 1 });
+    const offset = integerOption(options.offset, 0, { maximum: Number.MAX_SAFE_INTEGER });
+    const records = dependencies.inventoryRegistry
+      ? dependencies.inventoryRegistry({ root, active, version })
+      : version.registry.records;
+    if (!Array.isArray(records)) throw new TypeError('invalid_inventory_records');
+    const state = dependencies.inventoryState
+      ? dependencies.inventoryState({ root, active, version })
+      : defaultInventoryState(root, active, version);
+    const diagnostics = version.registry.diagnostics || state?.diagnostics || [];
+    const operational = operationalProjection(state, records.length, diagnostics);
+    const reason = safeToken(state.reason_code, state.state === 'current' ? 'inventory_current' : `inventory_${state.state}`);
+    const nextAction = state.state === 'current' ? null : safeToken(state.next_recovery_action, 'authoritative-repair');
+
+    if (options.id) {
+      const projected = records.map(inventoryRecordProjection).sort(inventorySort);
+      const record = projected.find(item => item.stable_id === options.id);
+      if (!record) {
+        return { result: canonical('inventory', false, 'inventory_record_not_found'), exitCode: EXIT.invalid };
+      }
+      return {
+        result: canonical('inventory', true, record.enabled ? 'inventory_record_ready' : 'inventory_record_disabled', {
+          ...record,
+          ...(nextAction ? { next_action: nextAction } : {}),
+        }),
+        exitCode: 0,
+      };
+    }
+
+    if (options.availability) {
+      const availability = inventoryAvailabilityProjection({
+        records,
+        semanticType: options.semantic_type,
+        runtime: options.runtime,
+        scope: options.scope,
+        limit,
+        offset,
+      });
+      return {
+        result: canonical('inventory', true, reason, {
+          ...operational,
+          ...availability,
+          ...(nextAction ? { next_action: nextAction } : {}),
+        }),
+        exitCode: 0,
+      };
+    }
+
+    const summary = inventorySummaryProjection({ records, state, diagnostics, limit, offset });
+    return {
+      result: canonical(
+        'inventory',
+        true,
+        records.length === 0 && state.state === 'current' ? 'inventory_empty' : reason,
+        { ...summary, ...(nextAction ? { next_action: nextAction } : {}) },
+      ),
+      exitCode: 0,
+    };
+  } catch {
+    return {
+      result: canonical('inventory', false, 'unsafe_inventory_projection', { next_action: 'check_inventory_diagnostics' }),
+      exitCode: EXIT.unsafe,
+    };
+  }
+}
+
 export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, dependencies = {} } = {}) {
   let parsed;
   try { parsed = parse(argv); } catch (error) { return { result: canonical('usage', false, error.message), exitCode: EXIT.usage }; }
@@ -217,6 +566,10 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
     return runContextCommand({ subcommand: positional[1], root, options });
   }
   const active = pointer(root);
+  if (command === 'inventory') {
+    if (positional.length !== 1) return { result: canonical('inventory', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    return inventoryCommand({ root, active, options, dependencies });
+  }
   if (command === 'status') {
     if (positional.length !== 1) return { result: canonical('status', false, 'invalid_arguments'), exitCode: EXIT.usage };
     const unsafe = activeSourceFailure('status', root, active); if (unsafe) return unsafe;
@@ -536,7 +889,11 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
     const stdin = process.stdin.isTTY ? '' : readFileSync(0, 'utf8');
     const { positional, options } = parse(process.argv.slice(2));
     const outcome = runRouterControl({ argv: process.argv.slice(2), stdin });
-    process.stdout.write(options.format === 'json' ? `${stableStringify(outcome.result)}\n` : textResult(outcome.result));
+    process.stdout.write(options.format === 'json'
+      ? `${stableStringify(outcome.result)}\n`
+      : outcome.result.command === 'inventory'
+        ? renderInventoryText(outcome.result)
+        : textResult(outcome.result));
     process.exitCode = outcome.exitCode;
   } catch {
     process.stderr.write('ROUTER CONTROL FAILED: internal_error\n');

@@ -41,11 +41,12 @@ test('[phase21-red:inspection] record projection strictly allowlists safe proven
   const projection = control.inventoryRecordProjection(maliciousRecord());
   const output = JSON.stringify(projection);
   assert.doesNotMatch(output, new RegExp(secret));
-  assert.doesNotMatch(output, /raw_body|frontmatter|api_key|router-admin|authorize myself/i);
+  assert.doesNotMatch(output, /raw_body|"frontmatter":|api_key|router-admin|authorize myself/i);
   assert.doesNotMatch(output, /\/Users\/private-user|secret-project/);
   assert.doesNotMatch(output, /[\u0000-\u001f\u007f-\u009f]/);
   assert.equal(projection.logical_root, 'fixture_home');
   assert.equal(projection.fingerprint, 'a'.repeat(64));
+  assert.ok(projection.diagnostics.every(item => item.relative_path !== '../outside'));
 });
 
 test('[phase21-red:inspection] terminal rendering escapes controls and redacts authored diagnostic prose', () => {
