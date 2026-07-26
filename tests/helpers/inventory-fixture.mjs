@@ -129,3 +129,50 @@ export function assertSemanticBytesEqual(left, right) {
     .sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))));
   assert.equal(bytes(left), bytes(right));
 }
+
+export function contractEvidence(record, variant = 'accepted') {
+  const structural = {
+    purpose: record.name,
+    triggers: [record.name],
+    inputs: [],
+    outputs: [],
+    preconditions: [],
+    dependencies: record.dependencies.items.map(item => item.id),
+    permissions: [],
+    side_effects: [],
+    reversibility: 'unknown',
+    risk: 'unknown',
+    invocation_kind: record.invocation.availability === 'available' ? record.semantic_type : 'none',
+    lifecycle_role: record.lifecycle_role,
+    scope: record.scope,
+    workflow_transitions: [],
+  };
+  const evidence = Object.fromEntries(Object.entries(structural).map(([field, value]) => [field, [{
+    value,
+    provenance: 'adapter',
+    confidence_basis_points: 10000,
+    freshness: 'fresh',
+    rule: `adapter-${field}-v1`,
+  }]]));
+  if (variant === 'missing') evidence.invocation_kind = [];
+  if (variant === 'conflicting') evidence.invocation_kind.push({
+    value: 'command',
+    provenance: 'authored',
+    confidence_basis_points: 9000,
+    freshness: 'fresh',
+    rule: 'authored-invocation-kind-v1',
+  });
+  if (variant === 'stale') evidence.invocation_kind[0].freshness = 'stale';
+  if (variant === 'below-threshold') evidence.invocation_kind[0].confidence_basis_points = 8499;
+  if (variant === 'rejected') evidence.purpose.push({
+    value: 'SECRET=/Users/example/private authored body',
+    provenance: 'authored',
+    confidence_basis_points: 10000,
+    freshness: 'fresh',
+    rule: 'authored-purpose-v1',
+  });
+  if (!['accepted', 'missing', 'conflicting', 'stale', 'below-threshold', 'rejected'].includes(variant)) {
+    throw new TypeError(`unknown contract evidence variant: ${variant}`);
+  }
+  return evidence;
+}
