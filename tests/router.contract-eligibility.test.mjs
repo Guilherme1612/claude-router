@@ -4,6 +4,7 @@ import test from 'node:test';
 import { assembleRegistry } from '../src/registry/build.mjs';
 import { buildCapabilityContract } from '../src/registry/contract.mjs';
 import { stableCapabilityId } from '../src/registry/identity.mjs';
+import { deriveRelationships } from '../src/registry/relationships.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { buildClaudeHeavyProfile, contractEvidence } from './helpers/inventory-fixture.mjs';
 
@@ -157,6 +158,43 @@ test('[phase22-red:eligibility] dependency cycles conflicts disabled targets and
   }
   const disabled = { ...base, enabled: false };
   assert.equal((await evaluate(disabled, { records: [disabled] })).gates.target_existence, 'failed');
+});
+
+test('[phase22:eligibility] inactive overflow cannot hide prerequisite uncertainty', async () => {
+  const base = safeRecord();
+  const other = safeRecord({ name: 'other', canonical_identity: 'router/other' });
+  const third = safeRecord({ name: 'third', canonical_identity: 'router/third' });
+  const prerequisite = (id, source, target) => ({
+    id,
+    type: 'prerequisite',
+    source_id: stableCapabilityId(source),
+    target_id: stableCapabilityId(target),
+    confidence_basis_points: 9000,
+    freshness: 'stale',
+    evidence: [{
+      kind: 'dependency-declaration',
+      provenance: 'adapter',
+      confidence_basis_points: 9000,
+      freshness: 'fresh',
+      rule_version: 'relationship-rules-v1',
+    }],
+  });
+  const relationships = deriveRelationships({
+    records: [base, other, third],
+    candidates: [
+      ...Array.from({ length: 128 }, (_, index) => prerequisite(
+        `000-unrelated-${String(index).padStart(3, '0')}`,
+        other,
+        third,
+      )),
+      prerequisite('zzz-relevant', base, other),
+    ],
+  });
+  assert.ok(relationships.reason_codes.includes('relationship_inactive_overflow'));
+  assert.equal(relationships.candidates.some(value => value.id === 'zzz-relevant'), false);
+  const result = await evaluate(base, { records: [base, other, third], relationships });
+  assert.equal(result.gates.dependency_closure, 'unknown');
+  assert.equal(result.eligible, false);
 });
 
 test('[phase22-red:eligibility] multiple failures have canonical gate and reason order', async () => {

@@ -91,7 +91,9 @@ function dependencyState(record, recordsById, relationships) {
     : [];
   if (edges.some(edge => edge.type === 'conflict'
     && (edge.source_id === subjectId || edge.target_id === subjectId))) return 'failed';
-  if (relationships?.reason_codes?.includes('relationship_active_overflow')) return 'unknown';
+  if (relationships?.reason_codes?.some(code => (
+    code === 'relationship_active_overflow' || code === 'relationship_inactive_overflow'
+  ))) return 'unknown';
   const candidates = Array.isArray(relationships?.candidates)
     ? relationships.candidates.slice(0, MAX_RELATIONSHIPS)
     : [];
