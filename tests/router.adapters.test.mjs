@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import * as claude from '../src/adapters/claude.mjs';
 import * as codex from '../src/adapters/codex.mjs';
+import { scanFingerprintTree } from '../src/registry/fingerprint.mjs';
 
 function put(path, value) {
   mkdirSync(dirname(path), { recursive: true });
@@ -272,4 +273,24 @@ test('real-world settings.json hooks: node_modules excluded, quoted TOML headers
     assert.equal(binding.hook_observation.valid, true);
     assert.equal(binding.hook_observation.reason, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('[phase21-red:discovery] fingerprint roots expose stable completeness without absolute paths', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-root-completeness-'));
+  try {
+    put(join(root, 'skills/safe/SKILL.md'), markdown('safe'));
+    const first = await scanFingerprintTree([{ logicalRoot: 'authorized', path: root }]);
+    const second = await scanFingerprintTree([{ logicalRoot: 'authorized', path: root }]);
+    assert.deepEqual(first, second);
+    assert.deepEqual(first.logicalRoots, [{
+      logicalRoot: 'authorized',
+      complete: true,
+      status: 'complete',
+      canonicalRoot: 'authorized',
+      diagnosticCodes: [],
+    }]);
+    assert.equal(JSON.stringify(first).includes(root), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
