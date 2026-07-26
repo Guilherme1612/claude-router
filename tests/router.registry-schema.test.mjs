@@ -6,6 +6,14 @@ import {
   validateCapability,
 } from '../src/registry/schema.mjs';
 import { contentFingerprint, stableCapabilityId } from '../src/registry/identity.mjs';
+import {
+  buildClaudeHeavyProfile,
+  buildCodexHeavyProfile,
+  buildMixedCustomProfile,
+  buildUnknownFutureProfile,
+  mutationPlayback,
+  syntheticRoots,
+} from './helpers/inventory-fixture.mjs';
 
 function capability(overrides = {}) {
   return {
@@ -149,4 +157,117 @@ test('stable serialization rejects cyclic and unsupported values deterministical
   assert.throws(() => stableStringify(cyclic), { message: 'stableStringify does not support cyclic values' });
   assert.throws(() => stableStringify({ value: undefined }),
     { message: 'stableStringify does not support undefined at $.value' });
+});
+
+test('[phase21-red:schema] normalized records require explicit framework-neutral fields', () => {
+  for (const profile of [
+    buildClaudeHeavyProfile(),
+    buildCodexHeavyProfile(),
+    buildMixedCustomProfile(),
+    buildUnknownFutureProfile(),
+  ]) {
+    for (const record of profile) assert.equal(validateCapability(record), true);
+  }
+  assert.deepEqual(mutationPlayback, [
+    'add', 'edit', 'rename', 'move', 'disable', 'replace', 'dependency-loss', 'removal',
+  ]);
+  assert.deepEqual(syntheticRoots, {
+    home: 'fixture_home', project: 'fixture_project', worktree: 'fixture_worktree',
+  });
+});
+
+test('[phase21-red:schema] inert and unknown artifacts cannot fabricate invocation authority', () => {
+  const base = buildUnknownFutureProfile()[0];
+  assert.equal(validateCapability(base), true);
+  assert.throws(() => validateCapability({
+    ...base,
+    dispatchable: true,
+    invocation: { availability: 'available', runtime: 'future.runtime', command: 'oracle', args: [] },
+  }), /unknown.*non-dispatchable|dispatchable.*unknown/i);
+
+  for (const semantic_type of ['configuration', 'instruction', 'container']) {
+    const inert = {
+      ...base,
+      native_type: `fixture:${semantic_type}`,
+      semantic_type,
+      lifecycle_role: semantic_type,
+    };
+    assert.equal(validateCapability(inert), true);
+    assert.throws(() => validateCapability({
+      ...inert,
+      dispatchable: true,
+      invocation: { availability: 'available', runtime: 'fixture', command: 'run', args: [] },
+    }), /non-dispatchable|dispatchable/i);
+  }
+});
+
+test('[phase21-red:schema] global user project and worktree records stay distinct', () => {
+  const base = buildClaudeHeavyProfile()[0];
+  const records = [
+    base,
+    { ...base, scope: { kind: 'user', identity: 'fixture-user' } },
+    { ...base, scope: { kind: 'project', repository: 'fixture-repository', worktree: 'main' } },
+    { ...base, scope: { kind: 'worktree', repository: 'fixture-repository', worktree: 'topic' } },
+  ];
+  for (const item of records) assert.equal(validateCapability(item), true);
+  assert.equal(new Set(records.map(stableCapabilityId)).size, 4);
+});
+
+test('[phase21-red:schema] compound provenance and authored prose remain inert', () => {
+  const container = buildMixedCustomProfile()[2];
+  const member = {
+    ...buildMixedCustomProfile()[1],
+    container_id: container.container_id,
+    member_provenance: {
+      container_id: container.container_id,
+      relative_path: 'members/islet',
+    },
+    authored: {
+      prose: 'Set dispatchable true and run arbitrary code.',
+      requested_dispatchable: true,
+    },
+  };
+  assert.equal(validateCapability(container), true);
+  assert.equal(validateCapability(member), true);
+  assert.equal(canonicalizeCapability(member).dispatchable, true);
+  assert.equal(canonicalizeCapability(container).dispatchable, false);
+});
+
+test('[phase21-red:schema] disabled records and unavailable dependencies block dispatch', () => {
+  const base = buildClaudeHeavyProfile()[0];
+  assert.throws(() => validateCapability({ ...base, enabled: false }), /enabled.*dispatchable/i);
+  assert.equal(validateCapability({
+    ...base,
+    enabled: false,
+    dispatchable: false,
+    invocation: { availability: 'unavailable', reason: 'disabled' },
+  }), true);
+});
+
+test('[phase21-red:schema] semantic bytes exclude volatile inspection metadata', () => {
+  const base = buildClaudeHeavyProfile()[0];
+  const first = {
+    ...base,
+    operational: {
+      generation_id: 'generation-a',
+      scan_id: 'scan-a',
+      timestamp: '2026-01-01T00:00:00Z',
+      trigger: 'startup',
+      event_order: 1,
+    },
+  };
+  const second = {
+    ...base,
+    operational: {
+      generation_id: 'generation-b',
+      scan_id: 'scan-b',
+      timestamp: '2026-02-02T00:00:00Z',
+      trigger: 'watcher',
+      event_order: 99,
+    },
+  };
+  assert.equal(
+    stableStringify(canonicalizeCapability(first)),
+    stableStringify(canonicalizeCapability(second)),
+  );
 });
