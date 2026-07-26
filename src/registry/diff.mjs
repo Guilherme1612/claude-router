@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { stableCapabilityId } from './identity.mjs';
+import { contentFingerprint, stableCapabilityId } from './identity.mjs';
 import { stableStringify } from './schema.mjs';
 
 const ORDER = [
@@ -44,13 +44,6 @@ function lifecycleRecord(record) {
   };
 }
 
-function nativeEvidence(record) {
-  const variant = record.runtime_variants?.find(item => item.runtime === record.invocation?.runtime)
-    || record.runtime_variants?.[0];
-  if (!variant?.runtime || !variant?.native_identity || !record.type) return null;
-  return `${variant.runtime}:${record.type}:${variant.native_identity}:${stableStringify(record.scope)}`;
-}
-
 function continuity(record) {
   if (typeof record.canonical_identity === 'string' && record.canonical_identity.trim()) {
     return { authority: 'canonical_identity', key: `${record.type}:${record.canonical_identity.trim()}`, id: record.canonical_identity.trim() };
@@ -59,8 +52,7 @@ function continuity(record) {
     const identity = record.shared_origin.identity.trim();
     return { authority: 'shared_origin', key: `${record.type}:${record.shared_origin.authority}:${identity}`, id: `origin:${identity}` };
   }
-  const native = nativeEvidence(record);
-  return native ? { authority: 'native_identity', key: native, id: stableCapabilityId(record) } : null;
+  return null;
 }
 
 function dimensionChanges(before, after) {
@@ -87,6 +79,7 @@ function lifecycleEvent(before, after, identity) {
     canonical_id: identity.id,
     primary,
     facets: changes.slice(1),
+    continuity: { authority: identity.authority, authoritative: true },
     old_provenance: before.provenance,
     new_provenance: after.provenance,
   };
@@ -129,28 +122,61 @@ export function diffFingerprintTrees(previous, current) {
   const oldByKey = new Map(), newByKey = new Map();
   for (const record of oldEntries) {
     const evidence = continuity(record);
-    if (evidence) oldByKey.set(evidence.key, { record, evidence });
+    if (evidence) {
+      if (!oldByKey.has(evidence.key)) oldByKey.set(evidence.key, []);
+      oldByKey.get(evidence.key).push({ record, evidence });
+    }
   }
   for (const record of newEntries) {
     const evidence = continuity(record);
-    if (evidence) newByKey.set(evidence.key, { record, evidence });
+    if (evidence) {
+      if (!newByKey.has(evidence.key)) newByKey.set(evidence.key, []);
+      newByKey.get(evidence.key).push({ record, evidence });
+    }
   }
   const pairedOld = new Set(), pairedNew = new Set(), events = [];
   for (const key of [...oldByKey.keys()].filter(value => newByKey.has(value)).sort()) {
-    const before = oldByKey.get(key), after = newByKey.get(key);
+    const oldBucket = oldByKey.get(key), newBucket = newByKey.get(key);
+    if (oldBucket.length !== 1 || newBucket.length !== 1) continue;
+    const [before] = oldBucket, [after] = newBucket;
     pairedOld.add(before.record);
     pairedNew.add(after.record);
     const event = lifecycleEvent(before.record, after.record, before.evidence);
     if (event) events.push(event);
   }
-  const removed = oldEntries.filter(record => !pairedOld.has(record));
-  const added = newEntries.filter(record => !pairedNew.has(record));
-  const confirmedRemoved = removed.filter(record => !removalUncertain(record));
-  events.push(...confirmedRemoved.map(record => addRemove('removed', record)));
+  const unpairedOld = oldEntries.filter(record => !pairedOld.has(record));
+  const unpairedNew = newEntries.filter(record => !pairedNew.has(record));
+  const confirmedRemoved = unpairedOld.filter(record => !removalUncertain(record));
+  const removedByFingerprint = new Map(), addedByFingerprint = new Map();
+  for (const record of confirmedRemoved) {
+    const key = contentFingerprint(record);
+    if (!removedByFingerprint.has(key)) removedByFingerprint.set(key, []);
+    removedByFingerprint.get(key).push(record);
+  }
+  for (const record of unpairedNew) {
+    const key = contentFingerprint(record);
+    if (!addedByFingerprint.has(key)) addedByFingerprint.set(key, []);
+    addedByFingerprint.get(key).push(record);
+  }
+  for (const key of [...removedByFingerprint.keys()].filter(value => addedByFingerprint.has(value)).sort()) {
+    const oldBucket = removedByFingerprint.get(key), newBucket = addedByFingerprint.get(key);
+    if (oldBucket.length !== 1 || newBucket.length !== 1) continue;
+    const [before] = oldBucket, [after] = newBucket;
+    pairedOld.add(before);
+    pairedNew.add(after);
+    const event = lifecycleEvent(before, after, {
+      authority: 'exact_fingerprint',
+      id: stableCapabilityId(before),
+    });
+    if (event) events.push(event);
+  }
+  const removed = confirmedRemoved.filter(record => !pairedOld.has(record));
+  const added = unpairedNew.filter(record => !pairedNew.has(record));
+  events.push(...removed.map(record => addRemove('removed', record)));
   events.push(...added.map(record => addRemove('added', record)));
 
   {
-    for (const before of confirmedRemoved) {
+    for (const before of removed) {
       for (const after of added) {
         if (!weaklySimilar(before, after)) continue;
         diagnostics.push({

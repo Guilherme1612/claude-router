@@ -28,11 +28,11 @@ function mutate(profile, mutation) {
     const next = structuredClone(records);
     const first = next[0];
     if (mutation === 'add') next.push({ ...first, name: `${first.name}-added`, provenance: first.provenance.map(p => ({ ...p, relative_path: `capabilities/${first.name}-added/manifest.md` })), runtime_variants: first.runtime_variants.map(v => ({ ...v, native_identity: `${v.native_identity}-added` })) });
-    if (mutation === 'edit') first.diagnostics = [{ code: 'edited' }];
+    if (mutation === 'edit') first.content = { body: 'edited semantic bytes' };
     if (mutation === 'rename') { first.name += '-renamed'; first.provenance[0].relative_path = `capabilities/${first.name}/manifest.md`; }
     if (mutation === 'move') first.provenance[0].logical_root = 'fixture_project';
     if (mutation === 'disable') { first.enabled = false; first.dispatchable = false; first.invocation = { availability: 'unavailable', reason: 'disabled' }; }
-    if (mutation === 'replace') { first.name += '-replacement'; first.provenance[0].source_fingerprint += '-replacement'; first.runtime_variants[0].native_identity += '-replacement'; }
+    if (mutation === 'replace') { first.name += '-replacement'; first.provenance[0].relative_path = `capabilities/${first.name}/manifest.md`; first.provenance[0].source_fingerprint += '-replacement'; first.runtime_variants[0].native_identity += '-replacement'; }
     if (mutation === 'dependency-loss') { first.dependencies = { state: 'declared', items: [{ id: 'fixture:missing', available: false }] }; first.dispatchable = false; }
     if (mutation === 'removal') next.shift();
     return next;
@@ -47,7 +47,8 @@ test('[phase21-red:mutation] D-19 mutation matrix has deterministic identity lif
       const first = diffFingerprintTrees(tree(base), tree(current));
       const second = diffFingerprintTrees(tree([...base].reverse()), tree([...current].reverse()));
       assert.deepEqual(first, second, `${buildProfile.name}:${mutation}`);
-      assert.ok(first.events.length > 0, `${buildProfile.name}:${mutation}`);
+      const alreadyInertDisable = mutation === 'disable' && base[0].dispatchable === false;
+      assert.equal(first.events.length > 0, !alreadyInertDisable, `${buildProfile.name}:${mutation}`);
       assert.ok(first.events.every(event => event.old_provenance || event.new_provenance));
       assert.equal(new Set(current.map(stableCapabilityId)).size, current.length);
     }

@@ -112,7 +112,7 @@ test('D-01 and D-02 preserve strong identity across rename and move with old/new
   assert.deepEqual(move.events[0].new_provenance, movedAndEdited.provenance);
 });
 
-test('D-03 weak similarity is remove-plus-add with sorted non-authoritative diagnostics', () => {
+test('D-03 exact fingerprints preserve continuity while merely similar evidence remains advisory', () => {
   const before = observation({ name: 'planner', content: { body: 'same' } });
   const after = observation({
     name: 'planner-renamed',
@@ -122,18 +122,17 @@ test('D-03 weak similarity is remove-plus-add with sorted non-authoritative diag
     content: { body: 'same' },
   });
   const result = diffFingerprintTrees(tree([before]), tree([after]));
-  assert.deepEqual(eventTypes(result), ['removed', 'added']);
-  assert.equal(result.diagnostics.length, 1);
-  assert.equal(result.diagnostics[0].code, 'possible_match');
-  assert.equal(result.diagnostics[0].authoritative, false);
+  assert.deepEqual(eventTypes(result), ['renamed']);
+  assert.equal(result.events[0].continuity.authority, 'exact_fingerprint');
+  assert.equal(result.diagnostics.length, 0);
   assert.deepEqual(result.diagnostics, [...result.diagnostics].sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))));
 
   const weakScope = diffFingerprintTrees(
     tree([observation()]),
     tree([observation({ scope: { kind: 'project', repository: 'repo:router', worktree: 'main' } })]),
   );
-  assert.deepEqual(eventTypes(weakScope), ['removed', 'added']);
-  assert.equal(weakScope.diagnostics[0].authoritative, false);
+  assert.deepEqual(eventTypes(weakScope), ['scope_changed']);
+  assert.equal(weakScope.events[0].continuity.authority, 'exact_fingerprint');
 });
 
 test('D-04 emits one event with fixed precedence and ordered facets for compound changes', () => {
