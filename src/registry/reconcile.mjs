@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { stableCapabilityId } from './identity.mjs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 import { reconcileHookInventory } from './hook-reconcile.mjs';
+import { relationshipReferences } from './relationships.mjs';
 
 function fingerprint(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value), 'utf8').digest('hex');
@@ -58,7 +59,7 @@ function canonicalAliases(aliases) {
 }
 
 const REFERENCE_TYPES = new Set([
-  'alias', 'equivalence', 'workflow', 'correction', 'mapping', 'compiled-route',
+  'alias', 'equivalence', 'workflow', 'correction', 'mapping', 'compiled-route', 'relationship',
 ]);
 
 function canonicalReferences(input, candidate, events) {
@@ -274,8 +275,20 @@ export function reconcileCandidate(options = {}) {
     const lifecycle = options.lifecycle && typeof options.lifecycle === 'object' ? options.lifecycle : { events: [], diagnostics: [] };
     const events = Array.isArray(lifecycle.events) ? lifecycle.events : [];
     const diagnostics = Array.isArray(lifecycle.diagnostics) ? lifecycle.diagnostics : [];
+    const relationshipEndpointIds = [
+      ...candidate.records.map(record => record.id),
+      ...events.map(event => event?.canonical_id).filter(value => typeof value === 'string'),
+    ];
+    const referenceInput = options.references ?? { schema_version: 1, edges: [] };
+    const combinedReferences = options.relationships === undefined ? referenceInput : {
+      schema_version: referenceInput.schema_version,
+      edges: [
+        ...referenceInput.edges,
+        ...relationshipReferences(options.relationships, relationshipEndpointIds),
+      ],
+    };
     const references = canonicalReferences(
-      options.references || { schema_version: 1, edges: [] },
+      combinedReferences,
       candidate,
       events,
     );
