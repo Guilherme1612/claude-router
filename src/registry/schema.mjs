@@ -1,4 +1,5 @@
 import { posix } from 'node:path';
+import { validateCapabilityContract } from './contract.mjs';
 
 const LIFECYCLES = ['ready', 'partial', 'invalid'];
 const SCOPES = ['global', 'user', 'project', 'worktree'];
@@ -33,6 +34,7 @@ const SET_LIKE_FIELDS = new Set([
   'diagnostics',
   'provenance',
   'runtime_variants',
+  'contract.reason_codes',
 ]);
 const OPERATIONAL_FIELDS = new Set([
   'event_order',
@@ -252,6 +254,7 @@ export function validateCapability(record) {
     object(conflict, `capability.conflicts[${index}]`);
     oneOf(conflict.severity, SEVERITIES, `capability.conflicts[${index}].severity`);
   }
+  if (record.contract !== undefined) validateCapabilityContract(record.contract);
   return true;
 }
 
@@ -290,7 +293,9 @@ function sortSet(array) {
 function canonicalize(value, path = '') {
   if (Array.isArray(value)) {
     const entries = value.map((entry) => canonicalize(entry, path));
-    return SET_LIKE_FIELDS.has(path) ? sortSet(entries) : entries;
+    const contractSet = path.startsWith('contract.fields.')
+      && ['evidence', 'rejected_evidence', 'provenance', 'reason_codes'].some(field => path.endsWith(`.${field}`));
+    return SET_LIKE_FIELDS.has(path) || contractSet ? sortSet(entries) : entries;
   }
   if (!value || typeof value !== 'object') return value;
   const output = {};
