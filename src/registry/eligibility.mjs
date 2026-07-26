@@ -1,5 +1,6 @@
 import { stableCapabilityId } from './identity.mjs';
 import { stableStringify } from './schema.mjs';
+import { validateContractFieldValue } from './contract.mjs';
 
 export const ELIGIBILITY_GATES = Object.freeze([
   'target_existence',
@@ -36,6 +37,7 @@ function fieldState(record, name, decide) {
   const envelope = field(record, name);
   if (!record?.contract) return 'unknown';
   if (!envelope || envelope.state !== 'known') return 'unknown';
+  if (validateContractFieldValue(name, envelope.value)) return 'unknown';
   return decide(envelope.value);
 }
 

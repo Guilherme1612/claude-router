@@ -115,6 +115,36 @@ test('[phase22:overlays] conflicting corrections and duplicate IDs are rejected'
   ]);
 });
 
+test('[phase22:overlays] malformed safety corrections cannot establish known fields', () => {
+  const record = installed();
+  const invalid = {
+    inputs: {},
+    preconditions: {},
+    dependencies: {},
+    permissions: {},
+    side_effects: {},
+    reversibility: [],
+    risk: [],
+    invocation_kind: {},
+    scope: [],
+    workflow_transitions: {},
+  };
+  for (const [field, value] of Object.entries(invalid)) {
+    const resolved = resolveContractOverlays([record], [
+      overlay(record, { overlay_id: `correction:${field}`, fields: { [field]: { value } } }),
+    ]);
+    assert.equal(resolved.accepted.length, 0, field);
+    assert.equal(resolved.rejected[0].reason_code, `overlay_${field}_value_invalid`);
+  }
+  for (const [field, value] of [['risk', 'unexpected'], ['reversibility', 'maybe']]) {
+    const resolved = resolveContractOverlays([record], [
+      overlay(record, { overlay_id: `correction:${field}`, fields: { [field]: { value } } }),
+    ]);
+    assert.equal(resolved.accepted.length, 0, field);
+    assert.equal(resolved.rejected[0].reason_code, `overlay_${field}_value_invalid`);
+  }
+});
+
 test('[phase22-red:overlays] assembler accepts explicit overlays without adding a discovery root', () => {
   const record = installed();
   const acquisition = {

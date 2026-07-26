@@ -43,6 +43,20 @@ const OVERLAY_KEYS = new Set(['schema_version', 'kind', 'overlay_id', 'provenanc
 const BINDING_KEYS = new Set(['stable_id', 'source_fingerprint', 'scope', 'runtime']);
 const CORRECTION_KEYS = new Set(['value']);
 const OVERLAY_TOKEN = /^[a-z0-9][a-z0-9:._-]{0,127}$/i;
+const STRING_LIST_FIELDS = new Set([
+  'triggers',
+  'inputs',
+  'outputs',
+  'preconditions',
+  'dependencies',
+  'permissions',
+  'side_effects',
+  'workflow_transitions',
+]);
+const ENUM_FIELDS = Object.freeze({
+  reversibility: new Set(['unknown', 'reversible', 'irreversible']),
+  risk: new Set(['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable']),
+});
 
 function ordered(values) {
   return [...values].sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
@@ -50,6 +64,28 @@ function ordered(values) {
 
 function reasonToken(value, fallback) {
   return typeof value === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/i.test(value) ? value : fallback;
+}
+
+export function validateContractFieldValue(field, value) {
+  if (!CONTRACT_FIELDS.includes(field)) return `contract_${field}_field_invalid`;
+  if (STRING_LIST_FIELDS.has(field)) {
+    return Array.isArray(value) && value.every(item => typeof item === 'string' && item.length > 0)
+      ? null
+      : `contract_${field}_value_invalid`;
+  }
+  if (ENUM_FIELDS[field]) {
+    return typeof value === 'string' && ENUM_FIELDS[field].has(value)
+      ? null
+      : `contract_${field}_value_invalid`;
+  }
+  if (field === 'scope') {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? null
+      : 'contract_scope_value_invalid';
+  }
+  return typeof value === 'string' && value.length > 0
+    ? null
+    : `contract_${field}_value_invalid`;
 }
 
 function portableEvidence(candidate, accepted, reasonCode) {
@@ -71,9 +107,20 @@ function envelope(field, candidates) {
     : [];
   const rejected = [];
   const eligible = [];
+  const validValues = [];
   for (const candidate of bounded) {
-    if (!candidate || typeof candidate !== 'object' || candidate.provenance === 'authored') {
+    if (!candidate || typeof candidate !== 'object') {
       rejected.push(portableEvidence(candidate || {}, false, 'authored_evidence_rejected'));
+      continue;
+    }
+    const valueReason = validateContractFieldValue(field, candidate.value);
+    if (valueReason) {
+      rejected.push(portableEvidence(candidate, false, valueReason));
+      continue;
+    }
+    validValues.push(candidate);
+    if (candidate.provenance === 'authored') {
+      rejected.push(portableEvidence(candidate, false, 'authored_evidence_rejected'));
       continue;
     }
     if (candidate.freshness !== 'fresh') {
@@ -92,7 +139,7 @@ function envelope(field, candidates) {
     eligible.push(candidate);
   }
   const distinct = new Map(eligible.map(candidate => [stableStringify(candidate.value), candidate]));
-  const assertedValues = new Set(bounded
+  const assertedValues = new Set(validValues
     .filter(candidate => candidate && typeof candidate === 'object' && Object.hasOwn(candidate, 'value'))
     .map(candidate => stableStringify(candidate.value)));
   let reason = `${field}_accepted`;
@@ -101,7 +148,9 @@ function envelope(field, candidates) {
   else if (!eligible.length) {
     reason = rejected.find(item => item.reason_code === `${field}_stale`)
       ? `${field}_stale`
-      : `${field}_below_threshold`;
+      : (rejected.find(item => item.reason_code === `contract_${field}_value_invalid`)
+        ? `contract_${field}_value_invalid`
+        : `${field}_below_threshold`);
   }
   const known = assertedValues.size <= 1 && distinct.size === 1;
   const accepted = known ? [...distinct.values()][0] : null;
@@ -222,6 +271,7 @@ function validateOverlayShape(overlay) {
     if (!correction || typeof correction !== 'object' || Array.isArray(correction)
       || Object.keys(correction).some(key => !CORRECTION_KEYS.has(key))
       || !Object.hasOwn(correction, 'value')) return 'overlay_correction_invalid';
+    if (validateContractFieldValue(field, correction.value)) return `overlay_${field}_value_invalid`;
   }
   try {
     const bytes = stableStringify(overlay);
@@ -405,6 +455,9 @@ export function validateCapabilityContract(contract) {
     if (!['known', 'unknown'].includes(value?.state)) throw new TypeError(`capability.contract.fields.${field}.state is invalid`);
     if (value.state === 'known' && !Object.hasOwn(value, 'value')) throw new TypeError(`capability.contract.fields.${field}.value is required`);
     if (value.state === 'unknown' && Object.hasOwn(value, 'value')) throw new TypeError(`capability.contract.fields.${field}.value must be absent when unknown`);
+    if (value.state === 'known' && validateContractFieldValue(field, value.value)) {
+      throw new TypeError(`capability.contract.fields.${field}.value is invalid`);
+    }
     if (!Array.isArray(value.evidence) || value.evidence.length > CONTRACT_POLICY.max_evidence_per_field) {
       throw new TypeError(`capability.contract.fields.${field}.evidence must be bounded`);
     }
