@@ -46,6 +46,18 @@ const OPERATIONAL_FIELDS = new Set([
   'timestamp',
   'trigger',
 ]);
+const ELIGIBILITY_GATES = [
+  'target_existence',
+  'invocation_shape',
+  'adapter',
+  'dependency_closure',
+  'permission',
+  'scope',
+  'side_effects',
+  'reversibility',
+  'risk',
+  'field_confidence',
+];
 const LEGACY_SEMANTIC_TYPES = Object.freeze({
   agents_store_skill: 'skill',
   binding: 'hook',
@@ -176,6 +188,42 @@ function validateProvenance(provenance) {
   }
 }
 
+export function validateEligibility(eligibility) {
+  object(eligibility, 'capability.eligibility');
+  if (eligibility.schema_version !== 1) fail('capability.eligibility.schema_version must be 1');
+  if (eligibility.policy_version !== 'eligibility-policy-v1') {
+    fail('capability.eligibility.policy_version must be eligibility-policy-v1');
+  }
+  if (typeof eligibility.eligible !== 'boolean'
+    || typeof eligibility.recommendation_only !== 'boolean'
+    || eligibility.eligible === eligibility.recommendation_only) {
+    fail('capability.eligibility disposition is invalid');
+  }
+  object(eligibility.gates, 'capability.eligibility.gates');
+  if (stableStringify(Object.keys(eligibility.gates).sort()) !== stableStringify([...ELIGIBILITY_GATES].sort())) {
+    fail('capability.eligibility.gates must contain the canonical gate set');
+  }
+  for (const gate of ELIGIBILITY_GATES) {
+    oneOf(eligibility.gates[gate], ['passed', 'failed', 'unknown'], `capability.eligibility.gates.${gate}`);
+  }
+  if (!Array.isArray(eligibility.reason_codes)
+    || eligibility.reason_codes.length < 1
+    || eligibility.reason_codes.length > ELIGIBILITY_GATES.length) {
+    fail('capability.eligibility.reason_codes must be a non-empty bounded array');
+  }
+  const expected = ELIGIBILITY_GATES
+    .filter(gate => eligibility.gates[gate] !== 'passed')
+    .map(gate => `${gate}_${eligibility.gates[gate]}`);
+  const reasons = expected.length ? expected : ['eligibility_all_gates_passed'];
+  if (stableStringify(eligibility.reason_codes) !== stableStringify(reasons)) {
+    fail('capability.eligibility.reason_codes must match canonical gate results');
+  }
+  if (eligibility.eligible !== (expected.length === 0)) {
+    fail('capability.eligibility.eligible requires every gate to pass');
+  }
+  return true;
+}
+
 export function validateCapability(record) {
   object(record, 'capability');
   if (record.schema_version !== 1) fail('capability.schema_version must be 1');
@@ -255,6 +303,12 @@ export function validateCapability(record) {
     oneOf(conflict.severity, SEVERITIES, `capability.conflicts[${index}].severity`);
   }
   if (record.contract !== undefined) validateCapabilityContract(record.contract);
+  if (record.eligibility !== undefined) {
+    validateEligibility(record.eligibility);
+    if (record.dispatchable !== record.eligibility.eligible) {
+      fail('capability.dispatchable must match derived capability.eligibility.eligible');
+    }
+  }
   return true;
 }
 

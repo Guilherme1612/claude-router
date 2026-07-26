@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { assembleRegistry } from '../src/registry/build.mjs';
 import { buildCapabilityContract } from '../src/registry/contract.mjs';
 import { stableCapabilityId } from '../src/registry/identity.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
@@ -163,4 +164,30 @@ test('[phase22-red:eligibility] authored authority fields and precomputed eligib
   const result = await evaluate(record);
   assert.equal(result.eligible, true);
   assert.doesNotMatch(stableStringify(result), /authored/);
+});
+
+test('[phase22-red:eligibility] assembly replaces authored eligibility and dispatchable together', () => {
+  const record = {
+    ...safeRecord(),
+    dispatchable: false,
+    eligibility: {
+      schema_version: 1,
+      policy_version: 'eligibility-policy-v1',
+      eligible: false,
+      recommendation_only: true,
+      gates: Object.fromEntries([
+        'target_existence', 'invocation_shape', 'adapter', 'dependency_closure',
+        'permission', 'scope', 'side_effects', 'reversibility', 'risk', 'field_confidence',
+      ].map(gate => [gate, gate === 'risk' ? 'failed' : 'passed'])),
+      reason_codes: ['risk_failed'],
+    },
+  };
+  const built = assembleRegistry({
+    claude: { observations: [record], diagnostics: [] },
+    codex: { observations: [], diagnostics: [] },
+  }, { relationships: graph() });
+  const derived = built.registry.records[0];
+  assert.equal(derived.dispatchable, true);
+  assert.equal(derived.eligibility.eligible, true);
+  assert.deepEqual(derived.eligibility.reason_codes, ['eligibility_all_gates_passed']);
 });

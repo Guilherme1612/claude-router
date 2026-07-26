@@ -5,6 +5,8 @@ import { readFileSync } from 'node:fs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 import { stableCapabilityId } from './identity.mjs';
 import { applyContractOverlays, resolveContractOverlays } from './contract.mjs';
+import { evaluateEligibility } from './eligibility.mjs';
+import { deriveRelationships } from './relationships.mjs';
 
 function key(value) {
   return stableStringify(value);
@@ -312,7 +314,24 @@ export function assembleRegistry(acquisition, options = {}) {
   const overlayResolution = options.overlays === undefined
     ? null
     : resolveContractOverlays(records, options.overlays, { lineage: options.overlayLineage });
-  const enrichedRecords = overlayResolution ? applyContractOverlays(records, overlayResolution) : records;
+  const overlaidRecords = overlayResolution ? applyContractOverlays(records, overlayResolution) : records;
+  const relationships = options.relationships || deriveRelationships({
+    records: overlaidRecords,
+    candidates: options.relationshipCandidates,
+  });
+  const enrichedRecords = overlaidRecords.map(record => {
+    const {
+      eligibility: _authoredEligibility,
+      dispatch_eligible: _authoredDispatchEligible,
+      ...authoritative
+    } = record;
+    const eligibility = evaluateEligibility({
+      record: authoritative,
+      records: overlaidRecords,
+      relationships,
+    });
+    return { ...authoritative, dispatchable: eligibility.eligible, eligibility };
+  });
   enrichedRecords.sort((a, b) => `${a.id}:${key(a.provenance)}`.localeCompare(`${b.id}:${key(b.provenance)}`));
   const diagnostics = [...claude.diagnostics, ...codex.diagnostics].map(({ local_path: _local, ...portable }) => portable)
     .sort((a, b) => key(a).localeCompare(key(b)));
@@ -323,5 +342,11 @@ export function assembleRegistry(acquisition, options = {}) {
     runtimes: { claude: claude.observations.length, codex: codex.observations.length },
     registry_fingerprint: fingerprint(registry), diagnostics_fingerprint: fingerprint(diagnostics),
   };
-  return { registry, diagnostics, summary, ...(overlayResolution ? { overlays: overlayResolution } : {}) };
+  return {
+    registry,
+    diagnostics,
+    summary,
+    relationships,
+    ...(overlayResolution ? { overlays: overlayResolution } : {}),
+  };
 }
