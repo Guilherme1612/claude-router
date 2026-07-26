@@ -42,7 +42,7 @@ test('validates required canonical fields and stable enum errors', () => {
   assert.throws(() => validateCapability(capability({ lifecycle: 'surprise' })),
     { message: 'capability.lifecycle must be one of: ready, partial, invalid' });
   assert.throws(() => validateCapability(capability({ scope: { kind: 'planetary' } })),
-    { message: 'capability.scope.kind must be one of: global, project, worktree' });
+    { message: 'capability.scope.kind must be one of: global, user, project, worktree' });
   assert.throws(() => validateCapability(capability({ dispatchable: 'yes' })),
     { message: 'capability.dispatchable must be a boolean' });
   assert.throws(() => validateCapability(capability({ conflicts: [{ field: 'name', type: 'metadata', severity: 'urgent', sources: ['a', 'b'], values: ['a', 'b'] }] })),
@@ -210,7 +210,7 @@ test('[phase21-red:schema] global user project and worktree records stay distinc
     { ...base, scope: { kind: 'worktree', repository: 'fixture-repository', worktree: 'topic' } },
   ];
   for (const item of records) assert.equal(validateCapability(item), true);
-  assert.equal(new Set(records.map(stableCapabilityId)).size, 4);
+  assert.equal(new Set(records.map(item => stableStringify(canonicalizeCapability(item)))).size, 4);
 });
 
 test('[phase21-red:schema] compound provenance and authored prose remain inert', () => {

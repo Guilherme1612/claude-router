@@ -1,10 +1,57 @@
 import { posix } from 'node:path';
 
 const LIFECYCLES = ['ready', 'partial', 'invalid'];
-const SCOPES = ['global', 'project', 'worktree'];
+const SCOPES = ['global', 'user', 'project', 'worktree'];
 const SEVERITIES = ['informational', 'dispatch-blocking', 'build-blocking'];
 const DEPENDENCY_STATES = ['unknown', 'declared'];
-const SET_LIKE_FIELDS = new Set(['conflicts', 'dependencies.items', 'provenance', 'runtime_variants']);
+const SEMANTIC_TYPES = [
+  'command',
+  'skill',
+  'agent',
+  'hook',
+  'tool',
+  'resource',
+  'container',
+  'configuration',
+  'instruction',
+  'unknown',
+];
+const LIFECYCLE_ROLES = [
+  'invocable',
+  'event-bound',
+  'resource',
+  'container',
+  'configuration',
+  'instruction',
+  'opaque',
+];
+const INERT_SEMANTIC_TYPES = new Set(['container', 'configuration', 'instruction', 'unknown']);
+const SET_LIKE_FIELDS = new Set([
+  'adapter_evidence',
+  'conflicts',
+  'dependencies.items',
+  'diagnostics',
+  'provenance',
+  'runtime_variants',
+]);
+const OPERATIONAL_FIELDS = new Set([
+  'event_order',
+  'generation_id',
+  'operational',
+  'processed_at',
+  'scan_id',
+  'scanned_at',
+  'timestamp',
+  'trigger',
+]);
+const LEGACY_SEMANTIC_TYPES = Object.freeze({
+  agents_store_skill: 'skill',
+  binding: 'hook',
+  dependency: 'tool',
+  plugin_metadata: 'tool',
+  plugin_skill: 'skill',
+  settings: 'configuration',
+});
 
 function fail(message) {
   throw new TypeError(message);
@@ -29,10 +76,68 @@ function isAbsolutePortablePath(value) {
 function validateScope(scope) {
   object(scope, 'capability.scope');
   oneOf(scope.kind, SCOPES, 'capability.scope.kind');
-  if (scope.kind !== 'global') {
+  if (scope.kind === 'user') {
+    nonempty(scope.identity, 'capability.scope.identity');
+  } else if (scope.kind !== 'global') {
     nonempty(scope.repository, 'capability.scope.repository');
     nonempty(scope.worktree, 'capability.scope.worktree');
   }
+}
+
+function runtimeOf(record) {
+  return record.invocation?.runtime || record.runtime_variants?.[0]?.runtime || record.provenance?.[0]?.runtime;
+}
+
+function normalizedSemanticType(record) {
+  if (record.semantic_type !== undefined) return record.semantic_type;
+  return LEGACY_SEMANTIC_TYPES[record.type]
+    || (SEMANTIC_TYPES.includes(record.type) ? record.type : 'tool');
+}
+
+function normalizedLifecycleRole(record, semanticType) {
+  if (record.lifecycle_role !== undefined) return record.lifecycle_role;
+  if (semanticType === 'hook') return 'event-bound';
+  if (semanticType === 'container') return 'container';
+  if (semanticType === 'configuration') return 'configuration';
+  if (semanticType === 'instruction') return 'instruction';
+  if (semanticType === 'resource') return 'resource';
+  if (semanticType === 'unknown') return 'opaque';
+  return 'invocable';
+}
+
+function normalizeInvocation(record) {
+  const invocation = record.invocation;
+  if (invocation?.availability) return invocation;
+  if (invocation?.runtime && invocation?.command && Array.isArray(invocation.args)) {
+    return { availability: 'available', ...invocation };
+  }
+  return { availability: 'unavailable', reason: record.enabled === false ? 'disabled' : 'not-invocable' };
+}
+
+function normalizeAdapterEvidence(record, nativeType) {
+  if (record.adapter_evidence !== undefined) return record.adapter_evidence;
+  return record.provenance.map(source => ({
+    namespace: nativeType.split(':', 1)[0],
+    native_type: nativeType,
+    adapter: source.adapter,
+    parser: source.parser || 'unspecified@compat',
+  }));
+}
+
+function normalizeRecord(record) {
+  const runtime = runtimeOf(record);
+  const nativeType = record.native_type || `${runtime}:${record.type}`;
+  const semanticType = normalizedSemanticType(record);
+  return {
+    ...record,
+    native_type: nativeType,
+    semantic_type: semanticType,
+    lifecycle_role: normalizedLifecycleRole(record, semanticType),
+    enabled: record.enabled ?? true,
+    invocation: normalizeInvocation(record),
+    adapter_evidence: normalizeAdapterEvidence(record, nativeType),
+    diagnostics: record.diagnostics || [],
+  };
 }
 
 function validateDependencies(record) {
@@ -76,13 +181,64 @@ export function validateCapability(record) {
   nonempty(record.name, 'capability.name');
   oneOf(record.lifecycle, LIFECYCLES, 'capability.lifecycle');
   validateScope(record.scope);
+  const normalized = normalizeRecord(record);
+  nonempty(normalized.native_type, 'capability.native_type');
+  if (!normalized.native_type.includes(':')) {
+    fail('capability.native_type must be namespaced');
+  }
+  oneOf(normalized.semantic_type, SEMANTIC_TYPES, 'capability.semantic_type');
+  oneOf(normalized.lifecycle_role, LIFECYCLE_ROLES, 'capability.lifecycle_role');
+  if (typeof normalized.enabled !== 'boolean') fail('capability.enabled must be a boolean');
   if (typeof record.dispatchable !== 'boolean') fail('capability.dispatchable must be a boolean');
-  object(record.invocation, 'capability.invocation');
-  nonempty(record.invocation.runtime, 'capability.invocation.runtime');
-  nonempty(record.invocation.command, 'capability.invocation.command');
-  if (!Array.isArray(record.invocation.args)) fail('capability.invocation.args must be an array');
+  if (!normalized.enabled && record.dispatchable) {
+    fail('capability.enabled false requires capability.dispatchable false');
+  }
+  if (INERT_SEMANTIC_TYPES.has(normalized.semantic_type) && record.dispatchable) {
+    fail(`capability.semantic_type ${normalized.semantic_type} must be non-dispatchable`);
+  }
+  object(normalized.invocation, 'capability.invocation');
+  oneOf(normalized.invocation.availability, ['available', 'unavailable'], 'capability.invocation.availability');
+  if (normalized.invocation.availability === 'available') {
+    nonempty(normalized.invocation.runtime, 'capability.invocation.runtime');
+    nonempty(normalized.invocation.command, 'capability.invocation.command');
+    if (!Array.isArray(normalized.invocation.args)) fail('capability.invocation.args must be an array');
+  } else {
+    nonempty(normalized.invocation.reason, 'capability.invocation.reason');
+    if (record.dispatchable) fail('capability.dispatchable requires an available invocation');
+  }
   validateDependencies(record);
   validateProvenance(record.provenance);
+  if (!Array.isArray(normalized.adapter_evidence) || normalized.adapter_evidence.length === 0
+    || normalized.adapter_evidence.length > 64) {
+    fail('capability.adapter_evidence must be a non-empty bounded array');
+  }
+  for (const [index, evidence] of normalized.adapter_evidence.entries()) {
+    const path = `capability.adapter_evidence[${index}]`;
+    object(evidence, path);
+    for (const field of ['namespace', 'native_type', 'adapter', 'parser']) {
+      nonempty(evidence[field], `${path}.${field}`);
+    }
+    if (!evidence.native_type.includes(':')) fail(`${path}.native_type must be namespaced`);
+  }
+  if (!Array.isArray(normalized.diagnostics) || normalized.diagnostics.length > 128) {
+    fail('capability.diagnostics must be a bounded array');
+  }
+  if (record.container_id !== undefined) nonempty(record.container_id, 'capability.container_id');
+  if (record.member_provenance !== undefined) {
+    object(record.member_provenance, 'capability.member_provenance');
+    nonempty(record.member_provenance.container_id, 'capability.member_provenance.container_id');
+    nonempty(record.member_provenance.relative_path, 'capability.member_provenance.relative_path');
+    if (record.container_id !== record.member_provenance.container_id) {
+      fail('capability.member_provenance.container_id must match capability.container_id');
+    }
+    if (isAbsolutePortablePath(record.member_provenance.relative_path)) {
+      fail('capability.member_provenance.relative_path must be relative');
+    }
+    const memberPath = posix.normalize(record.member_provenance.relative_path.replaceAll('\\', '/'));
+    if (memberPath === '..' || memberPath.startsWith('../')) {
+      fail('capability.member_provenance.relative_path must remain within its container');
+    }
+  }
   if (!Array.isArray(record.runtime_variants) || !record.runtime_variants.length) {
     fail('capability.runtime_variants must be a non-empty array');
   }
@@ -139,6 +295,7 @@ function canonicalize(value, path = '') {
   if (!value || typeof value !== 'object') return value;
   const output = {};
   for (const key of Object.keys(value).sort()) {
+    if (OPERATIONAL_FIELDS.has(key)) continue;
     const childPath = path ? `${path}.${key}` : key;
     output[key] = canonicalize(value[key], childPath);
   }
@@ -147,5 +304,5 @@ function canonicalize(value, path = '') {
 
 export function canonicalizeCapability(record) {
   validateCapability(record);
-  return canonicalize(record);
+  return canonicalize(normalizeRecord(record));
 }
