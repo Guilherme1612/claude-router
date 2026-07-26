@@ -46,7 +46,12 @@ function canonicalCandidate(candidate) {
     validateCapability(record);
     return { id: stableCapabilityId(record), ...canonicalizeCapability(record) };
   }).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
-  return { schema_version: candidate.schema_version ?? 1, records };
+  return {
+    schema_version: candidate.schema_version ?? 1,
+    records,
+    ...(candidate.relationships ? { relationships: candidate.relationships } : {}),
+    ...(Array.isArray(candidate.rejected_overlays) ? { rejected_overlays: candidate.rejected_overlays } : {}),
+  };
 }
 
 function canonicalAliases(aliases) {

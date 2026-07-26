@@ -335,7 +335,12 @@ export function assembleRegistry(acquisition, options = {}) {
   enrichedRecords.sort((a, b) => `${a.id}:${key(a.provenance)}`.localeCompare(`${b.id}:${key(b.provenance)}`));
   const diagnostics = [...claude.diagnostics, ...codex.diagnostics].map(({ local_path: _local, ...portable }) => portable)
     .sort((a, b) => key(a).localeCompare(key(b)));
-  const registry = { schema_version: 1, records: enrichedRecords };
+  const registry = {
+    schema_version: 1,
+    records: enrichedRecords,
+    ...((relationships.edges.length || relationships.candidates.length) ? { relationships } : {}),
+    ...(overlayResolution?.rejected.length ? { rejected_overlays: overlayResolution.rejected } : {}),
+  };
   const summary = {
     schema_version: 1, activated: false, record_count: enrichedRecords.length, diagnostic_count: diagnostics.length,
     dispatchable_count: enrichedRecords.filter(r => r.dispatchable).length,

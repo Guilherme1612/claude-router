@@ -30,6 +30,11 @@ const INVENTORY_RECORD_FIELDS = [
   'fingerprint', 'adapter_version', 'parser_version', 'required_dependencies',
   'container_id', 'member_ids', 'identity_continuity', 'diagnostics',
 ];
+const CONTRACT_DETAIL_FIELDS = [
+  'stable_id', 'disposition', 'reason_codes', 'eligible', 'recommendation_only',
+  'eligibility_gates', 'eligibility_reason_codes', 'fields', 'rejected_overlays',
+  'correction_paths',
+];
 
 function canonical(command, ok, reasonCode, data = {}, warnings = []) {
   return { schema_version: 1, command, ok, reason_code: reasonCode, data, warnings: [...warnings].sort() };
@@ -115,6 +120,11 @@ function safeToken(value, fallback = 'unknown') {
   return typeof value === 'string' && SAFE_TOKEN.test(value) && !/[\u0000-\u001f\u007f-\u009f]/u.test(value)
     ? value
     : fallback;
+}
+
+function safeIdentifier(value, fallback = 'unknown') {
+  const token = safeToken(value, '');
+  return token && !token.replaceAll('\\', '/').split('/').includes('..') ? token : fallback;
 }
 
 function safeRelativePath(value, fallback = 'unavailable') {
@@ -307,6 +317,148 @@ export function inventoryAvailabilityProjection({
   };
 }
 
+function safeTokenList(values) {
+  return (Array.isArray(values) ? values : []).map(value => safeToken(value)).sort().slice(0, MAX_VALUE);
+}
+
+function contractSummary(record) {
+  return {
+    stable_id: safeIdentifier(record?.stable_id || record?.id || record?.name),
+    disposition: safeToken(record?.contract?.disposition, 'recommendation-only'),
+    reason_codes: safeTokenList(record?.contract?.reason_codes),
+    eligible: record?.eligibility?.eligible === true,
+    recommendation_only: record?.eligibility?.recommendation_only !== false,
+    eligibility_reason_codes: safeTokenList(record?.eligibility?.reason_codes),
+  };
+}
+
+function evidenceProjection(value) {
+  return {
+    provenance: safeToken(value?.provenance),
+    rule_version: safeToken(value?.rule_version),
+    freshness: safeToken(value?.freshness),
+    confidence_basis_points: Number.isInteger(value?.confidence_basis_points)
+      ? Math.max(0, Math.min(10000, value.confidence_basis_points))
+      : 0,
+    accepted: value?.accepted === true,
+    reason_code: safeToken(value?.reason_code),
+  };
+}
+
+function fieldProjection(value) {
+  const evidence = values => (Array.isArray(values) ? values : [])
+    .map(evidenceProjection)
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)))
+    .slice(0, MAX_VALUE);
+  return {
+    state: value?.state === 'known' ? 'known' : 'unknown',
+    evidence: evidence(value?.evidence),
+    rejected_evidence: evidence(value?.rejected_evidence),
+    provenance: safeTokenList(value?.provenance),
+    policy_version: safeToken(value?.policy_version),
+    freshness: safeToken(value?.freshness),
+    confidence_basis_points: Number.isInteger(value?.confidence_basis_points)
+      ? Math.max(0, Math.min(10000, value.confidence_basis_points))
+      : 0,
+    reason_codes: safeTokenList(value?.reason_codes),
+  };
+}
+
+function rejectedOverlayProjection(value) {
+  return {
+    overlay_id: safeIdentifier(value?.overlay_id, 'invalid-overlay'),
+    provenance: safeToken(value?.provenance),
+    reason_code: safeToken(value?.reason_code),
+  };
+}
+
+export function contractListProjection({ records = [], limit = MAX_DIFF, offset = 0 } = {}) {
+  const contracts = records.filter(record => record?.contract).map(contractSummary)
+    .sort((left, right) => left.stable_id.localeCompare(right.stable_id));
+  const bounded = boundedResult(contracts, { limit, offset });
+  return {
+    total: bounded.meta.total,
+    returned: bounded.meta.returned,
+    truncated: bounded.meta.truncated,
+    limit: bounded.meta.limit,
+    offset: bounded.meta.offset,
+    next_offset: bounded.meta.next_offset,
+    contracts: bounded.values,
+  };
+}
+
+export function contractDetailProjection(record, { rejectedOverlays = [] } = {}) {
+  if (!record?.contract || typeof record.contract !== 'object') throw new TypeError('invalid_contract_record');
+  const summary = contractSummary(record);
+  const fields = Object.fromEntries(Object.entries(record.contract.fields || {})
+    .sort(([left], [right]) => left.localeCompare(right)).slice(0, MAX_VALUE)
+    .map(([field, value]) => [safeToken(field), fieldProjection(value)]));
+  const correctionPaths = Object.entries(fields).flatMap(([field, value]) => (
+    [...value.evidence, ...value.rejected_evidence]
+      .filter(item => item.provenance === 'correction')
+      .map(item => ({
+        field,
+        provenance: item.provenance,
+        rule_version: item.rule_version,
+        reason_code: item.reason_code,
+        accepted: item.accepted,
+      }))
+  )).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  return {
+    ...summary,
+    eligibility_gates: Object.fromEntries(Object.entries(record.eligibility?.gates || {})
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([gate, state]) => [safeToken(gate), safeToken(state)])),
+    fields,
+    rejected_overlays: rejectedOverlays.map(rejectedOverlayProjection)
+      .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)))
+      .slice(0, MAX_VALUE),
+    correction_paths: correctionPaths.slice(0, MAX_VALUE),
+  };
+}
+
+function relationshipItemProjection(value) {
+  return {
+    id: safeIdentifier(value?.id),
+    type: safeToken(value?.type),
+    source_id: safeIdentifier(value?.source_id),
+    target_id: safeIdentifier(value?.target_id),
+    confidence_basis_points: Number.isInteger(value?.confidence_basis_points)
+      ? Math.max(0, Math.min(10000, value.confidence_basis_points))
+      : 0,
+    freshness: safeToken(value?.freshness),
+    evidence: (Array.isArray(value?.evidence) ? value.evidence : []).map(item => ({
+      kind: safeToken(item?.kind),
+      provenance: safeToken(item?.provenance),
+      confidence_basis_points: Number.isInteger(item?.confidence_basis_points)
+        ? Math.max(0, Math.min(10000, item.confidence_basis_points))
+        : 0,
+      freshness: safeToken(item?.freshness),
+      rule_version: safeToken(item?.rule_version),
+    })).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right))).slice(0, MAX_VALUE),
+    validation_state: value?.validation_state === 'active' ? 'active' : 'inactive',
+    reason_codes: safeTokenList(value?.reason_codes),
+  };
+}
+
+export function relationshipProjection({ relationships = {}, limit = MAX_DIFF, offset = 0 } = {}) {
+  const values = [
+    ...(Array.isArray(relationships?.edges) ? relationships.edges : []),
+    ...(Array.isArray(relationships?.candidates) ? relationships.candidates : []),
+  ].map(relationshipItemProjection)
+    .sort((left, right) => left.id.localeCompare(right.id) || stableStringify(left).localeCompare(stableStringify(right)));
+  const bounded = boundedResult(values, { limit, offset });
+  return {
+    total: bounded.meta.total,
+    returned: bounded.meta.returned,
+    truncated: bounded.meta.truncated,
+    limit: bounded.meta.limit,
+    offset: bounded.meta.offset,
+    next_offset: bounded.meta.next_offset,
+    relationships: bounded.values,
+  };
+}
+
 function diffVersions(root, sourceId, destinationId) {
   const source = readVersion(root, sourceId), destination = readVersion(root, destinationId);
   if (!source.verdict.valid || !destination.verdict.valid) return { ok: false, reason_code: !source.verdict.valid ? source.verdict.reason_code : destination.verdict.reason_code };
@@ -382,8 +534,17 @@ export function renderInventoryText(result) {
   return `${lines.join('\n')}\n`;
 }
 
+export function renderContractText(result) {
+  const lines = [`COMMAND ${result.command}`, `OK ${result.ok}`, `REASON ${safeToken(result.reason_code)}`];
+  for (const [key, value] of Object.entries(result.data || {}).sort(([left], [right]) => left.localeCompare(right))) {
+    lines.push(`${safeToken(key).toUpperCase()} ${value !== null && typeof value === 'object' ? stableStringify(value) : String(value)}`);
+  }
+  for (const warning of result.warnings || []) lines.push(`WARNING ${safeToken(warning, 'redacted')}`);
+  return `${lines.join('\n')}\n`;
+}
+
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -554,6 +715,66 @@ function inventoryCommand({ root, active, options, dependencies }) {
   }
 }
 
+function contractCommand({ root, active, positional, options, dependencies }) {
+  const relationshipView = positional[1] === 'relationships';
+  if (positional.length > (relationshipView ? 2 : 1)
+    || (relationshipView && options.id)
+    || options.availability
+    || options.execute
+    || options.semantic_type
+    || options.runtime
+    || options.scope) {
+    return { result: canonical('contract', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  const unsafe = activeSourceFailure('contract', root, active);
+  if (unsafe) return unsafe;
+  const version = readVersion(root, active.version_id);
+  if (!version.verdict.valid || !Array.isArray(version.registry?.records)) {
+    return { result: canonical('contract', false, 'invalid_contract_source'), exitCode: EXIT.invalid };
+  }
+  try {
+    const limit = integerOption(options.limit, MAX_DIFF, { minimum: 1 });
+    const offset = integerOption(options.offset, 0, { maximum: Number.MAX_SAFE_INTEGER });
+    const source = dependencies.contractRegistry
+      ? dependencies.contractRegistry({ root, active, version })
+      : version.registry;
+    if (!Array.isArray(source?.records)) throw new TypeError('invalid_contract_records');
+    if (relationshipView) {
+      return {
+        result: canonical('contract relationships', true, 'contract_relationships_ready', relationshipProjection({
+          relationships: source.relationships,
+          limit,
+          offset,
+        })),
+        exitCode: 0,
+      };
+    }
+    if (options.id) {
+      if (safeIdentifier(options.id, '') !== options.id) {
+        return { result: canonical('contract', false, 'invalid_contract_id'), exitCode: EXIT.usage };
+      }
+      const record = source.records.find(item => safeIdentifier(item?.stable_id || item?.id || item?.name) === options.id);
+      if (!record?.contract) return { result: canonical('contract', false, 'contract_not_found'), exitCode: EXIT.invalid };
+      return {
+        result: canonical('contract', true, 'contract_detail_ready', contractDetailProjection(record, {
+          rejectedOverlays: source.rejected_overlays,
+        })),
+        exitCode: 0,
+      };
+    }
+    return {
+      result: canonical('contract', true, 'contract_list_ready', contractListProjection({
+        records: source.records,
+        limit,
+        offset,
+      })),
+      exitCode: 0,
+    };
+  } catch {
+    return { result: canonical('contract', false, 'unsafe_contract_projection'), exitCode: EXIT.unsafe };
+  }
+}
+
 export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, dependencies = {} } = {}) {
   let parsed;
   try { parsed = parse(argv); } catch (error) { return { result: canonical('usage', false, error.message), exitCode: EXIT.usage }; }
@@ -569,6 +790,9 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   if (command === 'inventory') {
     if (positional.length !== 1) return { result: canonical('inventory', false, 'invalid_arguments'), exitCode: EXIT.usage };
     return inventoryCommand({ root, active, options, dependencies });
+  }
+  if (command === 'contract') {
+    return contractCommand({ root, active, positional, options, dependencies });
   }
   if (command === 'status') {
     if (positional.length !== 1) return { result: canonical('status', false, 'invalid_arguments'), exitCode: EXIT.usage };
@@ -893,7 +1117,9 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
       ? `${stableStringify(outcome.result)}\n`
       : outcome.result.command === 'inventory'
         ? renderInventoryText(outcome.result)
-        : textResult(outcome.result));
+        : outcome.result.command.startsWith('contract')
+          ? renderContractText(outcome.result)
+          : textResult(outcome.result));
     process.exitCode = outcome.exitCode;
   } catch {
     process.stderr.write('ROUTER CONTROL FAILED: internal_error\n');
