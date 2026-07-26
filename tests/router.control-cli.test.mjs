@@ -391,3 +391,61 @@ test('[phase21-red:inspection] inventory uses only exact operational states and 
     assert.doesNotMatch(JSON.stringify(malformed), /stack|\/Users\//);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
+
+test('[phase22-red:inspection] contract parser dispatches list detail and relationships without mutation', async () => {
+  const f = await fixture();
+  try {
+    const before = snapshot(f.root);
+    const contract = {
+      schema_version: 1,
+      policy_version: 'contract-policy-v1',
+      disposition: 'recommendation-only',
+      reason_codes: ['risk_missing'],
+      fields: {},
+    };
+    const eligibility = {
+      schema_version: 1,
+      policy_version: 'eligibility-policy-v1',
+      eligible: false,
+      recommendation_only: true,
+      gates: { risk: 'unknown' },
+      reason_codes: ['risk_unknown'],
+    };
+    const records = [{ id: 'router/alpha', stable_id: 'router/alpha', contract, eligibility }];
+    const relationships = {
+      schema_version: 1,
+      policy_version: 'relationship-rules-v1',
+      edges: [],
+      candidates: [{
+        id: 'relationship:risk',
+        type: 'conflict',
+        source_id: 'router/alpha',
+        target_id: 'router/missing',
+        confidence_basis_points: 0,
+        freshness: 'unknown',
+        evidence: [],
+        validation_state: 'inactive',
+        reason_codes: ['relationship_dangling_target'],
+      }],
+    };
+    const dependencies = { contractRegistry: () => ({ records, relationships, rejected_overlays: [] }) };
+    for (const argv of [
+      ['contract', '--limit', '1', '--offset', '0', '--format', 'json', '--owned-root', f.root],
+      ['contract', '--id', 'router/alpha', '--format', 'json', '--owned-root', f.root],
+      ['contract', 'relationships', '--format', 'json', '--owned-root', f.root],
+    ]) {
+      const outcome = runRouterControl({ argv, dependencies });
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.ok, true);
+      assert.deepEqual(snapshot(f.root), before);
+    }
+    for (const argv of [
+      ['contract', '--id', '../escape', '--owned-root', f.root],
+      ['contract', 'unknown', '--owned-root', f.root],
+      ['contract', '--limit', '0', '--owned-root', f.root],
+    ]) {
+      assert.notEqual(runRouterControl({ argv, dependencies }).exitCode, 0);
+      assert.deepEqual(snapshot(f.root), before);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
