@@ -211,7 +211,7 @@ test('[phase22-red:eligibility] assembly replaces authored eligibility and dispa
     codex: { observations: [], diagnostics: [] },
   }, { relationships: graph() });
   const derived = built.registry.records[0];
-  assert.equal(derived.dispatchable, true);
-  assert.equal(derived.eligibility.eligible, true);
-  assert.deepEqual(derived.eligibility.reason_codes, ['eligibility_all_gates_passed']);
+  assert.equal(derived.dispatchable, false);
+  assert.equal(derived.eligibility.eligible, false);
+  assert.ok(derived.eligibility.reason_codes.includes('risk_unknown'));
 });

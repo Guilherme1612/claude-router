@@ -4,7 +4,12 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 import { stableCapabilityId } from './identity.mjs';
-import { applyContractOverlays, resolveContractOverlays } from './contract.mjs';
+import {
+  applyContractOverlays,
+  buildCapabilityContract,
+  resolveContractOverlays,
+  validateCapabilityContract,
+} from './contract.mjs';
 import { evaluateEligibility } from './eligibility.mjs';
 import { deriveRelationships } from './relationships.mjs';
 
@@ -310,6 +315,10 @@ export function assembleRegistry(acquisition, options = {}) {
       const merged = [...new Set([...existingExplicit, ...subjects])].sort();
       record.mapping = { ...existing, explicit_subjects: merged };
     }
+  }
+  for (const record of records) {
+    record.contract = buildCapabilityContract(record);
+    validateCapabilityContract(record.contract);
   }
   const overlayResolution = options.overlays === undefined
     ? null

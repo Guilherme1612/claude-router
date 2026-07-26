@@ -124,11 +124,38 @@ function envelope(field, candidates) {
   };
 }
 
+function authoritativeEvidence(record) {
+  const values = {
+    purpose: record.name,
+    triggers: [record.name],
+    inputs: [],
+    outputs: [],
+    preconditions: [],
+    dependencies: record.dependencies.items.map(item => item.id),
+    permissions: [],
+    side_effects: [],
+    reversibility: 'unknown',
+    risk: 'unknown',
+    invocation_kind: record.invocation.availability === 'available' ? record.semantic_type : 'none',
+    lifecycle_role: record.lifecycle_role,
+    scope: record.scope,
+    workflow_transitions: [],
+  };
+  return Object.fromEntries(Object.entries(values).map(([field, value]) => [field, [{
+    value,
+    provenance: 'adapter',
+    confidence_basis_points: 10000,
+    freshness: 'fresh',
+    rule: `adapter-${field}-v1`,
+  }]]));
+}
+
 export function buildCapabilityContract(record, fieldEvidence = {}) {
   validateCapability(record);
+  const fallback = authoritativeEvidence(record);
   const fields = Object.fromEntries(CONTRACT_FIELDS.map(field => [
     field,
-    envelope(field, fieldEvidence[field]),
+    envelope(field, Object.hasOwn(fieldEvidence, field) ? fieldEvidence[field] : fallback[field]),
   ]));
   const unknownDispatchFields = CONTRACT_FIELDS.filter(field => (
     DISPATCH_FIELDS.has(field) && fields[field].state !== 'known'

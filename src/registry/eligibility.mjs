@@ -34,7 +34,7 @@ function field(record, name) {
 
 function fieldState(record, name, decide) {
   const envelope = field(record, name);
-  if (!record?.contract) return 'passed'; // Phase 21 compatibility.
+  if (!record?.contract) return 'unknown';
   if (!envelope || envelope.state !== 'known') return 'unknown';
   return decide(envelope.value);
 }
@@ -79,7 +79,7 @@ function adapterState(record) {
 
 function dependencyState(record, recordsById, relationships) {
   if (record?.dependencies?.state !== 'declared') {
-    return record?.contract ? 'unknown' : 'passed'; // Phase 21 allowed unknown empty dependency sets.
+    return 'unknown';
   }
   if (record.dependencies.items.some(value => value?.available !== true)) return 'failed';
 
@@ -117,7 +117,7 @@ function dependencyState(record, recordsById, relationships) {
 }
 
 function confidenceState(record) {
-  if (!record?.contract) return 'passed'; // Phase 21 compatibility.
+  if (!record?.contract) return 'unknown';
   let unknown = false;
   for (const name of DISPATCH_FIELDS) {
     const envelope = field(record, name);
