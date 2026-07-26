@@ -56,8 +56,14 @@ test('equal names or content do not merge without declared evidence', () => {
     provenance: [{ ...capability().provenance[0], runtime: 'codex', logical_root: 'codex_home' }],
     runtime_variants: [{ runtime: 'codex', native_identity: 'planner', native: { command: '/planner' } }],
   });
-  assert.equal(stableCapabilityId(claude), 'claude:skill:planner');
-  assert.equal(stableCapabilityId(codex), 'codex:skill:planner');
+  assert.equal(
+    stableCapabilityId(claude),
+    'path:skill:claude:global:claude_global:skills%2Fplanner%2FSKILL.md',
+  );
+  assert.equal(
+    stableCapabilityId(codex),
+    'path:skill:codex:global:codex_home:skills%2Fplanner%2FSKILL.md',
+  );
   assert.notEqual(stableCapabilityId(claude), stableCapabilityId(codex));
 });
 
@@ -147,8 +153,12 @@ test('semantic invocation argument and precedence order changes canonical bytes'
     precedence: ['global', 'project'],
     invocation: { ...a.invocation, args: [...a.invocation.args].reverse() },
   });
+  const changedSource = capability({
+    provenance: [{ ...a.provenance[0], source_fingerprint: 'def456' }],
+  });
   assert.notEqual(stableStringify(canonicalizeCapability(a)), stableStringify(canonicalizeCapability(b)));
-  assert.notEqual(contentFingerprint(a), contentFingerprint(b));
+  assert.equal(contentFingerprint(a), contentFingerprint(b));
+  assert.notEqual(contentFingerprint(a), contentFingerprint(changedSource));
 });
 
 test('stable serialization rejects cyclic and unsupported values deterministically', () => {
