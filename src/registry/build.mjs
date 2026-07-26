@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 import { stableCapabilityId } from './identity.mjs';
+import { applyContractOverlays, resolveContractOverlays } from './contract.mjs';
 
 function key(value) {
   return stableStringify(value);
@@ -308,15 +309,19 @@ export function assembleRegistry(acquisition, options = {}) {
       record.mapping = { ...existing, explicit_subjects: merged };
     }
   }
-  records.sort((a, b) => `${a.id}:${key(a.provenance)}`.localeCompare(`${b.id}:${key(b.provenance)}`));
+  const overlayResolution = options.overlays === undefined
+    ? null
+    : resolveContractOverlays(records, options.overlays, { lineage: options.overlayLineage });
+  const enrichedRecords = overlayResolution ? applyContractOverlays(records, overlayResolution) : records;
+  enrichedRecords.sort((a, b) => `${a.id}:${key(a.provenance)}`.localeCompare(`${b.id}:${key(b.provenance)}`));
   const diagnostics = [...claude.diagnostics, ...codex.diagnostics].map(({ local_path: _local, ...portable }) => portable)
     .sort((a, b) => key(a).localeCompare(key(b)));
-  const registry = { schema_version: 1, records };
+  const registry = { schema_version: 1, records: enrichedRecords };
   const summary = {
-    schema_version: 1, activated: false, record_count: records.length, diagnostic_count: diagnostics.length,
-    dispatchable_count: records.filter(r => r.dispatchable).length,
+    schema_version: 1, activated: false, record_count: enrichedRecords.length, diagnostic_count: diagnostics.length,
+    dispatchable_count: enrichedRecords.filter(r => r.dispatchable).length,
     runtimes: { claude: claude.observations.length, codex: codex.observations.length },
     registry_fingerprint: fingerprint(registry), diagnostics_fingerprint: fingerprint(diagnostics),
   };
-  return { registry, diagnostics, summary };
+  return { registry, diagnostics, summary, ...(overlayResolution ? { overlays: overlayResolution } : {}) };
 }

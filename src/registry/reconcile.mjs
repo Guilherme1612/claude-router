@@ -280,11 +280,21 @@ export function reconcileCandidate(options = {}) {
       ...events.map(event => event?.canonical_id).filter(value => typeof value === 'string'),
     ];
     const referenceInput = options.references ?? { schema_version: 1, edges: [] };
-    const combinedReferences = options.relationships === undefined ? referenceInput : {
+    const correctionEdges = (options.overlays?.accepted || []).map(overlay => ({
+      id: `overlay:${overlay.overlay_id}`,
+      type: 'correction',
+      from_id: overlay.overlay_id,
+      to_id: overlay.target_id,
+    }));
+    const relationshipEdges = options.relationships === undefined
+      ? []
+      : relationshipReferences(options.relationships, relationshipEndpointIds);
+    const combinedReferences = {
       schema_version: referenceInput.schema_version,
       edges: [
         ...referenceInput.edges,
-        ...relationshipReferences(options.relationships, relationshipEndpointIds),
+        ...relationshipEdges,
+        ...correctionEdges,
       ],
     };
     const references = canonicalReferences(

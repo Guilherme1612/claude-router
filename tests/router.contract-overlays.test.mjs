@@ -109,17 +109,33 @@ test('[phase22-red:overlays] assembler accepts explicit overlays without adding 
 
 test('[phase22-red:overlays] reconciliation invalidates corrections before callbacks', () => {
   const record = installed();
-  const id = stableCapabilityId(record);
+  const overlays = resolveContractOverlays([record], [overlay(record)]);
   const observed = [];
   const result = reconcileCandidate({
     candidate: { schema_version: 1, records: [{ ...record, dispatchable: false, dependencies: { state: 'declared', items: [{ id: 'missing', available: false }] } }] },
-    references: { schema_version: 1, edges: [
-      { id: 'correction-edge', type: 'correction', from_id: 'correction:atlas-risk', to_id: id },
-    ] },
+    overlays,
     evaluateReferences: value => observed.push(value),
   });
   assert.ok(result.invalidated_ids.includes('correction:atlas-risk'));
   assert.ok(observed.every(value => value.references.edges.length === 0));
+});
+
+test('[phase22-red:overlays] edit replacement and removal invalidate stale corrections', () => {
+  const record = installed();
+  const correction = overlay(record);
+  const edited = {
+    ...record,
+    provenance: record.provenance.map(source => ({ ...source, source_fingerprint: 'edited' })),
+  };
+  const replacement = {
+    ...edited,
+    canonical_identity: 'router/replacement',
+  };
+  for (const records of [[edited], [replacement], []]) {
+    const resolved = resolveContractOverlays(records, [correction]);
+    assert.equal(resolved.accepted.length, 0);
+    assert.equal(resolved.rejected.length, 1);
+  }
 });
 
 test('[phase22-red:overlays] rename carryover requires explicit one-to-one exact lineage', () => {
