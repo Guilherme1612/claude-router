@@ -22,7 +22,16 @@ const PROHIBITION = /\b(must not|forbidden|not allowed|prohibited)\b/i;
 const HYPOTHETICAL = /\b(if|suppose|imagine|what if|assuming|hypothetical)\b/i;
 const PREVIEW = /\b(preview|dry[- ]?run|simulate|rehearse)\b/i;
 const EXPLAIN = /\b(explain|what (is|does)|compare|difference between|why|how does)\b/i;
-const QUOTED = /`[^`]+`|"[^"]{1,200}"|^>[\s\S]*$/m;
+// Triple-backtick fenced code blocks, single-backtick spans, double-quoted
+// phrases, and nested single-quoted phrases (≥2 words) all abstain as quoted.
+// The nested single-quote form requires a space inside the quotes so plain
+// apostrophes like "don't" do NOT match.
+const QUOTED = /```[\s\S]*?```|`[^`\n]+`|"[^"\n]{1,200}"|'\w[^'\n]*\s[^'\n]*'|^>[\s\S]*$/m;
+// Multilingual guard (INT-06): Spanish/Portuguese execute-like verbs and
+// accented Latin-1 chars indicate a non-English prompt. Such prompts abstain
+// as ambiguous rather than dispatching on a coincidentally-shared execute verb
+// (e.g. Portuguese "execute a próxima fase" must NOT dispatch).
+const MULTILINGUAL = /[À-ſ]|\b(ejecuta|ejecutar|executar|inicia|iniciar|verifique|verificar|pr[oó]xima?|siguiente|fases?|ahora|trabalho)\b/i;
 const EXECUTE_VERB = /\b(run|execute|start|create|debug|fix|ship|deploy|plan|verify|review|resume|go to|continue|finish)\b/i;
 
 function outcome(disposition, reason_code) {
@@ -69,6 +78,12 @@ export function classifyIntent(prompt, { policyVersion } = {}) {
   }
   if (EXPLAIN.test(text)) {
     return outcome('explain', 'explain_marker');
+  }
+  // Multilingual abstention (INT-06): a non-English prompt never dispatches
+  // even if it shares an execute-like verb with English (e.g. Portuguese
+  // "execute a próxima fase"). Precedence: after explain, before execute.
+  if (MULTILINGUAL.test(text)) {
+    return outcome('ambiguous', 'multilingual_abstention');
   }
   if (EXECUTE_VERB.test(text) && !NEGATION.test(text) && !PROHIBITION.test(text)) {
     return outcome('execute', 'explicit_execute_verb');
