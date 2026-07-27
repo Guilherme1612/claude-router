@@ -249,6 +249,38 @@ test('[phase23-red:approval] verifyApproval where all legs match → approved ap
   assert.equal(r.reason_code, 'approval_bound');
 });
 
+test('[phase23-fix:approval] verifyApproval fail-closes when expected is omitted — staleness leg must NOT be skipped (CR-01)', async () => {
+  const { bindApproval, verifyApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'no-expected-cap' });
+  const bound = bindApproval({
+    capability: cap, args: { topic: 'auth' }, targets: ['p24'],
+    effects: ['fs:write'], proposalVersion: 1,
+  });
+  // Presented token matches bound, but no `expected` is supplied. The gate
+  // MUST fail closed — a stale bound token + matching presented token must
+  // never approve when the staleness leg cannot be anchored to fresh state.
+  const r = verifyApproval({ bound, presented: { token: bound.token } });
+  assert.equal(r.status, 'blocked', `expected blocked, got ${r.status}`);
+  assert.equal(r.dispatch_eligible, false);
+  assert.notEqual(r.reason_code, 'approval_bound', 'must NOT approve without expected');
+  assert.ok(r.reason_code, 'must return a non-empty reason_code');
+});
+
+test('[phase23-fix:approval] verifyApproval fail-closes when expected is malformed (numeric/object without token) (CR-01)', async () => {
+  const { bindApproval, verifyApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'malformed-expected-cap' });
+  const bound = bindApproval({
+    capability: cap, args: { topic: 'auth' }, targets: ['p24'],
+    effects: ['fs:write'], proposalVersion: 1,
+  });
+  for (const malformed of [42, {}, { token: 42 }, null, '']) {
+    const r = verifyApproval({ bound, presented: { token: bound.token }, expected: malformed });
+    assert.equal(r.status, 'blocked', `expected blocked for malformed expected=${JSON.stringify(malformed)}`);
+    assert.equal(r.dispatch_eligible, false);
+    assert.notEqual(r.reason_code, 'approval_bound', `must NOT approve for malformed expected=${JSON.stringify(malformed)}`);
+  }
+});
+
 test('[phase23-red:approval] EXEC-09 invariant — a hook-only registry never reaches bindApproval (resolveAction returns no_eligible_capability)', async () => {
   const { resolveAction } = await actionsModule;
   const { classifyIntent } = await classifyModule;
