@@ -51,7 +51,7 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
 
 - [x] **Phase 21: Authoritative Personalized Inventory** - Discover and reconcile installed capabilities as framework-neutral local truth. (completed 2026-07-26)
 - [ ] **Phase 22: Conservative Contracts and Relationship Graph** - Infer inspectable capability meaning, uncertainty, and typed relationships.
-- [ ] **Phase 23: Intent-Safe State-Aware Execution** - Route explicit action intent through authoritative state to one safe installed capability.
+- [x] **Phase 23: Intent-Safe State-Aware Execution** - Route explicit action intent through authoritative state to one safe installed capability. (completed 2026-07-27)
 - [ ] **Phase 24: Privacy-Safe Outcomes and Capability Health** - Turn bounded local outcomes into conservative, evidence-backed health observations.
 - [ ] **Phase 25: Advisory Stewardship and Guarded Drafts** - Surface one useful recommendation without silently mutating personal capabilities.
 - [ ] **Phase 26: Coherent Publication and Dual-Runtime Release** - Prove the complete v1.3 tuple preserves latency, compatibility, rollback, and recovery.
@@ -118,10 +118,18 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
   4. Destructive, external, privileged, or difficult-to-reverse actions require separately bound approval, and Router never elevates permissions, bypasses runtime restrictions, or invokes hooks as task tools.
   5. After work completes, the user receives the correct next locally available capability and a ready-to-use framework-neutral prompt, with newest explicit instructions overriding stale context.
 
-**Plans**: 3 plans
-- [ ] 23-01-PLAN.md — Tracer: end-to-end "go to next phase" through all 8 layers + intent classifier 8-disposition matrix
-- [ ] 23-02-PLAN.md — Adversarial intent corpus (INT-03/06) + action mapper debug/create-phase verbs (EXEC-01/02/03/04/06/10)
-- [ ] 23-03-PLAN.md — Approval gate (EXEC-07/08/09) + full dispatch integration matrix (EXEC-05/06/09/10)
+**Plans**: 3/3 plans executed
+**Wave 1**
+
+- [x] 23-01-PLAN.md — Tracer: end-to-end "go to next phase" through all 8 layers + intent classifier 8-disposition matrix
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 23-02-PLAN.md — Adversarial intent corpus (INT-03/06) + action mapper debug/create-phase verbs (EXEC-01/02/03/04/06/10)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 23-03-PLAN.md — Approval gate (EXEC-07/08/09) + full dispatch integration matrix (EXEC-05/06/09/10)
 
 ### Phase 24: Privacy-Safe Outcomes and Capability Health
 
@@ -135,7 +143,23 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
   3. Health observations distinguish missing, unavailable, stale, unused, duplicate, overlapping, complementary, repeatedly ineffective, and reusable-workflow opportunities with reason codes, evidence windows, opportunity counts, freshness, confidence, and non-destructive remedies.
   4. Rare or new recovery, incident, release, and migration capabilities remain unjudged when evidence is insufficient, while versioned thresholds, decay, cooldown, and multilingual calibration are testable and canary-guarded.
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [ ] 24-01-PLAN.md — Tracer: outcome schema + privacy boundary + minimal observer + inspect, end-to-end
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 24-02-PLAN.md — Full 9-kind observation capture (HLTH-03) + usefulness scoring (HLTH-06) + rare-role unjudged tier (HLTH-07)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 24-03-PLAN.md — Health observation catalog: 10 kinds + HLTH-10 required fields (HLTH-08/09/10) + admin reset/dispose/recover (HLTH-05)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 24-04-PLAN.md — Versioned thresholds + canary-guarded activation + multilingual calibration plumbing (HLTH-11)
 
 ### Phase 25: Advisory Stewardship and Guarded Drafts
 
@@ -186,7 +210,7 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
 | 20. Close gap EVO-05 | v1.2 | 5/5 | Complete | 2026-07-22 |
 | 21. Authoritative Personalized Inventory | v1.3 | 6/6 | Complete    | 2026-07-26 |
 | 22. Conservative Contracts and Relationship Graph | v1.3 | 0/TBD | Not started | - |
-| 23. Intent-Safe State-Aware Execution | v1.3 | 0/TBD | Not started | - |
+| 23. Intent-Safe State-Aware Execution | v1.3 | 3/3 | Complete    | 2026-07-27 |
 | 24. Privacy-Safe Outcomes and Capability Health | v1.3 | 0/TBD | Not started | - |
 | 25. Advisory Stewardship and Guarded Drafts | v1.3 | 0/TBD | Not started | - |
 | 26. Coherent Publication and Dual-Runtime Release | v1.3 | 0/TBD | Not started | - |
