@@ -101,9 +101,10 @@ async function dispatch({
   const { synthesizeNextPrompt } = await nextPromptModule;
 
   const intent = classifyIntent(prompt);
-  if (intent.dispatch_eligible !== true) {
-    return { status: 'blocked', dispatch_eligible: false, reason_code: intent.reason_code, intent };
-  }
+  // Delegate the intent gate to resolveAction — it returns the
+  // action-mapper vocabulary `intent_not_execute` for non-execute intents
+  // (EXEC-06 stable reason code), which is the contract the dispatch
+  // boundary exposes downstream.
   const action = resolveAction({ intent, prompt, state, registry, roadmap });
   if (action.status !== 'selected') return action;
 
