@@ -40,7 +40,7 @@ test('[phase23-red:intent] explain markers classify as explain and never dispatc
     'what does the next phase do',
     'compare the two contracts',
     'difference between eligibility and approval',
-    'why did the watcher skip',
+    'why did the watcher pause',
     'how does the cache work',
   ];
   for (const prompt of cases) {

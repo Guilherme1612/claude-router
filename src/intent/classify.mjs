@@ -18,8 +18,10 @@ export const INTENT_DISPOSITIONS = Object.freeze([
 ]);
 
 const NEGATION = /\b(don'?t|do not|never|stop|cancel|abort|skip)\b/i;
+const PROHIBITION = /\b(must not|forbidden|not allowed|prohibited)\b/i;
 const HYPOTHETICAL = /\b(if|suppose|imagine|what if|assuming|hypothetical)\b/i;
 const PREVIEW = /\b(preview|dry[- ]?run|simulate|rehearse)\b/i;
+const EXPLAIN = /\b(explain|what (is|does)|compare|difference between|why|how does)\b/i;
 const QUOTED = /`[^`]+`|"[^"]{1,200}"|^>[\s\S]*$/m;
 const EXECUTE_VERB = /\b(run|execute|start|create|debug|fix|ship|deploy|plan|verify|review|resume|go to|continue|finish)\b/i;
 
@@ -47,8 +49,10 @@ export function classifyIntent(prompt, { policyVersion } = {}) {
   }
 
   // Precedence (Pitfall 1): prohibition → quoted → hypothetical → negated
-  // → preview → execute. Execute additionally requires !NEGATION.test.
-  if (/\b(must not|forbidden|not allowed|prohibited)\b/i.test(text)) {
+  // → preview → explain → execute. Execute additionally requires
+  // !NEGATION.test && !PROHIBITION.test (belt-and-suspenders; the earlier
+  // checks already short-circuit those cases).
+  if (PROHIBITION.test(text)) {
     return outcome('prohibited', 'prohibition_marker');
   }
   if (QUOTED.test(text)) {
@@ -63,7 +67,10 @@ export function classifyIntent(prompt, { policyVersion } = {}) {
   if (PREVIEW.test(text)) {
     return outcome('preview', 'preview_marker');
   }
-  if (EXECUTE_VERB.test(text) && !NEGATION.test(text)) {
+  if (EXPLAIN.test(text)) {
+    return outcome('explain', 'explain_marker');
+  }
+  if (EXECUTE_VERB.test(text) && !NEGATION.test(text) && !PROHIBITION.test(text)) {
     return outcome('execute', 'explicit_execute_verb');
   }
   return outcome('ambiguous', 'no_execute_marker');
