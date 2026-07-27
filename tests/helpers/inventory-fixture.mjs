@@ -171,7 +171,10 @@ export function contractEvidence(record, variant = 'accepted') {
     freshness: 'fresh',
     rule: 'authored-purpose-v1',
   });
-  if (!['accepted', 'missing', 'conflicting', 'stale', 'below-threshold', 'rejected'].includes(variant)) {
+  if (variant === 'workflow-transitions') {
+    evidence.workflow_transitions[0].value = ['gsd.execute'];
+  }
+  if (!['accepted', 'missing', 'conflicting', 'stale', 'below-threshold', 'rejected', 'workflow-transitions'].includes(variant)) {
     throw new TypeError(`unknown contract evidence variant: ${variant}`);
   }
   return evidence;
