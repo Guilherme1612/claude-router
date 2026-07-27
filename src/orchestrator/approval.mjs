@@ -1,0 +1,114 @@
+// Phase 23: Approval gate — distinct from execute intent (EXEC-07).
+// Plan 01 ships the safe-only path: needsApproval returns false for the
+// safe fixture, so verifyApproval is not invoked on the tracer. The module
+// is complete (bind/verify with stale/mismatch fail-closed) and Plan 03
+// wires the destructive dispatch path.
+
+import { createHash } from 'node:crypto';
+import { contentFingerprint, stableCapabilityId } from '../registry/identity.mjs';
+import { stableStringify } from '../registry/schema.mjs';
+import { validateContractFieldValue } from '../registry/contract.mjs';
+
+export const APPROVAL_POLICY_VERSION = 'approval-policy-v1';
+export const APPROVAL_SCHEMA_VERSION = 1;
+
+// Same token vocabulary as eligibility.mjs:165-175 — destructive/privileged
+// surface requires a separately bound approval token.
+const DESTRUCTIVE_SIDE_EFFECTS = new Set(['destructive', 'unbounded', 'external', 'privileged']);
+const IRREVERSIBLE = new Set(['irreversible']);
+const HIGH_RISK = new Set(['high', 'critical', 'unacceptable']);
+
+function field(record, name) {
+  return record?.contract?.fields?.[name];
+}
+
+function knownValue(record, name) {
+  const envelope = field(record, name);
+  if (!envelope || envelope.state !== 'known') return null;
+  if (validateContractFieldValue(name, envelope.value)) return null;
+  return envelope.value;
+}
+
+function tokenMatches(value, vocabulary) {
+  const text = stableStringify(value).toLowerCase();
+  return vocabulary.some(token => text.includes(token));
+}
+
+/**
+ * Does this capability's contract surface declare destructive/privileged
+ * effects that require a separately bound approval token? Reads only the
+ * contract envelope (state=known gate) — does NOT re-check eligibility
+ * (Anti-Pattern: re-checking eligibility drifts Phase 22 authority).
+ */
+export function needsApproval(contract) {
+  const record = { contract };
+  const sideEffects = knownValue(record, 'side_effects');
+  if (sideEffects !== null && tokenMatches(sideEffects, [...DESTRUCTIVE_SIDE_EFFECTS])) {
+    return true;
+  }
+  const reversibility = knownValue(record, 'reversibility');
+  if (reversibility !== null && tokenMatches(reversibility, [...IRREVERSIBLE])) {
+    return true;
+  }
+  const risk = knownValue(record, 'risk');
+  if (risk !== null && tokenMatches(risk, [...HIGH_RISK])) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Bind a capability+args+targets+effects+proposalVersion to an opaque
+ * approval token via SHA-256 fingerprinting. Reuses contentFingerprint for
+ * the capability leg (identity.mjs:37-51). Never hand-roll hashing (ASVS V6).
+ */
+export function bindApproval({ capability, args, targets, effects, proposalVersion } = {}) {
+  if (!capability) throw new TypeError('bindApproval requires a capability');
+  const capFingerprint = contentFingerprint(capability);
+  const capId = (() => { try { return stableCapabilityId(capability); } catch { return ''; } })();
+  const canonical = stableStringify({
+    capability_fingerprint: capFingerprint,
+    capability_id: capId,
+    args: args ?? null,
+    targets: Array.isArray(targets) ? [...targets].sort() : null,
+    effects: effects ?? null,
+    proposal_version: String(proposalVersion ?? ''),
+  });
+  const token = createHash('sha256').update(canonical, 'utf8').digest('hex');
+  return {
+    schema_version: APPROVAL_SCHEMA_VERSION,
+    policy_version: APPROVAL_POLICY_VERSION,
+    token,
+    capability_fingerprint: capFingerprint,
+    capability_id: capId,
+  };
+}
+
+/**
+ * Verify a presented approval token against the bound one. Fail-closed on
+ * missing/stale/mismatch (RESEARCH Pattern 3). Returns a blocked shape on
+ * any failure so the dispatcher gates destructive actions without exception.
+ */
+export function verifyApproval({ bound, presented } = {}) {
+  if (!bound || typeof bound !== 'object') {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
+  }
+  if (!presented || typeof presented !== 'object') {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
+  }
+  if (typeof bound.token !== 'string' || !bound.token) {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
+  }
+  if (typeof presented.token !== 'string' || !presented.token) {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
+  }
+  if (presented.token !== bound.token) {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_mismatch' };
+  }
+  return {
+    status: 'approved',
+    dispatch_eligible: true,
+    reason_code: 'approval_verified',
+    token: bound.token,
+  };
+}
