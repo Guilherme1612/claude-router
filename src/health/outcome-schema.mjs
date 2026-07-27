@@ -12,7 +12,7 @@
 // validateEvidenceEnvelope, privacy_signature_forbidden). boundedToken is
 // re-imported so path-escape defense stays shared, not redefined.
 
-import { boundedToken } from '../evolution/evidence.mjs';
+import { boundedToken, MAX_RETENTION_MS } from '../evolution/evidence.mjs';
 
 // PRIVACY_GUARDS is not exported by evidence.mjs; mirror the set verbatim so
 // the privacy_signature_forbidden rule stays in lockstep with the evidence
@@ -62,6 +62,21 @@ function hasFrameworkPrefix(value) {
   return typeof value === 'string' && FRAMEWORK_PREFIXES.some((prefix) => value.startsWith(prefix));
 }
 
+// boundedInteger — HLTH-04 bounded integer check for evidence_window_ms,
+// sample_size, opportunity_count. Rejects non-integers, negatives, and values
+// above `max`. `max` defaults to MAX_RETENTION_MS for evidence_window_ms; the
+// count fields use 10_000_000 as their upper bound (defensive — a single
+// process should never accumulate that many samples in 7d of retention).
+const MAX_COUNT = 10_000_000;
+
+function boundedInteger(value, max) {
+  return Number.isSafeInteger(value) && value >= 0 && value <= max;
+}
+
+function stringFieldTooLong(value) {
+  return typeof value === 'string' && value.length > 128;
+}
+
 // validateOutcomeEnvelope is the trust boundary between the observer and the
 // persistent store (T-24-01). Every record crosses this boundary; any field
 // not in OUTCOME_FIELDS is rejected with 'forbidden_outcome_field' BEFORE any
@@ -72,11 +87,33 @@ export function validateOutcomeEnvelope(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return deny('invalid_outcome_envelope');
   if (Object.keys(input).some((field) => !OUTCOME_FIELDS.has(field))) return deny('forbidden_outcome_field');
   if (!OUTCOME_KINDS.has(input.outcome_kind)) return deny('invalid_outcome_kind');
+
+  // Task 2 hardening — field_too_long for any string field > boundedToken's
+  // 128-char max (Pitfall 5: a string field longer than boundedToken signals
+  // user-typed content or an unbounded argument leaking in). This generic
+  // length guard fires BEFORE the format-specific boundedToken checks below so
+  // a 129-char capability_id is reported as field_too_long (length violation)
+  // rather than invalid_capability_id (which is reserved for format /
+  // framework-prefix violations).
+  for (const field of ['capability_id', 'route_id', 'reason_code', 'freshness', 'policy_version', 'fingerprint']) {
+    if (stringFieldTooLong(input[field])) return deny('field_too_long');
+  }
+  // confidence_band is a short enum-like token; bound it too.
+  if (typeof input.confidence_band === 'string' && input.confidence_band.length > 64) return deny('field_too_long');
+
   if (!boundedToken(input.capability_id)) return deny('invalid_capability_id');
   if (hasFrameworkPrefix(input.capability_id)) return deny('invalid_capability_id');
   if (!boundedToken(input.route_id)) return deny('invalid_route_id');
   if (!Number.isSafeInteger(input.timestamp_ms) || input.timestamp_ms < 0) return deny('invalid_timestamp');
   if (!Array.isArray(input.guard_codes) || input.guard_codes.length > 16 || input.guard_codes.some((code) => !boundedToken(code, 64))) return deny('invalid_guard_codes');
+
+  // Task 2 hardening — HLTH-04 bounded integer ranges.
+  if (!boundedInteger(input.evidence_window_ms, MAX_RETENTION_MS)) return deny('invalid_evidence_window');
+  if (!boundedInteger(input.sample_size, MAX_COUNT)) return deny('invalid_sample_size');
+  if (!boundedInteger(input.opportunity_count, MAX_COUNT)) return deny('invalid_opportunity_count');
+
+  // Task 2 hardening — fingerprint integrity anchor (64-hex sha256).
+  if (typeof input.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(input.fingerprint)) return deny('invalid_fingerprint');
 
   const privacyDenied = input.guard_codes.some((code) => PRIVACY_GUARDS.has(code));
   if (privacyDenied && input.prompt_signature !== null) return deny('privacy_signature_forbidden');

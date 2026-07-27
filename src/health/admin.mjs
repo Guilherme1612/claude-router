@@ -2,9 +2,10 @@
 // dispose / recover land in Plan 24-03 (Wave 3).
 //
 // D-5 (scope isolation): this module reads ~/.claude/router/health/outcomes.jsonl
-// only. It must NOT import src/registry/activate.mjs or src/prompt/publish-index.mjs
-// — health state is a sibling of evidence/, never a parent of registry/. The
-// content-hash regression test in Plan 24-03 Task 2 enforces this at test time.
+// only. It must NOT depend on src/registry/activate.mjs or
+// src/prompt/publish-index.mjs — health state is a sibling of evidence/, never
+// a parent of registry/. The content-hash regression test in Plan 24-03 Task 2
+// enforces this at test time.
 //
 // D-4: the `health` subcommand family is distinct from the Phase 07
 // `router doctor` / `router coverage` route-coverage diagnostics. router
