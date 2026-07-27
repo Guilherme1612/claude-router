@@ -40,7 +40,11 @@ const DEBUG_VERB = /\b(debug|bug|troubleshoot)\b/i;
 const CREATE_PHASE_VERB = /\b(?:create|plan)\s+(?:a\s+)?phase\s+(?:about|for|on)\s+(.+)$/i;
 
 const DEBUG_TOKENS = /\b(debug|debugging|troubleshoot|troubleshooting|bug)\b/i;
-const PLAN_TRANSITION_TO = 'plan';
+// WR-03: the phase-creation transition is identified by a stable `role`
+// marker on the transition row (set in the workflow-transition policy),
+// NOT a hardcoded workflow-state `to` literal. Framework-neutral: the role
+// is a policy-level annotation, not a framework command name.
+const PHASE_CREATION_ROLE = 'phase_creation';
 
 function blocked(reason_code, facts = {}) {
   return { status: 'blocked', dispatch_eligible: false, reason_code, ...facts };
@@ -158,7 +162,7 @@ function selectOne(matches, args = null) {
  *
  * Returns { status: 'selected'|'blocked'|'clarify', dispatch_eligible, reason_code, capability?, args? }
  */
-export function resolveAction({ intent, prompt, state, registry, roadmap } = {}) {
+export function resolveAction({ intent, prompt, state, registry, roadmap, transitionPolicy } = {}) {
   if (!intent || typeof intent !== 'object') {
     return blocked('invalid_intent');
   }
@@ -169,7 +173,10 @@ export function resolveAction({ intent, prompt, state, registry, roadmap } = {})
     return blocked('registry_invalid');
   }
 
-  const transitions = nextValidTransitions(state);
+  // WR-03: accept an optional transition policy from the caller so the
+  // action mapper does not couple to a single hardcoded WORKFLOW_TRANSITIONS
+  // vocabulary. Defaults to the canonical policy when omitted.
+  const transitions = nextValidTransitions(state, transitionPolicy);
   // Hard gates apply to every verb: stale/terminal/invalid/missing-dep.
   const mapped = TRANSITION_REASON_MAP[transitions?.reason_code];
   if (mapped) return blocked(mapped);
@@ -193,10 +200,11 @@ export function resolveAction({ intent, prompt, state, registry, roadmap } = {})
   const transitionIds = new Set(transitions.candidates.map(c => c.transition_id));
 
   if (verb.kind === 'create_phase') {
-    // The phase-creation transition is the candidate whose `to` state is
-    // 'plan' in the canonical transition policy. Framework-neutral: the
-    // transition_id is read from policy data, not hardcoded as a command.
-    const planCandidate = transitions.candidates.find(c => c.to === PLAN_TRANSITION_TO);
+    // WR-03: identify the phase-creation transition by its stable `role`
+    // marker ('phase_creation'), NOT by a hardcoded `to` state literal.
+    // Framework-neutral: the role is a policy-level annotation, so the verb
+    // resolves regardless of the policy's `to` vocabulary.
+    const planCandidate = transitions.candidates.find(c => c.role === PHASE_CREATION_ROLE);
     if (!planCandidate) return blocked('no_eligible_capability');
     const planIds = new Set([planCandidate.transition_id]);
     const matches = collectCandidates(registry, planIds);

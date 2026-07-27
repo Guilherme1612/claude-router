@@ -290,6 +290,49 @@ test('[phase23-fix:actions] debug verb respects required_gate_missing hard gate 
   assert.equal(action.dispatch_eligible, false);
 });
 
+test('[phase23-fix:actions] create_phase derives the plan transition from a role marker, not a hardcoded "plan" `to` literal (WR-03)', async () => {
+  const { resolveAction } = await actionsModule;
+  const { classifyIntent } = await classifyModule;
+  // Custom policy: the phase-creation transition has a DIFFERENT transition_id
+  // ('custom.plan') and `to` state ('planning', NOT 'plan') from the default
+  // policy. The capability'\''s contract lists only 'custom.plan'. The verb
+  // MUST resolve via the `role: 'phase_creation'` marker on the transition
+  // row — proving create_phase does not depend on a hardcoded `to` literal
+  // and accepts the transition policy from the caller (framework-neutral).
+  const customPolicy = [{
+    id: 'custom.plan', family: 'gsd', from: 'discussed', to: 'planning',
+    workflow_id: 'custom-plan-phase', requires: ['discussion_complete'],
+    role: 'phase_creation',
+  }];
+  const planCap = makeCapability({ name: 'plan-phase-cap', workflowTransitions: ['custom.plan'] });
+  const registry = registryWith([planCap]);
+  const intent = classifyIntent('create a phase about routing');
+  const action = resolveAction({
+    intent, prompt: 'create a phase about routing',
+    state: freshDiscussedGsdState(), registry,
+    roadmap: { current_max_phase: 23 },
+    transitionPolicy: customPolicy,
+  });
+  assert.equal(action.status, 'selected');
+  assert.equal(action.reason_code, 'unique_eligible_capability');
+  assert.equal(action.args.next_number, 24);
+  assert.equal(action.args.topic, 'routing');
+  assert.equal(stableCapabilityId(action.capability), stableCapabilityId(planCap));
+});
+
+test('[phase23-fix:actions] create_phase still resolves with the default policy whose plan transition has to="plan" (WR-03 regression guard)', async () => {
+  const planCap = makeCapability({ name: 'plan-phase-cap', workflowTransitions: ['gsd.plan'] });
+  const registry = registryWith([planCap]);
+  const action = await resolve('create a phase about auth', {
+    state: freshDiscussedGsdState(),
+    registry,
+    roadmap: { current_max_phase: 23 },
+  });
+  assert.equal(action.status, 'selected');
+  assert.equal(action.args.next_number, 24);
+  assert.equal(action.args.topic, 'auth');
+});
+
 test('[phase23-red:actions] synthesizeNextPrompt emits no framework slash for next-phase, debug, or create-phase selections (EXEC-10)', async () => {
   const { synthesizeNextPrompt } = await nextPromptModule;
 

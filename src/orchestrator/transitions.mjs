@@ -2,15 +2,15 @@ export const TRANSITION_POLICY_VERSION = 'workflow-transitions-v1';
 
 const TERMINAL_STATUSES = new Set(['completed', 'cancelled', 'superseded', 'closed']);
 
-function transition(id, family, from, to, workflow_id, requires = []) {
-  return Object.freeze({ id, family, from, to, workflow_id, requires: Object.freeze([...requires]) });
+function transition(id, family, from, to, workflow_id, requires = [], role = null) {
+  return Object.freeze({ id, family, from, to, workflow_id, requires: Object.freeze([...requires]), role });
 }
 
 export const WORKFLOW_TRANSITIONS = Object.freeze([
   transition('brainstorm.approve-design', 'brainstorm', 'design_ready', 'design_approval', 'brainstorming', ['design_ready']),
   transition('brainstorm.plan-implementation', 'brainstorm', 'design_approved', 'implementation_planning', 'writing-plans', ['design_approved']),
   transition('gsd.discuss', 'gsd', 'phase_ready', 'discuss', 'gsd-discuss-phase', ['phase_available']),
-  transition('gsd.plan', 'gsd', 'discussed', 'plan', 'gsd-plan-phase', ['discussion_complete']),
+  transition('gsd.plan', 'gsd', 'discussed', 'plan', 'gsd-plan-phase', ['discussion_complete'], 'phase_creation'),
   transition('gsd.execute', 'gsd', 'planned', 'execute', 'gsd-execute-phase', ['plan_approved']),
   transition('gsd.verify', 'gsd', 'executed', 'verify', 'gsd-verify-work', ['execution_complete']),
   transition('interrupted.resume', 'interrupted', 'interrupted', 'resume', 'gsd-resume-work', ['resumable_execution']),
@@ -33,7 +33,12 @@ function normalizeTransition(value) {
   const requires = Array.isArray(value.requires) && value.requires.every(validString)
     ? [...new Set(value.requires)].sort()
     : [];
-  return { id, family, from, to, workflow_id, requires };
+  // WR-03: preserve an optional `role` marker (e.g. 'phase_creation') so the
+  // action mapper can identify the plan transition by a stable dedicated
+  // marker instead of a hardcoded workflow-state `to` literal. The role is
+  // a policy-level annotation — framework-neutral (not a command name).
+  const role = validString(value.role) ? value.role : null;
+  return { id, family, from, to, workflow_id, requires, role };
 }
 
 function compareTransition(a, b) {
@@ -59,6 +64,7 @@ function candidateFact(row) {
     family: row.family,
     from: row.from,
     to: row.to,
+    role: row.role || null,
   };
 }
 
@@ -110,6 +116,10 @@ function semanticCandidates(values) {
     const fields = ['transition_id', 'workflow_id', 'family', 'from', 'to'];
     if (!fields.every(field => validString(value[field]))) continue;
     const candidate = Object.fromEntries(fields.map(field => [field, value[field]]));
+    // WR-03: preserve the optional `role` marker so the candidate shape is
+    // consistent with candidateFact (which also surfaces role). Dedup key
+    // stays semantic (workflow_id/family/from/to) — role is an annotation.
+    candidate.role = validString(value.role) ? value.role : null;
     const semanticKey = JSON.stringify({
       workflow_id: candidate.workflow_id,
       family: candidate.family,
