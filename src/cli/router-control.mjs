@@ -11,6 +11,7 @@ import { createPersistentEvidenceStore } from '../evolution/evidence.mjs';
 import { assessCalibration, CALIBRATION_CORPUS, evaluateCalibrationCorpus, measureRoutes } from '../evolution/perf-measure.mjs';
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-index.mjs';
+import { inspect as healthInspect } from '../health/admin.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -544,7 +545,7 @@ export function renderContractText(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback> [--format text|json] [--owned-root path] [--execute --confirm version]\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -1103,6 +1104,38 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
       }
     } catch (error) {
       return { result: canonical('canary', false, 'internal_error', { error: error.message }), exitCode: EXIT.mutation };
+    }
+  }
+  // Plan 24-01: health {inspect|reset|dispose|recover} — the operator surface
+  // for capability health (HLTH-05). Distinct from the Phase 07 `router doctor`
+  // / `router coverage` route-coverage diagnostics (D-4): router doctor reports
+  // router plumbing health; router health reports capability health. Wave 1
+  // wires `inspect` only; reset/dispose/recover return not_implemented until
+  // Plan 24-03. healthRoot is join(root, 'health') — a sibling of evidence/,
+  // never a parent of registry/ (D-5). This block must NOT import activate.mjs
+  // or publish-index.mjs; admin.mjs is the sole health-mutation seam.
+  if (command === 'health') {
+    const subcommand = positional[1];
+    if (!['inspect', 'reset', 'dispose', 'recover'].includes(subcommand)) {
+      return { result: canonical('health', false, 'invalid_subcommand', { subcommand: subcommand ?? null, usage: usage().trim() }), exitCode: EXIT.usage };
+    }
+    if (subcommand !== 'inspect') {
+      return { result: canonical('health', false, 'not_implemented', { subcommand }), exitCode: EXIT.usage };
+    }
+    try {
+      const healthRoot = join(root, 'health');
+      let limit = 100;
+      let offset = 0;
+      try {
+        if (options.limit !== undefined) limit = integerOption(options.limit, 100, { minimum: 1, maximum: 1000 });
+        if (options.offset !== undefined) offset = integerOption(options.offset, 0, { minimum: 0, maximum: 1_000_000 });
+      } catch {
+        return { result: canonical('health inspect', false, 'invalid_pagination'), exitCode: EXIT.usage };
+      }
+      const result = healthInspect({ healthRoot, limit, offset });
+      return { result, exitCode: result.ok ? EXIT.success : EXIT.invalid };
+    } catch (error) {
+      return { result: canonical('health', false, 'internal_error', { error: error.message }), exitCode: EXIT.mutation };
     }
   }
   return { result: canonical(command || 'usage', false, 'unknown_command', { usage: usage().trim() }), exitCode: EXIT.usage };
