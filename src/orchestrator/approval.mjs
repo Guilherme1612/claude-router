@@ -84,12 +84,30 @@ export function bindApproval({ capability, args, targets, effects, proposalVersi
   };
 }
 
+function extractExpectedToken(expected) {
+  if (!expected) return null;
+  if (typeof expected === 'string') return expected;
+  if (typeof expected === 'object' && typeof expected.token === 'string') return expected.token;
+  return null;
+}
+
 /**
  * Verify a presented approval token against the bound one. Fail-closed on
  * missing/stale/mismatch (RESEARCH Pattern 3). Returns a blocked shape on
  * any failure so the dispatcher gates destructive actions without exception.
+ *
+ * Three legs checked in order (EXEC-08):
+ *   1. bound + presented must both carry a non-empty token (else approval_missing)
+ *   2. bound.token must equal the re-derived `expected` token minted from the
+ *      CURRENT args/targets/effects/proposalVersion (else approval_stale —
+ *      the bound token was minted against a prior proposal/args set)
+ *   3. presented.token must equal bound.token (else approval_mismatch)
+ *
+ * `expected` is either a hex string or { token: <hex> } — the caller
+ * re-derives it via `bindApproval` over the current dispatch inputs so the
+ * stale check is anchored to fresh state, not a cached value.
  */
-export function verifyApproval({ bound, presented } = {}) {
+export function verifyApproval({ bound, presented, expected } = {}) {
   if (!bound || typeof bound !== 'object') {
     return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
   }
@@ -102,13 +120,17 @@ export function verifyApproval({ bound, presented } = {}) {
   if (typeof presented.token !== 'string' || !presented.token) {
     return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_missing' };
   }
+  const expectedToken = extractExpectedToken(expected);
+  if (expectedToken !== null && bound.token !== expectedToken) {
+    return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_stale' };
+  }
   if (presented.token !== bound.token) {
     return { status: 'blocked', dispatch_eligible: false, reason_code: 'approval_mismatch' };
   }
   return {
     status: 'approved',
     dispatch_eligible: true,
-    reason_code: 'approval_verified',
+    reason_code: 'approval_bound',
     token: bound.token,
   };
 }
