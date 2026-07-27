@@ -32,7 +32,7 @@ const QUOTED = /```[\s\S]*?```|`[^`\n]+`|"[^"\n]{1,200}"|'\w[^'\n]*\s[^'\n]*'|^>
 // as ambiguous rather than dispatching on a coincidentally-shared execute verb
 // (e.g. Portuguese "execute a próxima fase" must NOT dispatch).
 const MULTILINGUAL = /[À-ſ]|\b(ejecuta|ejecutar|executar|inicia|iniciar|verifique|verificar|pr[oó]xima?|siguiente|fases?|ahora|trabalho)\b/i;
-const EXECUTE_VERB = /\b(run|execute|start|create|debug|fix|ship|deploy|plan|verify|review|resume|go to|continue|finish)\b/i;
+const EXECUTE_VERB = /\b(run|execute|start|create|debug|troubleshoot|bug|fix|ship|deploy|plan|verify|review|resume|go to|continue|finish)\b/i;
 
 function outcome(disposition, reason_code) {
   return {

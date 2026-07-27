@@ -24,8 +24,11 @@ function invocationLabel(capability) {
 /**
  * Synthesize the next-prompt from a selected capability. Framework-neutral:
  * no framework slash hardcode; the label comes from capability.invocation.
+ * Structured args (e.g. { next_number, topic } for the create-phase verb)
+ * are surfaced as `key=value` pairs so the model can act on them without a
+ * hardcoded slash command (EXEC-10).
  */
-export function synthesizeNextPrompt({ selection, capability } = {}) {
+export function synthesizeNextPrompt({ selection, capability, args } = {}) {
   const cap = capability || selection?.capability;
   const reason = selection?.reason_code || 'unique_eligible_capability';
   const label = invocationLabel(cap);
@@ -36,8 +39,14 @@ export function synthesizeNextPrompt({ selection, capability } = {}) {
     `<context-recovery outcome="selected" reason="${reason}" dispatch="true">`,
     `Next capability: ${label || name}`,
     `Capability: ${name}`,
-    '</context-recovery>',
   ];
+  if (args && typeof args === 'object') {
+    const pairs = Object.entries(args)
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
+    if (pairs.length > 0) fields.push(`Args: ${pairs.join(' ')}`);
+  }
+  fields.push('</context-recovery>');
   const value = fields.join('\n');
   if (Buffer.byteLength(value) <= MAX_CONTEXT_BYTES) return value;
   return '<!-- router-inject -->\n<context-recovery outcome="clarify" reason="bounded_output">Which capability should I run next?</context-recovery>';
