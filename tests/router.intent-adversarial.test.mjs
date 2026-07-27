@@ -21,6 +21,23 @@ const MINIMAL_PAIRS = [
   ['run the tests', 'never run the tests'],
   ['debug this', "don't debug this"],
   ['ship it', "don't ship it"],
+  // WR-01: missing contractions must classify as negated (not execute).
+  ['run the tests', "won't run the tests"],
+  ['ship the release', "can't ship the release"],
+  ['deploy the bundle', "shouldn't deploy the bundle"],
+  ['fix the branch', "couldn't fix the branch"],
+  ['ship the commit', "wouldn't ship the commit"],
+  ['verify the work', "isn't verified yet"], // negation anywhere in the prompt
+  ['run the suite', "the suite doesn't pass"],
+  ['ship the feature', "haven't shipped the feature"],
+  ['review the pr', "hasn't reviewed the pr"],
+  ['finish the task', "hadn't finished the task"],
+  ['start the gate', "mustn't start the gate"],
+  ['review the user list', "needn't review the user list"],
+  // WR-01: Unicode curly apostrophe (U+2019, macOS/iOS autocorrect) must
+  // classify as negated, not execute.
+  ['go to the next phase', "don’t go to the next phase"],
+  ['run the tests', "can’t run the tests"],
 ];
 
 // Nested quotations / code blocks → quoted (never execute). INT-06.

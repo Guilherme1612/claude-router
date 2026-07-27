@@ -17,7 +17,23 @@ export const INTENT_DISPOSITIONS = Object.freeze([
   'ambiguous',
 ]);
 
-const NEGATION = /\b(don'?t|do not|never|stop|cancel|abort|skip)\b/i;
+// Negation markers. Covers ASCII apostrophe plus Unicode curly single
+// quotes (U+2018/U+2019 — macOS/iOS autocorrect default for `don't`) and
+// the common English negative contractions that were missing in v1
+// (won't/can't/shouldn't/couldn't/wouldn't/isn't/aren't/doesn't/haven't/
+// hasn't/hadn't/mustn't/needn't). The apostrophe class is optional so
+// `dont`/`wont` also match — a false positive abstains (negated, never
+// dispatches) which is the safe direction; a false negative would dispatch
+// a negated prompt (WR-01). Precedence is unchanged: prohibition → quoted
+// → hypothetical → negated → preview → explain → execute (Pitfall 1).
+const APOS = "['’‘]"; // ASCII ' + curly U+2019 + curly U+2018
+const NEGATION = new RegExp(
+  '\\b(don' + APOS + '?t|won' + APOS + '?t|can' + APOS + '?t|shouldn' + APOS + '?t'
+  + '|couldn' + APOS + '?t|wouldn' + APOS + '?t|isn' + APOS + '?t|aren' + APOS + '?t'
+  + '|doesn' + APOS + '?t|haven' + APOS + '?t|hasn' + APOS + '?t|hadn' + APOS + '?t'
+  + '|mustn' + APOS + '?t|needn' + APOS + '?t|do not|never|stop|cancel|abort|skip)\\b',
+  'i'
+);
 const PROHIBITION = /\b(must not|forbidden|not allowed|prohibited)\b/i;
 const HYPOTHETICAL = /\b(if|suppose|imagine|what if|assuming|hypothetical)\b/i;
 const PREVIEW = /\b(preview|dry[- ]?run|simulate|rehearse)\b/i;
