@@ -18,10 +18,20 @@ export const ACTION_POLICY_VERSION = 'action-policy-v1';
 // Reason codes mapped from nextValidTransitions' vocabulary to the EXEC-06
 // action-mapper vocabulary. `dependency_unsafe` from the transition gate is
 // surfaced as `dependency_unavailable` (missing-dep) per the plan's done-gate.
+// WR-02: ALL hard-gate reason codes are mapped so they apply to EVERY verb
+// (including debug), matching the phase context's "Hard gates apply to every
+// verb: stale/terminal/invalid/missing-dep". Previously the debug branch
+// returned before the `status !== 'candidates_available'` backstop, so
+// invalid_workflow_status / no_valid_transition / required_gate_missing
+// were silently bypassed and a debug capability was selected on a paused /
+// no-transition / missing-gate workflow.
 const TRANSITION_REASON_MAP = {
   authoritative_evidence_stale: 'authoritative_evidence_stale',
   terminal_workflow: 'terminal_workflow',
   invalid_authoritative_evidence: 'invalid_authoritative_evidence',
+  invalid_workflow_status: 'invalid_workflow_status',
+  no_valid_transition: 'no_valid_transition',
+  required_gate_missing: 'required_gate_missing',
   dependency_unsafe: 'dependency_unavailable',
 };
 
@@ -168,7 +178,10 @@ export function resolveAction({ intent, prompt, state, registry, roadmap } = {})
 
   if (verb.kind === 'debug') {
     // Debug is a semantic-category match, not a next-transition action. The
-    // freshness/terminal/dependency gate above is the only state gate.
+    // hard-gate map above (stale/terminal/invalid/missing-dep) applies to
+    // every verb including debug (WR-02); the freshness/terminal/invalid/
+    // missing-dep gates are the only state gates — debug does not require a
+    // valid next-transition candidate, but it MUST respect the hard gates.
     const matches = collectDebugCandidates(registry);
     return selectOne(matches);
   }

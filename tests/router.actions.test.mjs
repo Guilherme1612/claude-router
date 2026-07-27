@@ -226,6 +226,70 @@ test('[phase23-red:actions] next-phase numbering boundary at last phase blocks r
   assert.equal(action.args.next_number, 24);
 });
 
+test('[phase23-fix:actions] debug verb respects invalid_workflow_status hard gate — never dispatches on a paused workflow (WR-02)', async () => {
+  const debugCap = makeCapability({
+    name: 'debug-the-watcher',
+    workflowTransitions: ['gsd.verify'],
+    purposeValue: 'debug the watcher pipeline',
+    triggersValue: ['debug', 'troubleshooting', 'watcher'],
+  });
+  const registry = registryWith([debugCap]);
+  // status='paused' → nextValidTransitions returns invalid_workflow_status.
+  // The debug verb MUST respect this hard gate (like every other verb) and
+  // block, not select the debug capability.
+  const action = await resolve('debug this', {
+    state: freshPlannedGsdState({ status: 'paused' }),
+    registry,
+  });
+  assert.equal(action.status, 'blocked');
+  assert.equal(action.reason_code, 'invalid_workflow_status');
+  assert.equal(action.dispatch_eligible, false);
+  assert.equal(action.capability, undefined, 'debug verb must not select on an invalid workflow status');
+});
+
+test('[phase23-fix:actions] debug verb respects no_valid_transition hard gate (WR-02)', async () => {
+  const debugCap = makeCapability({
+    name: 'debug-cap',
+    workflowTransitions: ['gsd.verify'],
+    purposeValue: 'debug the watcher',
+    triggersValue: ['debug', 'troubleshooting'],
+  });
+  const registry = registryWith([debugCap]);
+  // family with no matching transition in the policy → no_valid_transition.
+  const state = {
+    status: 'active', freshness: 'fresh',
+    position: { family: 'unknown-family', state: 'unknown-state' },
+    gates: {}, dependencies_safe: true,
+  };
+  const action = await resolve('debug this', { state, registry });
+  assert.equal(action.status, 'blocked');
+  assert.equal(action.reason_code, 'no_valid_transition');
+  assert.equal(action.dispatch_eligible, false);
+});
+
+test('[phase23-fix:actions] debug verb respects required_gate_missing hard gate (WR-02)', async () => {
+  const debugCap = makeCapability({
+    name: 'debug-cap',
+    workflowTransitions: ['gsd.verify'],
+    purposeValue: 'debug the watcher',
+    triggersValue: ['debug', 'troubleshooting'],
+  });
+  const registry = registryWith([debugCap]);
+  // family matches gsd.plan (from 'discussed') but the discussion_complete
+  // gate is missing → required_gate_missing. The debug verb must block.
+  const action = await resolve('debug this', {
+    state: {
+      status: 'active', freshness: 'fresh',
+      position: { family: 'gsd', state: 'discussed' },
+      gates: {}, dependencies_safe: true,
+    },
+    registry,
+  });
+  assert.equal(action.status, 'blocked');
+  assert.equal(action.reason_code, 'required_gate_missing');
+  assert.equal(action.dispatch_eligible, false);
+});
+
 test('[phase23-red:actions] synthesizeNextPrompt emits no framework slash for next-phase, debug, or create-phase selections (EXEC-10)', async () => {
   const { synthesizeNextPrompt } = await nextPromptModule;
 
