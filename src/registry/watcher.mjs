@@ -585,6 +585,9 @@ export function createRegistryReconciler(config, dependencies = {}) {
                     ownedRoot: config.activation_root, registry: built.registry,
                     registryVersionId: activation.version_id, mapping,
                     policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                    contracts: built.contracts, relationships: built.relationships,
+                    intentPolicy: built.intent_policy, workflows: built.workflows,
+                    healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
                   });
                   if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
                   activation = { ...activation, ...publication };
@@ -667,6 +670,9 @@ export function createRegistryReconciler(config, dependencies = {}) {
                         ownedRoot: config.activation_root, registry: built.registry,
                         registryVersionId: decision.active_version, mapping,
                         policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                        contracts: built.contracts, relationships: built.relationships,
+                        intentPolicy: built.intent_policy, workflows: built.workflows,
+                        healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
                       });
                       if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
                       activation = { ...activation, ...publication };

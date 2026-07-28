@@ -65,6 +65,7 @@ export function publishCompiledIndex({
   contracts, relationships, intentPolicy, workflows, healthPolicy, suggestionReference,
 } = {}) {
   const root = resolve(ownedRoot);
+  if (['build', 'before-build'].includes(crashAt)) throw new Error('injected crash before tuple build');
   if (!registry || !Array.isArray(registry.records) || !/^v1-[a-f0-9]{16}$/.test(registryVersionId || '')) throw new TypeError('verified registry version required');
   const records = new Map(registry.records.flatMap(record => [record.id, record.canonical_identity, record.name].filter(Boolean).map(key => [key, record])));
   // Phase 19 D-01: workflow declarations source — static file read via relative
@@ -264,6 +265,8 @@ export function publishCompiledIndex({
   };
   const promptProjectionBytes = json(promptProjection);
   const tupleRoot = join(root, 'release-tuples', 'versions', tupleVersionId);
+  if (['member', 'before-member-write'].includes(crashAt)) throw new Error('injected crash before tuple member write');
+  if (['manifest', 'before-manifest-write'].includes(crashAt)) throw new Error('injected crash before tuple manifest write');
   if (!existsSync(tupleRoot)) {
     mkdirSync(tupleRoot, { recursive: true });
     for (const [name, bytes] of Object.entries(tupleMembers)) durableWrite(join(tupleRoot, name), bytes);
@@ -288,11 +291,16 @@ export function publishCompiledIndex({
     tuple_version_id: tupleVersionId,
     prompt_projection_sha256: sha256(promptProjectionBytes),
   };
+  if (['verification', 'before-verification'].includes(crashAt)) throw new Error('injected crash before tuple verification');
+  const candidate = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer });
+  if (!candidate.dispatch_eligible || candidate.tuple_version_id !== tupleVersionId) throw new Error('tuple_validation_failed');
   if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
   if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
-  const verified = loadCompiledIndex({ ownedRoot: root, now });
-  if (!verified.dispatch_eligible || verified.tuple_version_id !== tupleVersionId) throw new Error('tuple_validation_failed');
   replacePointer(join(root, 'release-tuples', 'known-good.json'), pointer);
-  return { publication_status: 'published', tuple_version_id: tupleVersionId, registry_version_id: registryVersionId, compiled_version_id: compiledVersionId };
+  return {
+    publication_status: 'published', tuple_version_id: tupleVersionId,
+    registry_version_id: registryVersionId, compiled_version_id: compiledVersionId,
+    member_fingerprints: memberHashes, manifest_fingerprint: sha256(readFileSync(join(tupleRoot, 'manifest.json'))),
+  };
 }

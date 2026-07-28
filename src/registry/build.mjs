@@ -18,6 +18,21 @@ function key(value) {
 }
 function fingerprint(value) { return createHash('sha256').update(key(value)).digest('hex'); }
 
+function completeTuple(members) {
+  const canonicalMembers = Object.fromEntries(
+    Object.entries(members).sort(([left], [right]) => left.localeCompare(right)),
+  );
+  const member_fingerprints = Object.fromEntries(
+    Object.entries(canonicalMembers).map(([name, value]) => [name, fingerprint(value)]),
+  );
+  return {
+    schema_version: 1,
+    members: canonicalMembers,
+    member_fingerprints,
+    tuple_id: `t1-${fingerprint(member_fingerprints).slice(0, 16)}`,
+  };
+}
+
 const MATERIAL_FIELDS = [
   ['name', 'informational'],
   ['type', 'dispatch-blocking'],
@@ -382,6 +397,15 @@ export function assembleRegistry(acquisition, options = {}) {
     available: false,
     cooldown_until_ms: null,
   };
+  const complete_tuple = completeTuple({
+    registry,
+    contracts,
+    relationships,
+    intent_policy: intentPolicy,
+    workflows,
+    health_policy: healthPolicy,
+    suggestion_reference: suggestionReference,
+  });
   return {
     registry,
     contracts,
@@ -392,6 +416,7 @@ export function assembleRegistry(acquisition, options = {}) {
     workflows,
     health_policy: healthPolicy,
     suggestion_reference: suggestionReference,
+    complete_tuple,
     ...(overlayResolution ? { overlays: overlayResolution } : {}),
   };
 }
