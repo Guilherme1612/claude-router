@@ -14,6 +14,9 @@ import { recoverReleaseTuple } from '../prompt/publish-index.mjs';
 export const MANIFEST_SCHEMA_VERSION = 1;
 export const RUNTIME_PROFILES = Object.freeze(['claude', 'codex', 'combined']);
 export const RECOMMENDATION_KINDS = Object.freeze(['command', 'skill', 'agent', 'workflow', 'mcp', 'tool']);
+export const ROUTE_COMPATIBILITY_MATRIX = Object.freeze(RUNTIME_PROFILES.flatMap(profile => (
+  RECOMMENDATION_KINDS.map(kind => `${profile}:${kind}`)
+)));
 
 export function fingerprint(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -556,6 +559,7 @@ export async function installRouter(options) {
       state: 'complete',
       runtime_profiles: RUNTIME_PROFILES,
       recommendation_kinds: RECOMMENDATION_KINDS,
+      route_matrix: ROUTE_COMPATIBILITY_MATRIX,
       roots: { claude: p.claudeRoot, codex: p.codexRoot },
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
