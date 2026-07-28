@@ -61,6 +61,12 @@ const WEIGHT_KEYS = Object.freeze(['recency', 'completion', 'opportunity', 'reve
 // candidate that drops/renames a key fails. Mirrors `compatible()` in
 // compile-index.mjs which checks contract version fields MATCH the existing
 // constants (not novelty).
+// WR-04: also validate the consumer-facing tier_boundaries 4-key shape so a
+// candidate with missing/malformed tier_boundaries cannot pass the gate,
+// get promoted, and have JSON.stringify silently omit the undefined field
+// from thresholds.json — planting a latent crash in loadThresholds
+// consumers.
+const TIER_KEYS = Object.freeze(['high', 'medium', 'low', 'low_usefulness']);
 function compatibleThresholds(candidate) {
   if (!candidate || typeof candidate !== 'object') return false;
   if (typeof candidate.policy_version !== 'string') return false;
@@ -71,6 +77,13 @@ function compatibleThresholds(candidate) {
   for (const k of WEIGHT_KEYS) {
     if (!keys.includes(k)) return false;
     if (typeof candidate.weights[k] !== 'number' || !Number.isFinite(candidate.weights[k])) return false;
+  }
+  if (!candidate.tier_boundaries || typeof candidate.tier_boundaries !== 'object') return false;
+  const tbKeys = Object.keys(candidate.tier_boundaries).sort();
+  if (tbKeys.length !== 4) return false;
+  for (const k of TIER_KEYS) {
+    if (!tbKeys.includes(k)) return false;
+    if (typeof candidate.tier_boundaries[k] !== 'number' || !Number.isFinite(candidate.tier_boundaries[k])) return false;
   }
   return true;
 }
