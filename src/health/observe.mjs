@@ -299,7 +299,12 @@ export function ingestTelemetryEvidence({
   // current record count, re-ingest from record 0 (file was rotated/truncated).
   // Legacy cursors wrote `lineCount` (raw lines incl. trailing empty); a cursor
   // with no `recordCount` triggers a safe full re-ingest (bounded by retention).
-  if (cursor && cursor.size <= size && typeof cursor.recordCount === 'number'
+  // WR-03: require strict growth (cursor.size < size) for the incremental path.
+  // A same-size rewrite with a different mtime would otherwise take the
+  // incremental path with a stale cursor.recordCount, silently skipping
+  // records overwritten at the start of the file. When size is equal but
+  // mtime differs, fall through to a full re-ingest (startLine stays 0).
+  if (cursor && cursor.size < size && typeof cursor.recordCount === 'number'
       && cursor.recordCount <= allRecords.length) {
     startLine = cursor.recordCount;
   }
