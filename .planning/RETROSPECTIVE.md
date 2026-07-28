@@ -88,3 +88,53 @@ Build the Autonomous Dual-Runtime Control Plane described in the approved design
 ### Next Milestone
 
 v1.3 not yet planned. Run `/gsd-new-milestone`.
+
+## v1.3 — Adaptive Local Capability Steward and Intent-Native Routing
+
+**Shipped:** 2026-07-28
+**Phases:** 6 (21–26) | **Plans:** 31 | **Tests:** 1102/1102 pass
+
+### What Was Built
+
+- Authoritative personalized inventory (Phase 21): framework-neutral local truth of installed `.claude`/`.codex` capabilities with evidence-gated stable identities.
+- Conservative contracts + typed relationship graph (Phase 22): normalized contracts, recommendation-only uncertainty, lifecycle-safe reverse invalidation.
+- Intent-safe state-aware execution (Phase 23): eight-disposition intent classifier + framework-neutral action mapper + SHA-256 approval gate behind a four-gate dispatch path.
+- Privacy-safe outcomes + capability health (Phase 24): bounded local outcome signals drive conservative health observations; no raw prompts persisted.
+- Advisory stewardship + guarded drafts (Phase 25): one high-confidence recommendation, preview-only drafts, no silent mutation.
+- Coherent publication + dual-runtime release (Phase 26): byte-identical atomic recoverable tuple publication + fail-closed release matrix (312-record fixture, warm p95 <25ms, max route <100ms, context 194B).
+
+### What Worked
+
+- Audit-first ship gate: `ship_with_deferred` verdict let BLOCKER 2 (live-install verification) defer cleanly to v1.3.1 without blocking 27/27 phase criteria.
+- Reusing the v1.2 verify/publish/canary/rollback lifecycle for v1.3 tuples avoided a second publication engine.
+- Framework-neutral contract-only authority kept `gsd-` tokens at 0 in dispatch logic — no framework hardcoding crept in.
+
+### What Was Inefficient
+
+- Phase 26 VERIFICATION.md used `status: verified` instead of the canonical `status: passed`, which made `init.manager` report `all_phases_verified=false` (projection lag) and nearly forced an override closeout — a one-character frontmatter drift created a false milestone-blocker.
+- Release matrix runs `mkdtempSync` + `testMode: true` fixtures, so it can pass while real installs stay stale (BLOCKER 2) — the gap was only caught by the milestone audit, not by the release gate itself.
+- Orphaned temp-dir watchers from prior sessions survived into v1.3 activation work, polluting watcher-reconcile observations.
+
+### Patterns Established
+
+- Canonical verification status string is `passed`; any other value fails closed in the readiness projection. Audit verdicts are the source of truth when projection lags.
+- Release-gate hardening (live-install verification) is a milestone-level deferral, distinct from phase success criteria — track in STATE.md Deferred Items, close in a `.1` follow-up milestone.
+- Watcher-reconcile activation must be confirmed from the operator's own shell so the daemon is theirs, not the build session's.
+
+### Key Lessons
+
+- A non-canonical frontmatter string in one phase artifact can mask a fully-verified milestone — normalize status fields before trusting projection queries.
+- A passing release matrix against fixtures is not a passing release against real installs — add a read-only live-install verification stage before declaring a release gate closed.
+- Watcher process hygiene is part of activation correctness, not just test cleanliness — orphaned watchers produce false stale-pointer signals.
+
+### Tech Debt Carried Forward
+
+- BLOCKER 2: live-install release verification stage (REL-05/06/07) — v1.3.1.
+- Orphaned temp-dir watcher cleanup — v1.3.1.
+- router.safety-release live-env failures — v1.3.1.
+- Watcher-reconcile → activation_status=activated confirmation from operator shell — v1.3.1.
+- v2 per-prompt source descriptors (Phase 19) — still carried.
+
+### Next Milestone
+
+v1.3.1 release-gate hardening (deferred items above). Run `/gsd-new-milestone`.
