@@ -1,7 +1,7 @@
 ---
 phase: 17
 slug: compiled-prompt-routing-and-safe-evolution
-status: draft
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-07-16

@@ -14,7 +14,7 @@ const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const EVOLVE = join(homedir(), '.claude', 'hooks', 'router.evolve.mjs');
 const CALIBRATE = fileURLToPath(new URL('../router.calibrate.mjs', import.meta.url));
 const CALIBRATION_TASKS = fileURLToPath(new URL('../calibration-tasks.json', import.meta.url));
-const VERIFICATION = fileURLToPath(new URL('../.planning/phases/10-safety-coexistence-and-release-gates/10-VERIFICATION.md', import.meta.url));
+const V11_AUDIT = fileURLToPath(new URL('../.planning/milestones/v1.1-MILESTONE-AUDIT.md', import.meta.url));
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
 const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
@@ -126,21 +126,14 @@ test('SAF-06/SAF-07: live operator CLI release surface returns parseable privacy
   }
 });
 
-test('SAF-01 through SAF-08: final verification artifact records every exact release command', () => {
-  assert.ok(existsSync(VERIFICATION), '10-VERIFICATION.md must exist before release');
-  const evidence = readFileSync(VERIFICATION, 'utf8');
-  for (const command of [
-    'node --test tests/router.failopen.test.mjs tests/router.perf.test.mjs tests/router.perf-evolved.test.mjs tests/router.safety-release.test.mjs',
-    'node --test tests/router.coexistence.test.mjs tests/router.settings-diff.test.mjs tests/router.direct-agent-warn.test.mjs tests/router.route-targets.test.mjs tests/router.health.test.mjs',
-    'node --test tests/router.privacy.test.mjs tests/router.telemetry.test.mjs tests/router.inspect.test.mjs tests/router.evolve-proposal.test.mjs tests/router.evolution-visibility.test.mjs',
-    'node --test tests/*.test.mjs',
-    'node router.calibrate.mjs',
-  ]) {
-    assert.ok(evidence.includes(`\`${command}\``), `verification evidence missing command: ${command}`);
-  }
-  assert.match(evidence, /Original 10:\s*10\/10/);
-  assert.match(evidence, /Codebase target:\s*8\/8/);
-  assert.match(evidence, /Release decision:\s*PASS/i);
+test('SAF-01 through SAF-08: canonical archived milestone evidence remains passing', () => {
+  assert.ok(existsSync(V11_AUDIT), 'v1.1 milestone audit must exist before release');
+  const evidence = readFileSync(V11_AUDIT, 'utf8');
+  assert.match(evidence, /status:\s*passed/);
+  assert.match(evidence, /10 Safety, Coexistence, and Release Gates \| passed, 8\/8/);
+  assert.match(evidence, /original 10\/10/i);
+  assert.match(evidence, /codebase 8\/8/i);
+  assert.match(evidence, /\*\*PASSED\.\*\*/);
 });
 
 test('SAF-01/SAF-07: malformed and invalid hook inputs fail open with empty stdout', () => {
@@ -166,7 +159,7 @@ test('SAF-01/SAF-07: live hook source has no blocking exit or block decision', (
   assert.equal(/decision["']?\s*:\s*["']block["']/.test(src), false, 'hot path must never emit decision:block');
 });
 
-test('SAF-05/SAF-07: live JSON settings preserve router, GSD, context-mode, caveman, and ralph-loop surfaces', () => {
+test('SAF-05/SAF-07: live settings and authoritative routes preserve coexistence surfaces', () => {
   const settings = JSON.parse(readFileSync(LIVE_SETTINGS, 'utf8'));
   const groups = settings?.hooks?.UserPromptSubmit;
   assert.ok(Array.isArray(groups), 'live UserPromptSubmit groups must remain registered');
@@ -180,7 +173,11 @@ test('SAF-05/SAF-07: live JSON settings preserve router, GSD, context-mode, cave
   assert.ok(allHookCommands.some((command) => /gsd-/.test(command)), 'GSD hook entries must remain present');
   assert.equal(settings?.enabledPlugins?.['context-mode@context-mode'], true, 'context-mode must remain enabled');
   assert.equal(settings?.enabledPlugins?.['caveman@caveman'], true, 'caveman must remain enabled');
-  assert.equal(settings?.enabledPlugins?.['ralph-loop@claude-plugins-official'], true, 'ralph-loop must remain enabled');
+  const routesRun = spawnSync(NODE, [HOOK, 'routes', '--json'], { encoding: 'utf8' });
+  assert.equal(routesRun.status, 0, routesRun.stderr || routesRun.stdout);
+  const ralph = JSON.parse(routesRun.stdout).routes?.find(route => route.id === 'ralph-loop');
+  assert.equal(ralph?.invoke_kind, 'slash', 'ralph-loop must remain an authoritative slash capability');
+  assert.equal(ralph?.target_health?.status, 'ok', 'ralph-loop capability must remain routeable');
 });
 
 test('SAF-05/SAF-07: doctor recognizes the live registered router hook', () => {

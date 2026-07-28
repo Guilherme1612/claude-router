@@ -3,7 +3,19 @@ import { canonicalizeCapability, stableStringify } from './schema.mjs';
 
 function scopeSuffix(scope) {
   if (!scope || scope.kind === 'global') return '';
+  if (scope.kind === 'user') return `@user:${encodeURIComponent(scope.identity)}`;
   return `@${scope.kind}:${encodeURIComponent(scope.repository)}:${encodeURIComponent(scope.worktree)}`;
+}
+
+function sourceIdentity(record) {
+  const sources = Array.isArray(record.provenance) ? record.provenance : [];
+  if (!sources.length) return null;
+  return sources.map(source => [
+    source.runtime,
+    source.scope,
+    source.logical_root,
+    source.relative_path,
+  ].map(value => encodeURIComponent(value)).join(':')).sort().join('+');
 }
 
 export function stableCapabilityId(record) {
@@ -15,17 +27,25 @@ export function stableCapabilityId(record) {
     && record.shared_origin.identity.trim()) {
     return `origin:${record.shared_origin.identity.trim()}${suffix}`;
   }
-  const variant = record.runtime_variants?.find((entry) => entry.runtime === record.invocation?.runtime)
-    || record.runtime_variants?.[0];
-  const runtime = record.invocation?.runtime || variant?.runtime;
-  const nativeIdentity = variant?.native_identity;
-  if (!runtime || !record.type || !nativeIdentity) {
-    throw new TypeError('capability identity requires runtime, type, and native identity');
+  const source = sourceIdentity(record);
+  if (!source || !record.type) {
+    throw new TypeError('capability fallback identity requires type and portable source provenance');
   }
-  return `${runtime}:${record.type}:${nativeIdentity}${suffix}`;
+  return `path:${record.type}:${source}${suffix}`;
 }
 
 export function contentFingerprint(value) {
-  const canonical = value?.schema_version === 1 ? canonicalizeCapability(value) : value;
+  let canonical = value;
+  if (value?.schema_version === 1) {
+    const normalized = canonicalizeCapability(value);
+    canonical = value.content !== undefined
+      ? { type: normalized.type, content: normalized.content }
+      : {
+          type: normalized.type,
+          source_fingerprints: normalized.provenance
+            .map(source => source.source_fingerprint)
+            .sort(),
+        };
+  }
   return createHash('sha256').update(stableStringify(canonical), 'utf8').digest('hex');
 }

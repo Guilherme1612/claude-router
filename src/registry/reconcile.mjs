@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { stableCapabilityId } from './identity.mjs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 import { reconcileHookInventory } from './hook-reconcile.mjs';
+import { relationshipReferences } from './relationships.mjs';
 
 function fingerprint(value) {
   return createHash('sha256').update(typeof value === 'string' ? value : stableStringify(value), 'utf8').digest('hex');
@@ -45,7 +46,12 @@ function canonicalCandidate(candidate) {
     validateCapability(record);
     return { id: stableCapabilityId(record), ...canonicalizeCapability(record) };
   }).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
-  return { schema_version: candidate.schema_version ?? 1, records };
+  return {
+    schema_version: candidate.schema_version ?? 1,
+    records,
+    ...(candidate.relationships ? { relationships: candidate.relationships } : {}),
+    ...(Array.isArray(candidate.rejected_overlays) ? { rejected_overlays: candidate.rejected_overlays } : {}),
+  };
 }
 
 function canonicalAliases(aliases) {
@@ -55,6 +61,105 @@ function canonicalAliases(aliases) {
     if (typeof alias.target_id !== 'string' || !alias.target_id.trim()) throw new TypeError('alias.target_id must be a non-empty string');
     return { id: alias.id.trim(), target_id: alias.target_id.trim() };
   }).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+}
+
+const REFERENCE_TYPES = new Set([
+  'alias', 'equivalence', 'workflow', 'correction', 'mapping', 'compiled-route', 'relationship',
+  'dependency', 'adapter', 'inference-rule', 'manifest', 'negative-evidence',
+]);
+
+export const INVALIDATION_CLASSES = Object.freeze([
+  'node', 'edge', 'dependency', 'adapter', 'inference-rule', 'manifest', 'correction', 'negative-evidence',
+]);
+
+function canonicalReferences(input, candidate, events) {
+  if (!input || typeof input !== 'object' || input.schema_version !== 1 || !Array.isArray(input.edges)) {
+    throw new TypeError('references must be a version 1 graph with an edges array');
+  }
+  const edges = input.edges.map(edge => {
+    if (!edge || typeof edge !== 'object') throw new TypeError('reference edge must be an object');
+    for (const field of ['id', 'type', 'from_id', 'to_id']) {
+      if (typeof edge[field] !== 'string' || !edge[field].trim()) {
+        throw new TypeError(`reference edge ${field} must be a non-empty string`);
+      }
+    }
+    if (!REFERENCE_TYPES.has(edge.type)) throw new TypeError(`unsupported reference edge type: ${edge.type}`);
+    return {
+      id: edge.id.trim(),
+      type: edge.type,
+      from_id: edge.from_id.trim(),
+      to_id: edge.to_id.trim(),
+    };
+  }).sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+  if (new Set(edges.map(edge => edge.id)).size !== edges.length) {
+    throw new TypeError('reference edge ids must be unique');
+  }
+  const known = new Set(candidate.records.map(record => record.id));
+  for (const edge of edges) known.add(edge.from_id);
+  for (const event of events) {
+    if (typeof event?.canonical_id === 'string') known.add(event.canonical_id);
+  }
+  for (const edge of edges) {
+    if (!known.has(edge.to_id)) throw new TypeError(`dangling unsafe reference target: ${edge.to_id}`);
+  }
+  return { schema_version: 1, edges };
+}
+
+function invalidationClosure(candidate, events, references) {
+  const seeds = new Set();
+  for (const event of events) {
+    const changeClass = event?.change_class;
+    if (changeClass !== undefined && !INVALIDATION_CLASSES.includes(changeClass)) {
+      throw new TypeError(`unsupported invalidation class: ${changeClass}`);
+    }
+    if ((['removed', 'replaced', 'disabled'].includes(event?.primary) || changeClass)
+      && typeof event.canonical_id === 'string') seeds.add(event.canonical_id);
+    for (const id of event?.affected_ids || []) {
+      if (typeof id !== 'string' || !id.trim()) throw new TypeError('affected_ids must contain non-empty strings');
+      seeds.add(id.trim());
+    }
+  }
+  for (const record of candidate.records) {
+    if (record.enabled === false || record.lifecycle !== 'ready'
+      || record.dependencies.items.some(dependency => !dependency.available)) {
+      seeds.add(record.id);
+    }
+  }
+  const reverse = new Map();
+  for (const edge of references.edges) {
+    if (!reverse.has(edge.to_id)) reverse.set(edge.to_id, []);
+    reverse.get(edge.to_id).push(edge);
+  }
+  for (const edges of reverse.values()) {
+    edges.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+  }
+  const invalidated = new Set(seeds);
+  const queue = [...seeds].sort();
+  const evidence = [];
+  for (let index = 0; index < queue.length; index += 1) {
+    const target = queue[index];
+    for (const edge of reverse.get(target) || []) {
+      evidence.push({
+        edge_id: edge.id,
+        reference_type: edge.type,
+        invalidated_id: edge.from_id,
+        invalidated_by: target,
+      });
+      if (invalidated.has(edge.from_id)) continue;
+      invalidated.add(edge.from_id);
+      queue.push(edge.from_id);
+    }
+  }
+  evidence.sort((a, b) => stableStringify(a).localeCompare(stableStringify(b)));
+  const invalidatedIds = [...invalidated].sort();
+  const liveEdges = references.edges.filter(edge => (
+    !invalidated.has(edge.from_id) && !invalidated.has(edge.to_id)
+  ));
+  return {
+    invalidated_ids: invalidatedIds,
+    invalidation_evidence: evidence,
+    references: { schema_version: 1, edges: liveEdges },
+  };
 }
 
 function sourceCompatible(event, target) {
@@ -188,6 +293,40 @@ export function reconcileCandidate(options = {}) {
     const lifecycle = options.lifecycle && typeof options.lifecycle === 'object' ? options.lifecycle : { events: [], diagnostics: [] };
     const events = Array.isArray(lifecycle.events) ? lifecycle.events : [];
     const diagnostics = Array.isArray(lifecycle.diagnostics) ? lifecycle.diagnostics : [];
+    const relationshipEndpointIds = [
+      ...candidate.records.map(record => record.id),
+      ...events.map(event => event?.canonical_id).filter(value => typeof value === 'string'),
+    ];
+    const referenceInput = options.references ?? { schema_version: 1, edges: [] };
+    const correctionEdges = (options.overlays?.accepted || []).map(overlay => ({
+      id: `overlay:${overlay.overlay_id}`,
+      type: 'correction',
+      from_id: overlay.overlay_id,
+      to_id: overlay.target_id,
+    }));
+    const relationshipEdges = options.relationships === undefined
+      ? []
+      : relationshipReferences(options.relationships, relationshipEndpointIds);
+    const combinedReferences = {
+      schema_version: referenceInput.schema_version,
+      edges: [
+        ...referenceInput.edges,
+        ...relationshipEdges,
+        ...correctionEdges,
+      ],
+    };
+    const references = canonicalReferences(
+      combinedReferences,
+      candidate,
+      events,
+    );
+    const invalidation = invalidationClosure(candidate, events, references);
+    options.evaluateReferences?.({
+      candidate: structuredClone(candidate),
+      references: structuredClone(invalidation.references),
+      invalidated_ids: structuredClone(invalidation.invalidated_ids),
+      invalidation_evidence: structuredClone(invalidation.invalidation_evidence),
+    });
     const claims = new Map();
     for (const alias of aliases) {
       if (!claims.has(alias.id)) claims.set(alias.id, new Set());
@@ -247,11 +386,16 @@ export function reconcileCandidate(options = {}) {
       }
     }
     for (const record of candidate.records) {
-      if (record.lifecycle === 'ready' && record.dispatchable && record.invocation.command.trim()) continue;
+      if (record.lifecycle === 'ready' && record.dispatchable && record.invocation.command?.trim()) continue;
       verdicts.push(verdict({
         code: 'target_not_dispatchable',
         subject: { kind: 'target', id: record.id },
-        evidence: { lifecycle: record.lifecycle, runtime: record.invocation.runtime, scope: record.scope },
+        evidence: {
+          lifecycle: record.lifecycle,
+          invocation_availability: record.invocation.availability,
+          ...(record.invocation.runtime ? { runtime: record.invocation.runtime } : {}),
+          scope: record.scope,
+        },
         reason: 'The canonical target is not ready and invocable.',
         correctiveAction: 'Repair or remove the target before publishing this candidate.',
       }));
@@ -267,10 +411,21 @@ export function reconcileCandidate(options = {}) {
       verdicts: structuredClone(verdicts),
       disposition: hasBlocking ? 'quarantined' : 'eligible',
     });
-    const canonical = { disposition: hasBlocking ? 'quarantined' : 'eligible', verdicts };
+    const canonical = {
+      disposition: hasBlocking ? 'quarantined' : 'eligible',
+      verdicts,
+      ...invalidation,
+      invalidation_classes: [...INVALIDATION_CLASSES],
+    };
     return {
       ...canonical,
       report_fingerprint: fingerprint(canonical),
+      invalidation_fingerprint: fingerprint({
+        classes: INVALIDATION_CLASSES,
+        invalidated_ids: invalidation.invalidated_ids,
+        evidence: invalidation.invalidation_evidence,
+        references: invalidation.references,
+      }),
       candidate_fingerprint: fingerprint(candidate),
       active_bytes: active.bytes,
       active_fingerprint: active.fingerprint,

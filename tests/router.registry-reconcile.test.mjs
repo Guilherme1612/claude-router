@@ -215,3 +215,70 @@ test('unsafe hook inventory composes with candidate gates and preserves active a
   assert.equal(result.active_bytes, active.bytes);
   assert.equal(result.active_fingerprint, active.fingerprint);
 });
+
+test('[phase21-red:mutation] typed reference closure is complete before callbacks and deterministic', () => {
+  const records = [
+    capability({ name: 'healthy' }),
+    capability({ name: 'disabled', enabled: false, dispatchable: false, invocation: { availability: 'unavailable', reason: 'disabled' } }),
+  ];
+  const edges = [
+    { id: 'compiled', type: 'compiled-route', from_id: 'route:compiled', to_id: 'mapping:one' },
+    { id: 'mapping', type: 'mapping', from_id: 'mapping:one', to_id: 'workflow:one' },
+    { id: 'workflow', type: 'workflow', from_id: 'workflow:one', to_id: 'equivalence:one' },
+    { id: 'equivalence', type: 'equivalence', from_id: 'equivalence:one', to_id: 'alias:one' },
+    { id: 'alias', type: 'alias', from_id: 'alias:one', to_id: 'router/disabled' },
+    { id: 'correction', type: 'correction', from_id: 'correction:one', to_id: 'route:compiled' },
+  ];
+  const observed = [];
+  const run = (recordOrder, edgeOrder) => reconcileCandidate({
+    candidate: candidate(recordOrder),
+    references: { schema_version: 1, edges: edgeOrder },
+    evaluateReferences: value => observed.push(value),
+  });
+  const forward = run(records, edges);
+  const reverse = run([...records].reverse(), [...edges].reverse());
+  assert.equal(stableStringify(forward), stableStringify(reverse));
+  assert.deepEqual(forward.invalidated_ids, [
+    'alias:one', 'correction:one', 'mapping:one', 'route:compiled',
+    'router/disabled', 'workflow:one', 'equivalence:one',
+  ].sort());
+  assert.ok(observed.every(value => value.references.edges.length === 0));
+});
+
+test('[phase21-red:mutation] removal replacement and dependency loss seed transitive invalidation', () => {
+  const dependent = capability({
+    name: 'dependent',
+    dependencies: { state: 'declared', items: [{ id: 'router/missing', available: false }] },
+    dispatchable: false,
+  });
+  const edges = [
+    { id: 'dependency-route', type: 'compiled-route', from_id: 'route:dependency', to_id: 'router/dependent' },
+    { id: 'removed-route', type: 'mapping', from_id: 'mapping:removed', to_id: 'router/removed' },
+    { id: 'replacement-route', type: 'correction', from_id: 'correction:old', to_id: 'router/replaced' },
+  ];
+  const result = reconcileCandidate({
+    candidate: candidate([dependent]),
+    lifecycle: { events: [
+      { canonical_id: 'router/removed', primary: 'removed' },
+      { canonical_id: 'router/replaced', primary: 'replaced' },
+    ], diagnostics: [] },
+    references: { schema_version: 1, edges },
+  });
+  assert.deepEqual(result.invalidated_ids, [
+    'correction:old', 'mapping:removed', 'route:dependency',
+    'router/dependent', 'router/removed', 'router/replaced',
+  ].sort());
+});
+
+test('[phase21-red:mutation] malformed or dangling unsafe reference graphs preserve active bytes', () => {
+  const active = activeSnapshot();
+  for (const references of [
+    { schema_version: 99, edges: [] },
+    { schema_version: 1, edges: [{ id: 'bad', type: 'alias', from_id: 'alias:bad', to_id: 'missing' }] },
+  ]) {
+    const result = reconcileCandidate({ candidate: candidate(), active, references });
+    assert.equal(result.disposition, 'quarantined');
+    assert.equal(result.active_bytes, active.bytes);
+    assert.equal(result.active_fingerprint, active.fingerprint);
+  }
+});

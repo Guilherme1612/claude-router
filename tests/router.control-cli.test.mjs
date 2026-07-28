@@ -8,11 +8,12 @@ import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
 import { activateCandidate, writeImmutableVersion } from '../src/registry/activate.mjs';
-import { runRouterControl } from '../src/cli/router-control.mjs';
+import * as routerControl from '../src/cli/router-control.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
+const { runRouterControl } = routerControl;
 const hash = value => createHash('sha256').update(stableStringify(value)).digest('hex');
 
 function contextCapsule(overrides = {}) {
@@ -287,5 +288,164 @@ test('corrupt active history returns stable recovery guidance before projection'
     const body = JSON.parse(result.stdout);
     assert.equal(body.reason_code, 'invalid_active_version');
     assert.equal(body.data.source_verdict.reason_code, 'verification_not_trusted');
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('[phase21-red:inspection] inventory summary and detail preserve text JSON parity and read-only state', async () => {
+  const f = await fixture();
+  try {
+    const before = snapshot(f.root);
+    const state = {
+      state: 'reconciling',
+      reason_code: 'reconciliation_in_progress',
+      active_generation_id: 'generation-2',
+      candidate_generation_id: 'generation-3',
+      last_complete_reconciliation: 1_785_084_000_000,
+      trigger: 'filesystem-event',
+      pending_changes: ['fixture_project'],
+      stale_roots: [],
+      unreadable_roots: [],
+      next_recovery_action: 'authoritative-repair',
+    };
+    const summary = runRouterControl({
+      argv: ['inventory', '--limit', '1', '--offset', '0', '--format', 'json', '--owned-root', f.root],
+      dependencies: { inventoryState: () => state },
+    });
+    assert.equal(summary.exitCode, 0);
+    assert.equal(summary.result.command, 'inventory');
+    assert.equal(summary.result.ok, true);
+    assert.deepEqual(
+      Object.keys(summary.result.data).slice(0, 11),
+      [
+        'state',
+        'active_generation_id',
+        'candidate_generation_id',
+        'last_complete_reconciliation',
+        'trigger',
+        'pending_changes',
+        'stale_roots',
+        'unreadable_roots',
+        'record_count',
+        'diagnostics',
+        'total',
+      ],
+    );
+    assert.equal(summary.result.data.state, 'reconciling');
+    assert.deepEqual(snapshot(f.root), before);
+
+    assert.equal(typeof routerControl.renderInventoryText, 'function');
+    const text = routerControl.renderInventoryText(summary.result);
+    const labels = text.trim().split('\n').map(line => line.split(' ', 1)[0]);
+    assert.deepEqual(labels.slice(0, 13), [
+      'COMMAND', 'OK', 'REASON', 'STATE', 'ACTIVE_GENERATION_ID',
+      'CANDIDATE_GENERATION_ID', 'LAST_COMPLETE_RECONCILIATION', 'TRIGGER',
+      'PENDING_CHANGES', 'STALE_ROOTS', 'UNREADABLE_ROOTS', 'RECORD_COUNT',
+      'DIAGNOSTICS',
+    ]);
+    assert.doesNotMatch(text, /\u001b|[\u0000-\u0008\u000b\u000c\u000e-\u001f]/);
+
+    const stableId = summary.result.data.records[0].stable_id;
+    const detail = runRouterControl({
+      argv: ['inventory', '--id', stableId, '--format', 'json', '--owned-root', f.root],
+      dependencies: { inventoryState: () => state },
+    });
+    assert.equal(detail.exitCode, 0);
+    assert.equal(detail.result.data.stable_id, stableId);
+    assert.deepEqual(snapshot(f.root), before);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('[phase21-red:inspection] inventory uses only exact operational states and fails closed on malformed state', async () => {
+  const f = await fixture();
+  try {
+    for (const stateName of ['current', 'reconciling', 'degraded', 'failed']) {
+      const outcome = runRouterControl({
+        argv: ['inventory', '--format', 'json', '--owned-root', f.root],
+        dependencies: {
+          inventoryState: () => ({
+            state: stateName,
+            reason_code: `inventory_${stateName}`,
+            active_generation_id: 'generation-2',
+            candidate_generation_id: stateName === 'current' ? null : 'generation-3',
+            last_complete_reconciliation: 1_785_084_000_000,
+            trigger: 'fixture',
+            pending_changes: stateName === 'current' ? [] : ['fixture_project'],
+            stale_roots: stateName === 'degraded' ? ['fixture_project'] : [],
+            unreadable_roots: [],
+            next_recovery_action: stateName === 'current' ? null : 'authoritative-repair',
+          }),
+        },
+      });
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.ok, true);
+      assert.equal(outcome.result.data.state, stateName);
+    }
+
+    const malformed = runRouterControl({
+      argv: ['inventory', '--owned-root', f.root],
+      dependencies: { inventoryState: () => ({ state: 'healthy' }) },
+    });
+    assert.equal(malformed.exitCode, 4);
+    assert.equal(malformed.result.ok, false);
+    assert.equal(malformed.result.reason_code, 'unsafe_inventory_projection');
+    assert.doesNotMatch(JSON.stringify(malformed), /stack|\/Users\//);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test('[phase22-red:inspection] contract parser dispatches list detail and relationships without mutation', async () => {
+  const f = await fixture();
+  try {
+    const before = snapshot(f.root);
+    const contract = {
+      schema_version: 1,
+      policy_version: 'contract-policy-v1',
+      disposition: 'recommendation-only',
+      reason_codes: ['risk_missing'],
+      fields: {},
+    };
+    const eligibility = {
+      schema_version: 1,
+      policy_version: 'eligibility-policy-v1',
+      eligible: false,
+      recommendation_only: true,
+      gates: { risk: 'unknown' },
+      reason_codes: ['risk_unknown'],
+    };
+    const records = [{ id: 'router/alpha', stable_id: 'router/alpha', contract, eligibility }];
+    const relationships = {
+      schema_version: 1,
+      policy_version: 'relationship-rules-v1',
+      edges: [],
+      candidates: [{
+        id: 'relationship:risk',
+        type: 'conflict',
+        source_id: 'router/alpha',
+        target_id: 'router/missing',
+        confidence_basis_points: 0,
+        freshness: 'unknown',
+        evidence: [],
+        validation_state: 'inactive',
+        reason_codes: ['relationship_dangling_target'],
+      }],
+    };
+    const dependencies = { contractRegistry: () => ({ records, relationships, rejected_overlays: [] }) };
+    for (const argv of [
+      ['contract', '--limit', '1', '--offset', '0', '--format', 'json', '--owned-root', f.root],
+      ['contract', '--id', 'router/alpha', '--format', 'json', '--owned-root', f.root],
+      ['contract', 'relationships', '--format', 'json', '--owned-root', f.root],
+    ]) {
+      const outcome = runRouterControl({ argv, dependencies });
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.ok, true);
+      assert.deepEqual(snapshot(f.root), before);
+    }
+    for (const argv of [
+      ['contract', '--id', '../escape', '--owned-root', f.root],
+      ['contract', 'unknown', '--owned-root', f.root],
+      ['contract', '--limit', '0', '--owned-root', f.root],
+    ]) {
+      assert.notEqual(runRouterControl({ argv, dependencies }).exitCode, 0);
+      assert.deepEqual(snapshot(f.root), before);
+    }
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });

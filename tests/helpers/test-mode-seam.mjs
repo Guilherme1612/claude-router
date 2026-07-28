@@ -1,4 +1,9 @@
-import { readFileSync } from 'node:fs';
+import {
+  existsSync, mkdirSync, readFileSync, rmSync, writeFileSync,
+} from 'node:fs';
+import { dirname, join } from 'node:path';
+import { buildFullRegistry } from '../../src/registry/build.mjs';
+import { contentFingerprint, stableCapabilityId } from '../../src/registry/identity.mjs';
 import { createTestActivationVerifier, REQUIRED_ACTIVATION_GATES } from '../../src/registry/validate.mjs';
 import { runRegistryWatcher } from '../../src/registry/watcher.mjs';
 
@@ -10,6 +15,46 @@ export const stubVerificationRunners = Object.fromEntries(
     async run() { return { passed: true, reason_code: 'passed', measured: {}, threshold: {} }; },
   })]),
 );
+
+export function safeFixtureContractOverlays({
+  claudeRoot, codexRoot, projectRoot, scopeId, artifacts,
+}) {
+  const buildOptions = {
+    claudeRoot, codexRoot, ...(projectRoot ? { projectRoot, scopeId } : {}),
+  };
+  return artifacts.map(({ runtime, relativePath, bytes, rootPath }, index) => {
+    const root = rootPath || (runtime === 'claude' ? claudeRoot : codexRoot);
+    const rootExisted = existsSync(root);
+    const path = join(root, relativePath);
+    const previous = existsSync(path) ? readFileSync(path) : null;
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, bytes);
+    const record = buildFullRegistry(buildOptions).registry.records.find(candidate => (
+      candidate.provenance.some(source => source.runtime === runtime && source.relative_path === relativePath)
+    ));
+    if (previous) writeFileSync(path, previous);
+    else rmSync(path);
+    if (!rootExisted) rmSync(root, { recursive: true, force: true });
+    if (!record) throw new Error(`fixture overlay target not discovered: ${runtime}:${relativePath}`);
+    const fingerprint = contentFingerprint(record);
+    return {
+      schema_version: 1,
+      kind: 'contract-overlay-v1',
+      overlay_id: `fixture-safe:${index}:${fingerprint.slice(0, 12)}`,
+      provenance: 'correction',
+      binding: {
+        stable_id: stableCapabilityId(record),
+        source_fingerprint: fingerprint,
+        scope: record.scope,
+        runtime: record.invocation.runtime || record.runtime_variants[0].runtime,
+      },
+      fields: {
+        reversibility: { value: 'reversible' },
+        risk: { value: 'low' },
+      },
+    };
+  });
+}
 
 // In-process controller launcher for the opt-in seam. installRouter writes the controller
 // config to disk WITHOUT verification_runners (functions are not JSON-serializable); this
@@ -61,7 +106,7 @@ export function inProcessControllerLauncher(runners, holder = {}) {
     };
     holder.child = child;
     let handle = null;
-    (async () => {
+    holder.ready = (async () => {
       try {
         if (!configPath) throw new Error('controller launcher missing --config');
         const config = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -74,6 +119,7 @@ export function inProcessControllerLauncher(runners, holder = {}) {
       } catch (error) {
         child.exitCode = 1;
         child.error = error;
+        throw error;
       }
     })();
     return child;

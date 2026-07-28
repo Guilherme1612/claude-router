@@ -4,11 +4,13 @@ import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
-import { installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
+import { spawn, spawnSync } from 'node:child_process';
+import { fingerprint, installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { buildFullRegistry } from '../src/registry/build.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
+import { safeFixtureContractOverlays } from './helpers/test-mode-seam.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = join(REPO_ROOT, 'install-router.mjs');
@@ -45,6 +47,21 @@ function snapshot(root) {
       : [{ path, type: 'file', bytes: readFileSync(absolute).toString('base64') }];
   });
   return walk(root);
+}
+
+function assertRelativeImportClosure(root) {
+  for (const entry of snapshot(root) || []) {
+    if (entry.type !== 'file' || !entry.path.endsWith('.mjs')) continue;
+    const source = readFileSync(join(root, entry.path), 'utf8');
+    const imports = source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"](\.[^'"]+)['"]/g);
+    for (const [, specifier] of imports) {
+      assert.equal(
+        existsSync(resolve(root, dirname(entry.path), specifier)),
+        true,
+        `${entry.path} imports missing deployed module ${specifier}`,
+      );
+    }
+  }
 }
 
 async function waitUntil(predicate, timeoutMs = 2_000) {
@@ -84,7 +101,16 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 8 = 4 evolution modules (Phase 20-01: canary-controller, evidence, perf-measure, telemetry-bridge) × 2 roots
     // + 2 = 1 evolution module (Phase 20-02: candidate-calibration-route) × 2 roots
     // + 1 = codex router.mjs (Task 260723-l9s: codex UserPromptSubmit binding)
-    assert.equal(manifest.files.length, 67);
+    // + 24 = 12 Phase 22-25 dependency-closure modules × 2 roots
+    // = 91 (modules-only deploy)
+    // + 90 = 45 moduleNames mirrored to src/ × 2 roots (including the complete
+    //   registry, health, steward, and approval dependency closure)
+    //   gate fixtures + router.calibrate.mjs `../src/...` imports resolve in production)
+    // + 4 = 2 gate entrypoints (router.calibrate.mjs, calibration-tasks.json) × 2 roots
+    // + 20 = 10 gate fixtures (tests/*.test.mjs) × 2 roots (Blocker-2b: production
+    //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality)
+    // = 213
+    assert.equal(manifest.files.length, 213);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -94,6 +120,7 @@ test('one command installs router, binding, Codex marker, and complete ownership
     for (const runtimeRoot of [join(f.options.claudeRoot, 'router'), join(f.options.codexRoot, 'router')]) {
       const control = join(runtimeRoot, 'modules', 'cli', 'router-control.mjs');
       assert.equal(existsSync(control), true);
+      assertRelativeImportClosure(join(runtimeRoot, 'modules'));
       const imported = await import(`${new URL(`file://${control}`).href}?fixture=${Date.now()}`);
       assert.equal(typeof imported.runRouterControl, 'function');
       for (const module of ['map.mjs', 'validate.mjs', 'activate.mjs', 'watcher.mjs']) {
@@ -140,6 +167,41 @@ test('post-mutation failure restores exact fresh-install state', async () => {
     await assert.rejects(installRouter({ ...f.options, afterMutation() { throw new Error('injected readiness failure'); } }), /injected readiness failure/);
     assert.deepEqual(snapshot(f.root), before);
   } finally { await cleanup(f); }
+});
+
+test('readiness accepts controller-owned candidate and report mutations', async () => {
+  const f = fixture();
+  let child;
+  try {
+    const candidatePath = join(f.options.claudeRoot, 'router', 'candidate', 'registry.json');
+    const reportPath = join(f.options.claudeRoot, 'router', 'candidate', 'report.json');
+    const statusPath = join(f.options.claudeRoot, 'router', 'controller', 'status.json');
+    const result = await installRouter({
+      ...f.options,
+      afterMutation() {
+        writeFileSync(candidatePath, '{"records":[{"id":"runtime"}],"schema_version":1}\n');
+        writeFileSync(reportPath, '{"runtime_reconciliation":true}\n');
+      },
+      launchController(_binary, args) {
+        child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+        const configPath = args[args.indexOf('--config') + 1];
+        const config = JSON.parse(readFileSync(configPath, 'utf8'));
+        writeFileSync(statusPath, JSON.stringify({
+          schema_version: 1,
+          state: 'ready',
+          instance_id: 'mutable-state-test',
+          pid: child.pid,
+          heartbeat: Date.now(),
+          configuration_fingerprint: fingerprint(stableStringify(config)),
+        }) + '\n');
+        return child;
+      },
+    });
+    assert.equal(result.ready, true);
+  } finally {
+    child?.kill('SIGTERM');
+    await cleanup(f);
+  }
 });
 
 test('post-mutation repair failure restores every owned byte and manifest', async () => {
@@ -284,22 +346,34 @@ test('owned controller restarts cooperatively with a new ready instance', async 
 
 test('live mutation reconciles within two seconds and stopped-controller mutation repairs on restart', async () => {
   const f = fixture();
+  const liveBytes = '---\nname: live-skill\ncanonical_identity: router/live-skill\ncommand: /live-skill\ndependencies: []\n---\n# live\n';
+  const downtimeBytes = '---\nname: downtime-skill\ncanonical_identity: router/downtime-skill\ncommand: $downtime\ndependencies: []\n---\n# downtime\n';
+  const contractOverlays = safeFixtureContractOverlays({
+    claudeRoot: f.options.claudeRoot,
+    codexRoot: f.options.codexRoot,
+    artifacts: [
+      { runtime: 'claude', relativePath: 'skills/live/SKILL.md', bytes: liveBytes },
+      { runtime: 'codex', relativePath: 'skills/downtime/SKILL.md', bytes: downtimeBytes },
+    ],
+  });
+  const options = { ...f.options, repairMs: 200, contractOverlays };
   try {
-    const installed = await installRouter({ ...f.options, repairMs: 200 });
+    const installed = await installRouter(options);
     const firstSkill = join(f.options.claudeRoot, 'skills', 'live', 'SKILL.md');
     mkdirSync(dirname(firstSkill), { recursive: true });
-    writeFileSync(firstSkill, '---\nname: live-skill\ncommand: /live-skill\n---\n# live\n');
+    writeFileSync(firstSkill, liveBytes);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('live-skill'));
     await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.strategy === 'incremental');
     const firstReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
     const firstStatus = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
     assert.equal(firstStatus.reconciliation.strategy, 'incremental');
     const firstLifecycleHash = firstStatus.reconciliation.lifecycle_hash;
-    const firstFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
+    const firstFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot, overlays: contractOverlays });
     const inactiveCandidate = JSON.parse(readFileSync(installed.candidatePath, 'utf8'));
     assert.equal(inactiveCandidate.activated, false);
     assert.equal(inactiveCandidate.disposition, 'eligible');
-    assert.deepEqual({ schema_version: inactiveCandidate.schema_version, records: inactiveCandidate.records }, firstFull.registry);
+    assert.equal(inactiveCandidate.schema_version, firstFull.registry.schema_version);
+    assert.deepEqual(inactiveCandidate.records, firstFull.registry.records);
     assert.deepEqual({ diagnostics: firstReport.diagnostics, summary: firstReport.summary },
       { diagnostics: firstFull.diagnostics, summary: firstFull.summary });
 
@@ -310,43 +384,58 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     });
     const downtimeSkill = join(f.options.codexRoot, 'skills', 'downtime', 'SKILL.md');
     mkdirSync(dirname(downtimeSkill), { recursive: true });
-    writeFileSync(downtimeSkill, '---\nname: downtime-skill\ncommand: $downtime\n---\n# downtime\n');
-    const restarted = await restartController({ ...f.options, repairMs: 200 });
+    writeFileSync(downtimeSkill, downtimeBytes);
+    const restarted = await restartController(options);
     assert.notEqual(restarted.instanceId, status.instance_id);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('downtime-skill'));
     await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.lifecycle_hash !== firstLifecycleHash);
     const repairedReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
     assert.equal(JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation.strategy, 'incremental');
-    const repairedFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot });
+    const repairedFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot, overlays: contractOverlays });
     const repairedCandidate = JSON.parse(readFileSync(installed.candidatePath, 'utf8'));
     assert.equal(repairedCandidate.activated, false);
     assert.equal(repairedCandidate.disposition, 'eligible');
-    assert.deepEqual({ schema_version: repairedCandidate.schema_version, records: repairedCandidate.records }, repairedFull.registry);
+    assert.equal(repairedCandidate.schema_version, repairedFull.registry.schema_version);
+    assert.deepEqual(repairedCandidate.records, repairedFull.registry.records);
     assert.deepEqual({ diagnostics: repairedReport.diagnostics, summary: repairedReport.summary },
       { diagnostics: repairedFull.diagnostics, summary: repairedFull.summary });
   } finally { await cleanup(f); }
 });
 
-test('installed project ancestor watches initially absent Claude and Codex inventories', async () => {
+test('installed project ancestor repairs initially absent Claude and Codex inventories', async () => {
   const f = fixture();
   const projectRoot = join(f.root, 'project');
   mkdirSync(projectRoot, { recursive: true });
-  const options = { ...f.options, projectRoot, scopeId: 'fixture', repairMs: 10_000 };
+  const claudeBytes = '---\nname: project-live\ncanonical_identity: router/project-live\ncommand: /project-live\ndependencies: []\n---\n# project live\n';
+  const codexBytes = '---\nname: project-codex\ncanonical_identity: router/project-codex\ncommand: $project-codex\ndependencies: []\n---\n# project codex\n';
+  const contractOverlays = safeFixtureContractOverlays({
+    claudeRoot: f.options.claudeRoot,
+    codexRoot: f.options.codexRoot,
+    projectRoot,
+    scopeId: 'fixture',
+    artifacts: [
+      { runtime: 'claude', rootPath: join(projectRoot, '.claude'), relativePath: 'skills/project-live/SKILL.md', bytes: claudeBytes },
+      { runtime: 'codex', rootPath: join(projectRoot, '.codex'), relativePath: 'skills/project-codex/SKILL.md', bytes: codexBytes },
+    ],
+  });
+  const options = {
+    ...f.options, projectRoot, scopeId: 'fixture', repairMs: 200, contractOverlays,
+  };
   try {
     const installed = await installRouter(options);
     const config = JSON.parse(readFileSync(join(f.options.claudeRoot, 'router', 'controller', 'config.json'), 'utf8'));
-    assert.equal(config.repair_ms, 10_000);
+    assert.equal(config.repair_ms, 200);
     assert.deepEqual(config.roots.filter(root => root.logicalRoot.startsWith('project:')), [
       { logicalRoot: 'project:fixture:claude', path: join(projectRoot, '.claude'), watchPath: projectRoot, includeRelativePaths: ['.claude'] },
       { logicalRoot: 'project:fixture:codex', path: join(projectRoot, '.codex'), watchPath: projectRoot, includeRelativePaths: ['.codex'] },
     ]);
     const claudeSkill = join(projectRoot, '.claude', 'skills', 'project-live', 'SKILL.md');
     mkdirSync(dirname(claudeSkill), { recursive: true });
-    writeFileSync(claudeSkill, '---\nname: project-live\ncommand: /project-live\n---\n# project live\n');
+    writeFileSync(claudeSkill, claudeBytes);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-live'));
     const codexSkill = join(projectRoot, '.codex', 'skills', 'project-codex', 'SKILL.md');
     mkdirSync(dirname(codexSkill), { recursive: true });
-    writeFileSync(codexSkill, '---\nname: project-codex\ncommand: $project-codex\n---\n# project codex\n');
+    writeFileSync(codexSkill, codexBytes);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-codex'));
   } finally { await cleanup({ ...f, options }); }
 });

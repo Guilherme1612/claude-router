@@ -1,9 +1,9 @@
 ---
 phase: 15
 slug: context-capsules-and-workflow-state-recovery
-status: draft
+status: validated
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-07-16
 ---
 
@@ -75,4 +75,4 @@ All phase behaviors have automated verification.
 - [ ] Feedback latency < 10s
 - [ ] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** validated 2026-07-23 after post-milestone Nyquist reconciliation; full sequential suite passed.

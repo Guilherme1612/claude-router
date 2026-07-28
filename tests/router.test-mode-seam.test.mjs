@@ -7,7 +7,11 @@ import { installRouter } from '../src/lifecycle/router-lifecycle.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 import { createTestActivationVerifier } from '../src/registry/validate.mjs';
 import { trusted } from '../src/registry/activate.mjs';
-import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
+import {
+  inProcessControllerLauncher,
+  safeFixtureContractOverlays,
+  stubVerificationRunners,
+} from './helpers/test-mode-seam.mjs';
 
 // Re-export the shared seam helpers so tests that import from this file (per the plan's
 // key_links) can access them. The canonical definitions live in tests/helpers/test-mode-seam.mjs
@@ -15,7 +19,14 @@ import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/
 export { stubVerificationRunners, inProcessControllerLauncher };
 
 function artifact(name, command = name) {
-  return `${JSON.stringify({ schema_version: 1, name, command, mapping: { explicit_subjects: [name] } })}\n`;
+  return `${JSON.stringify({
+    schema_version: 1,
+    name,
+    canonical_identity: `router/${name}`,
+    command,
+    mapping: { explicit_subjects: [name] },
+    dependencies: [],
+  })}\n`;
 }
 
 function tupleId(root) {
@@ -23,14 +34,14 @@ function tupleId(root) {
   catch { return null; }
 }
 
-async function waitUntil(predicate, timeoutMs = 2_000) {
+async function waitUntil(predicate, timeoutMs = 2_000, diagnostic = () => '') {
   const deadline = Date.now() + timeoutMs;
   do {
     const value = predicate();
     if (value) return value;
     await new Promise(resolve => setTimeout(resolve, 25));
   } while (Date.now() <= deadline);
-  assert.fail(`controller did not publish within ${timeoutMs}ms`);
+  assert.fail(`controller did not publish within ${timeoutMs}ms${diagnostic()}`);
 }
 
 test('production-default trusted() rejects test_only:true verification without test_mode', () => {
@@ -73,14 +84,29 @@ test('opt-in test_mode lets the installed controller publish via the real watche
     writeFileSync(settingsPath, '{"hooks":{}}\n');
     writeFileSync(sourceRouter, 'export const router = true;\n');
     writeFileSync(join(claudeRoot, 'skills', 'alpha.json'), artifact('alpha'));
+    options.contractOverlays = safeFixtureContractOverlays({
+      claudeRoot,
+      codexRoot,
+      artifacts: [
+        { runtime: 'claude', relativePath: 'skills/alpha.json', bytes: artifact('alpha') },
+        { runtime: 'claude', relativePath: 'skills/beta.json', bytes: artifact('beta') },
+      ],
+    });
 
     const installed = await installRouter(options);
     const initialTuple = tupleId(ownedRoot);
+    await holder.ready;
     // Seed a safe filesystem event and wait for the installed controller to publish
     writeFileSync(join(claudeRoot, 'skills', 'beta.json'), artifact('beta'));
     const published = await waitUntil(() => {
+      if (holder.child?.error) throw holder.child.error;
       const current = tupleId(ownedRoot);
       return current && current !== initialTuple ? current : null;
+    }, 2_000, () => {
+      const paths = [installed.controllerStatusPath, installed.reportPath, installed.candidatePath];
+      return `: ${paths.map(path => {
+        try { return readFileSync(path, 'utf8'); } catch { return 'missing'; }
+      }).join(' | ')}`;
     });
     // The published tuple is observable via the public compiled-index reader
     const compiled = loadCompiledIndex({ ownedRoot });

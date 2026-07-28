@@ -2,8 +2,10 @@ import { loadCapsule, saveCapsule } from './capsule.mjs';
 import { normalizeContextInstruction, resolveContextAction } from './resolve.mjs';
 import { assembleRefreshEvidence, collectAuthoritativeSnapshot } from './sources.mjs';
 import { loadCompiledIndex } from '../prompt/compile-index.mjs';
+import { loadStartupPointer } from '../steward/startup-pointer.mjs';
 
 const MAX_CONTEXT_BYTES = 2048;
+const SUGGESTION_NOTICE = 'Router suggestion available — inspect with /router suggestion';
 
 function parseInstruction(prompt) {
   const referential = normalizeContextInstruction(prompt);
@@ -81,20 +83,54 @@ function authoritativeEvidence(capsule, projectRoot) {
   });
 }
 
-export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale = false, authoritative, now = Date.now(), compiledFs } = {}) {
+export function appendStartupNotice(result, pointer) {
+  if (!pointer?.available) return result;
+  const additional_context = result.additional_context
+    ? `${result.additional_context}\n${SUGGESTION_NOTICE}`
+    : SUGGESTION_NOTICE;
+  return Buffer.byteLength(additional_context) <= MAX_CONTEXT_BYTES
+    ? {
+      ...result,
+      additional_context,
+      startup_notice_emitted: true,
+      startup_notice_pointer: pointer,
+    }
+    : { ...result, startup_notice_emitted: false };
+}
+
+export function routeContextPrompt({
+  prompt, ownedRoot, projectRoot, forceStale = false, authoritative,
+  now = Date.now(), compiledFs,
+} = {}) {
   const instruction = parseInstruction(prompt);
-  if (instruction.kind === 'none') return { handled: false, reason_code: 'instruction_not_contextual' };
+  if (instruction.kind === 'none') {
+    if (typeof ownedRoot !== 'string') return { handled: false, reason_code: 'instruction_not_contextual' };
+    const tuple = loadCompiledIndex({
+      ownedRoot, now, projectionOnly: true, ...(compiledFs ? { fs: compiledFs } : {}),
+    });
+    const suggestion = tuple.prompt_projection === true
+      ? tuple.suggestionReference
+      : loadStartupPointer({ ownedRoot, now });
+    return appendStartupNotice({ handled: false, reason_code: 'instruction_not_contextual' }, suggestion);
+  }
   if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return { handled: false, reason_code: 'context_roots_missing' };
   const loaded = loadCapsule({ ownedRoot });
   const capsule = loaded.capsule;
   if (!capsule && instruction.kind === 'explicit') return { handled: false, reason_code: loaded.reason_code };
-  const compiledIndex = loadCompiledIndex({ ownedRoot, now, ...(compiledFs ? { fs: compiledFs } : {}) });
+  const loadOptions = { ownedRoot, now, ...(compiledFs ? { fs: compiledFs } : {}) };
+  const compiledIndex = loadCompiledIndex({ ...loadOptions, projectionOnly: true });
+  const boundedTuple = compiledIndex.prompt_projection === true;
+  // Compatibility only: pre-v1.3 installations still expose the old pointer.
+  const suggestion = boundedTuple
+    ? compiledIndex.suggestionReference
+    : loadStartupPointer({ ownedRoot, now });
+  const projected = result => appendStartupNotice(result, suggestion);
   if (!compiledIndex.dispatch_eligible) {
     const resolution = {
       outcome: 'blocked', dispatch_eligible: false,
       reason_code: compiledIndex.reason_code, diagnostic: compiledIndex.diagnostic,
     };
-    return { handled: true, resolution, additional_context: injection(resolution) };
+    return projected({ handled: true, resolution, additional_context: injection(resolution) });
   }
   const resolution = resolveContextAction({
     instruction, capsule,
@@ -107,7 +143,7 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
       outcome: 'blocked', dispatch_eligible: false, reason_code: 'compiled_workflow_missing',
       diagnostic: 'Activate a compiled routing index containing the selected workflow.',
     };
-    return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
+    return projected({ handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) });
   }
   // Phase 19 D-03 (TOK-02 hot-path closure): observe the baked dispatch_eligible flag from the
   // budget sibling. Required-overflow baked at publish -> bakedBudget.dispatch_eligible === false
@@ -120,13 +156,15 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
       reason_code: bakedBudget.reason_code || 'required_context_overflow',
       diagnostic: 'Baked budget declared this workflow non-dispatchable at publish time.',
     };
-    return { handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) };
+    return projected({ handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) });
   }
   let save = null;
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
-  if (save?.status === 'blocked') return { handled: false, reason_code: save.reason_code };
-  return {
+  // Pre-v1.3 compatibility retains the old mutation contract. Published v1.3
+  // tuples are strict read-only prompt projections.
+  if (!boundedTuple && capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
+  if (!boundedTuple && capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
+  if (save?.status === 'blocked') return projected({ handled: false, reason_code: save.reason_code });
+  return projected({
     handled: true,
     resolution,
     additional_context: injection(resolution),
@@ -144,5 +182,5 @@ export function routeContextPrompt({ prompt, ownedRoot, projectRoot, forceStale 
       summaryIndex: compiledIndex.summaryIndex?.by_workflow?.[workflowId] ?? null,
     } } : {}),
     ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}),
-  };
+  });
 }

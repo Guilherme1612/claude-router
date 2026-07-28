@@ -12,7 +12,7 @@ import { acquireRegistry, assembleRegistry, refreshIncrementalAcquisition } from
 import { reconcileCandidate as reconcileRegistryCandidate } from './reconcile.mjs';
 import { mapCandidateRegistry } from './map.mjs';
 import { isCanonicalMappingSafe, produceActivationVerification, createTestActivationVerifier } from './validate.mjs';
-import { activateCandidate, recoverActiveVersion } from './activate.mjs';
+import { activateCandidate, recoverActiveVersion, rollbackActivation as rollbackActivationExport } from './activate.mjs';
 import { stableStringify } from './schema.mjs';
 import { publishCompiledIndex } from '../prompt/publish-index.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY, loadCompiledIndex } from '../prompt/compile-index.mjs';
@@ -28,6 +28,45 @@ function hash(value) {
 
 function defaultScheduler() {
   return { now: Date.now, setTimeout, clearTimeout };
+}
+
+const INVALIDATION_TUPLE_MEMBER = Object.freeze({
+  node: 'registry',
+  edge: 'relationships',
+  dependency: 'registry',
+  adapter: 'contracts',
+  'inference-rule': 'intent_policy',
+  manifest: 'workflows',
+  correction: 'contracts',
+  'negative-evidence': 'health_policy',
+});
+
+export function deriveInvalidationInput(built, lifecycle = {}) {
+  const events = (lifecycle.events || []).map(event => ({
+    ...event,
+    ...(event.change_class && !event.affected_tuple_member
+      ? { affected_tuple_member: INVALIDATION_TUPLE_MEMBER[event.change_class] }
+      : {}),
+  }));
+  const edges = [];
+  for (const record of built.registry?.records || []) {
+    for (const dependency of record.dependencies?.items || []) {
+      edges.push({
+        id: `dependency:${record.id}:${dependency.id}`,
+        type: 'dependency',
+        from_id: record.id,
+        to_id: dependency.id,
+      });
+    }
+  }
+  for (const event of events) edges.push(...(event.references || []));
+  edges.sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  return {
+    lifecycle: { ...lifecycle, events },
+    references: { schema_version: 1, edges },
+    relationships: built.relationships,
+    overlays: built.overlays,
+  };
 }
 
 // EVO-05: ingest telemetry.jsonl into the persistent evidence store before
@@ -108,6 +147,35 @@ export function createRegistryWatcher(options) {
   const dirty = new Set();
   let closed = false, timer = null, repairTimer = null, firstDirtyAt = null;
   let inFlight = null, rerun = false, baseline = null;
+  let pendingTrigger = 'filesystem-event';
+  let generation = 0;
+  let operational = {
+    state: 'reconciling',
+    reason_code: 'startup_reconciliation',
+    active_generation_id: null,
+    candidate_generation_id: 'generation-1',
+    last_complete_reconciliation: null,
+    trigger: 'startup',
+    pending_changes: [...rootNames],
+    stale_roots: [],
+    unreadable_roots: [],
+    next_recovery_action: null,
+    last_complete_fingerprint_state: null,
+    last_complete_semantic_snapshot: null,
+  };
+
+  const AUTHORITATIVE_TRIGGERS = new Set([
+    'startup', 'periodic-repair', 'dropped-events', 'ambiguous-event',
+    'watcher-restart', 'root-replacement', 'fingerprint-mismatch',
+  ]);
+
+  function snapshotOperational() {
+    return structuredClone(operational);
+  }
+
+  function setOperational(state, values = {}) {
+    operational = { ...operational, state, ...values };
+  }
 
   function clearTimer(name) {
     const value = name === 'work' ? timer : repairTimer;
@@ -125,17 +193,75 @@ export function createRegistryWatcher(options) {
     if (closed) return;
     repairTimer = scheduler.setTimeout(() => {
       repairTimer = null;
-      markDirty(rootNames, true);
+      markDirty(rootNames, true, 'periodic-repair');
       scheduleRepair();
     }, repairMs);
   }
 
-  async function reconcileDirty(names) {
-    const current = await scan(roots);
-    const lifecycle = diff(baseline, current);
-    await reconcile({ roots: names, previous: baseline, current, diff: lifecycle });
-    await writeState(current);
-    baseline = current;
+  async function reconcileDirty(names, trigger) {
+    const candidateGenerationId = `generation-${generation + 1}`;
+    setOperational('reconciling', {
+      reason_code: 'reconciliation_in_progress',
+      candidate_generation_id: candidateGenerationId,
+      trigger,
+      pending_changes: [...names].sort(),
+      stale_roots: [],
+      unreadable_roots: [],
+      next_recovery_action: null,
+    });
+    try {
+      const current = await scan(roots);
+      const incompleteRoots = (current.logicalRoots || []).filter(root => root.complete === false);
+      if (incompleteRoots.length) {
+        const unreadableRoots = incompleteRoots
+          .filter(root => (root.diagnosticCodes || []).some(code => ['access_denied', 'read_error', 'scan_error'].includes(code)))
+          .map(root => root.logicalRoot).sort();
+        const staleRoots = incompleteRoots.map(root => root.logicalRoot).sort();
+        setOperational('degraded', {
+          reason_code: 'incomplete_scan',
+          candidate_generation_id: candidateGenerationId,
+          pending_changes: [...names].sort(),
+          stale_roots: staleRoots,
+          unreadable_roots: unreadableRoots,
+          next_recovery_action: 'authoritative-repair',
+        });
+        return;
+      }
+      const lifecycle = diff(baseline, current);
+      const derivedTrigger = (current.logicalRoots || []).some(root => (root.diagnosticCodes || []).includes('root_replaced'))
+        ? 'root-replacement'
+        : (lifecycle.diagnostics || []).some(item => item.code === 'fingerprint_mismatch')
+          ? 'fingerprint-mismatch'
+          : trigger;
+      const result = await reconcile({ roots: names, previous: baseline, current, diff: lifecycle, trigger: derivedTrigger });
+      await writeState(current);
+      baseline = current;
+      generation += 1;
+      setOperational('current', {
+        reason_code: 'reconciliation_complete',
+        active_generation_id: candidateGenerationId,
+        candidate_generation_id: null,
+        last_complete_reconciliation: scheduler.now(),
+        trigger: derivedTrigger,
+        pending_changes: [],
+        stale_roots: [],
+        unreadable_roots: [],
+        next_recovery_action: null,
+        last_complete_fingerprint_state: structuredClone(current),
+        last_complete_semantic_snapshot: result?.semanticSnapshot
+          ? structuredClone(result.semanticSnapshot)
+          : operational.last_complete_semantic_snapshot,
+      });
+    } catch (error) {
+      setOperational('failed', {
+        reason_code: error?.code || 'reconciliation_failed',
+        candidate_generation_id: candidateGenerationId,
+        pending_changes: [...names].sort(),
+        stale_roots: [...names].sort(),
+        next_recovery_action: 'authoritative-repair',
+      });
+      throw error;
+    }
   }
 
   function startWork() {
@@ -143,8 +269,10 @@ export function createRegistryWatcher(options) {
     if (inFlight) { rerun = true; return inFlight; }
     clearTimer('work');
     const names = [...dirty].sort();
+    const trigger = pendingTrigger;
+    pendingTrigger = 'filesystem-event';
     dirty.clear(); firstDirtyAt = null;
-    inFlight = reconcileDirty(names).catch(report).finally(() => {
+    inFlight = reconcileDirty(names, trigger).catch(report).finally(() => {
       inFlight = null;
       if (closed) return;
       if (rerun || dirty.size) {
@@ -155,9 +283,10 @@ export function createRegistryWatcher(options) {
     return inFlight;
   }
 
-  function markDirty(names, immediate = false) {
+  function markDirty(names, immediate = false, trigger = 'filesystem-event') {
     if (closed) return;
     for (const name of names) dirty.add(name);
+    if (AUTHORITATIVE_TRIGGERS.has(trigger) || pendingTrigger === 'filesystem-event') pendingTrigger = trigger;
     const now = scheduler.now();
     if (firstDirtyAt === null) firstDirtyAt = now;
     if (inFlight) { rerun = true; return; }
@@ -188,14 +317,14 @@ export function createRegistryWatcher(options) {
             ));
             return included && !ignored;
           }).map(root => root.logicalRoot);
-          if (matched.length) markDirty(matched);
+          if (matched.length) markDirty(matched, relative === null, relative === null ? 'ambiguous-event' : 'filesystem-event');
         });
         handle.on?.('error', report);
         watchers.push(handle);
       } catch (error) { report(error); }
     }
     scheduleRepair();
-    await reconcileDirty(rootNames);
+    await reconcileDirty(rootNames, 'startup');
   })().catch(error => {
     report(error);
     throw error;
@@ -204,7 +333,14 @@ export function createRegistryWatcher(options) {
   return {
     ready,
     notify(logicalRoot) { markDirty([logicalRoot]); },
-    async repair() { markDirty(rootNames, true); clearTimer('work'); return startWork(); },
+    inspect: snapshotOperational,
+    async authoritative(trigger = 'dropped-events') {
+      if (!AUTHORITATIVE_TRIGGERS.has(trigger)) throw new TypeError(`unsupported authoritative trigger: ${trigger}`);
+      markDirty(rootNames, true, trigger);
+      clearTimer('work');
+      return startWork();
+    },
+    async repair() { markDirty(rootNames, true, 'periodic-repair'); clearTimer('work'); return startWork(); },
     async flush() {
       do {
         const current = inFlight;
@@ -311,6 +447,17 @@ export function createRegistryReconciler(config, dependencies = {}) {
     claudeRoot: config.claude_root,
     codexRoot: config.codex_root,
     ...(config.project_root ? { projectRoot: config.project_root, scopeId: config.scope_id } : {}),
+    // modeMapPath flows through to buildFullRegistry/buildIncrementalRegistry inside
+    // the incremental_full_equivalence gate, so the gate's rebuilt registries get the
+    // SAME mode-map stamping as the candidate. Without it the candidate (stamped) and
+    // the rebuilt incremental/full (un-stamped) differ → bytes mismatch → gate fails.
+    ...(config.mode_map_path ? { modeMapPath: config.mode_map_path } : {}),
+    // workflowDeclarationsPath: the orchestrator's declared workflow_ids are stamped
+    // onto matching records so the compiled index has routes for every declared
+    // workflow (e.g. gsd-execute-phase). Without this the calibration quality gate
+    // fails (the corpus routes through gsd-execute-phase) and the canary rolls back.
+    ...(config.workflow_declarations_path ? { workflowDeclarationsPath: config.workflow_declarations_path } : {}),
+    ...(config.contract_overlays ? { overlays: config.contract_overlays } : {}),
   };
   const acquire = dependencies.acquireRegistry || acquireRegistry;
   const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;
@@ -319,6 +466,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const mapper = dependencies.mapCandidateRegistry || mapCandidateRegistry;
   const verifier = dependencies.produceActivationVerification || produceActivationVerification;
   const activator = dependencies.activateCandidate || activateCandidate;
+  const rollbackActivation = dependencies.rollbackActivation || rollbackActivationExport;
   const recovery = dependencies.recoverActiveVersion || recoverActiveVersion;
   const publishIndex = dependencies.publishCompiledIndex || publishCompiledIndex;
   const canaryDecision = dependencies.applyCanaryDecision || applyCanaryDecision;
@@ -350,6 +498,18 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
   });
   let baseline = acquire(acquisitionOptions);
+  // Blocker-1 fix: the registry baseline above is module-scope and was previously
+  // NEVER re-acquired. `refreshIncrementalAcquisition` only replaces
+  // dirty-root observations, so small errors accumulate over hours of ~/.claude
+  // churn until hook observations are corrupted (stale file pairing) and the
+  // reconciler quarantines the candidate with `hook_orphan_binding`. Bound the
+  // drift by periodically re-acquiring the FULL registry: every
+  // FULL_REACQUIRE_EVENT_THRESHOLD cumulative lifecycle events, drop the
+  // incremental path and rebuild the baseline from a fresh `acquire()`. The
+  // equivalence gate is fed an empty diff on that reconcile so
+  // incremental(empty)===full===candidate stays coherent.
+  let cumulativeEvents = 0;
+  const FULL_REACQUIRE_EVENT_THRESHOLD = 500;
 
   const reconcile = async ({ diff }) => {
     // CR-01: reset `recovered` per reconcile call so the recovery block (and
@@ -360,13 +520,28 @@ export function createRegistryReconciler(config, dependencies = {}) {
     // reconcile skipped recovery, knownGood stayed null, and the bootstrap
     // path bypassed applyCanaryDecision.
     let recovered = false;
-    const next = refresh(baseline, diff, acquisitionOptions);
-    const built = assemble(next);
+    cumulativeEvents += (diff?.events?.length || 0);
+    const doFullAcquire = cumulativeEvents >= FULL_REACQUIRE_EVENT_THRESHOLD;
+    let next;
+    let equivalenceDiff;
+    if (doFullAcquire) {
+      baseline = acquire(acquisitionOptions);
+      next = baseline;
+      // Empty lifecycle for the equivalence gate: refresh(baseline, empty)
+      // returns baseline unchanged, so incremental===full===candidate.
+      equivalenceDiff = { events: [], diagnostics: [] };
+      cumulativeEvents = 0;
+    } else {
+      next = refresh(baseline, diff, acquisitionOptions);
+      equivalenceDiff = diff;
+    }
+    const built = assemble(next, acquisitionOptions);
     const active = await readActive();
+    const invalidation = deriveInvalidationInput(built, diff);
     const report = evaluate({
       candidate: built.registry,
       active,
-      lifecycle: diff,
+      ...invalidation,
       aliases: config.aliases || [],
       mappings: config.mappings || [],
       runtimeRoots: { claude: config.claude_root, codex: config.codex_root },
@@ -423,7 +598,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
         if (isCanonicalMappingSafe(mapping)) {
           const verification = await verifier({
             candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {},
-            equivalence: { previous: baseline, diff, options: acquisitionOptions },
+            equivalence: { previous: baseline, diff: equivalenceDiff, options: acquisitionOptions },
           });
           if (verification.disposition === 'passing' && verification.complete === true) {
             if (knownGood === null) {
@@ -432,13 +607,34 @@ export function createRegistryReconciler(config, dependencies = {}) {
               // the known-good; no canary rollback possible — RESEARCH.md:376).
               activation = await activator({ ownedRoot: config.activation_root, candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {}, verification, reason: 'watcher', test_mode: config.test_mode === true });
               if (activation.activation_status === 'activated' && activation.version_id) {
-                const publication = await publishIndex({
-                  ownedRoot: config.activation_root, registry: built.registry,
-                  registryVersionId: activation.version_id, mapping,
-                  policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
-                });
-                if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
-                activation = { ...activation, ...publication };
+                // Publish can fail closed on a zero-route registry: publishIndex
+                // enforces ORC-01 ('at least one dispatch route') and throws on
+                // an empty mapping (D-06). On a fresh install with no inventory
+                // the bootstrap mapping has zero mapped subjects, so publish
+                // throws. An uncaught throw here propagates through the
+                // controller's `ready` reconcile and crashes the watcher before
+                // it ever publishes a `ready` status. Roll the activation back
+                // to the pre-bootstrap state (no valid history → remove the
+                // active pointer + the just-written orphan version) and report
+                // `preserved` instead of crashing. The controller reaches
+                // `ready`; a later reconcile after inventory appears activates
+                // normally. Unit bootstrap tests stub publishCompiledIndex to
+                // succeed, so this branch is a no-op for them.
+                try {
+                  const publication = await publishIndex({
+                    ownedRoot: config.activation_root, registry: built.registry,
+                    registryVersionId: activation.version_id, mapping,
+                    policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                    contracts: built.contracts, relationships: built.relationships,
+                    intentPolicy: built.intent_policy, workflows: built.workflows,
+                    healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
+                  });
+                  if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
+                  activation = { ...activation, ...publication };
+                } catch (error) {
+                  await rollbackActivation({ ownedRoot: config.activation_root, versionId: activation.version_id });
+                  activation = { activation_status: 'preserved', reason_code: 'bootstrap_publish_failed', ...(error?.message ? { publish_error: error.message } : {}) };
+                }
               }
             } else {
               // Canary path: eligible + known-good present. Gate on evidence
@@ -510,13 +706,30 @@ export function createRegistryReconciler(config, dependencies = {}) {
                   if (decision.status === 'promoted') {
                     activation = { activation_status: 'activated', version_id: decision.active_version, ...decision };
                     if (decision.active_version) {
-                      const publication = await publishIndex({
-                        ownedRoot: config.activation_root, registry: built.registry,
-                        registryVersionId: decision.active_version, mapping,
-                        policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
-                      });
-                      if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
-                      activation = { ...activation, ...publication };
+                      try {
+                        const publication = await publishIndex({
+                          ownedRoot: config.activation_root, registry: built.registry,
+                          registryVersionId: decision.active_version, mapping,
+                          policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                          contracts: built.contracts, relationships: built.relationships,
+                          intentPolicy: built.intent_policy, workflows: built.workflows,
+                          healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
+                        });
+                        if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
+                        activation = { ...activation, ...publication };
+                      } catch (error) {
+                        const restored = await rollbackActivation({
+                          ownedRoot: config.activation_root,
+                          versionId: decision.active_version,
+                          previousVersionId: knownGood,
+                          test_mode: config.test_mode === true,
+                        });
+                        activation = {
+                          activation_status: restored.rollback_status === 'rolled_back' ? 'preserved' : 'recovery_required',
+                          reason_code: restored.rollback_status === 'rolled_back' ? 'canary_publish_failed' : restored.reason_code,
+                          ...(error?.message ? { publish_error: error.message } : {}),
+                        };
+                      }
                     }
                   } else if (decision.status === 'rolled_back') {
                     activation = { activation_status: 'rolled_back', reason_code: decision.reason_code };

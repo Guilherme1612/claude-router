@@ -1,0 +1,108 @@
+// Phase 23: Intent classifier — minimal v1 (tracer).
+// Full 8-disposition matrix is expanded in task 23-01-02.
+
+export const INTENT_POLICY_VERSION = 'intent-policy-v1';
+
+// Eight dispositions; frozen so downstream consumers can rely on the set.
+// Order in the array is NOT the precedence order — precedence is encoded in
+// classifyIntent's check chain (see RESEARCH Pattern 1, Pitfall 1).
+export const INTENT_DISPOSITIONS = Object.freeze([
+  'execute',
+  'explain',
+  'hypothetical',
+  'quoted',
+  'negated',
+  'prohibited',
+  'preview',
+  'ambiguous',
+]);
+
+// Negation markers. Covers ASCII apostrophe plus Unicode curly single
+// quotes (U+2018/U+2019 — macOS/iOS autocorrect default for `don't`) and
+// the common English negative contractions that were missing in v1
+// (won't/can't/shouldn't/couldn't/wouldn't/isn't/aren't/doesn't/haven't/
+// hasn't/hadn't/mustn't/needn't). The apostrophe class is optional so
+// `dont`/`wont` also match — a false positive abstains (negated, never
+// dispatches) which is the safe direction; a false negative would dispatch
+// a negated prompt (WR-01). Precedence is unchanged: prohibition → quoted
+// → hypothetical → negated → preview → explain → execute (Pitfall 1).
+const APOS = "['’‘]"; // ASCII ' + curly U+2019 + curly U+2018
+const NEGATION = new RegExp(
+  '\\b(don' + APOS + '?t|won' + APOS + '?t|can' + APOS + '?t|shouldn' + APOS + '?t'
+  + '|couldn' + APOS + '?t|wouldn' + APOS + '?t|isn' + APOS + '?t|aren' + APOS + '?t'
+  + '|doesn' + APOS + '?t|haven' + APOS + '?t|hasn' + APOS + '?t|hadn' + APOS + '?t'
+  + '|mustn' + APOS + '?t|needn' + APOS + '?t|do not|never|stop|cancel|abort|skip)\\b',
+  'i'
+);
+const PROHIBITION = /\b(must not|forbidden|not allowed|prohibited)\b/i;
+const HYPOTHETICAL = /\b(if|suppose|imagine|what if|assuming|hypothetical)\b/i;
+const PREVIEW = /\b(preview|dry[- ]?run|simulate|rehearse)\b/i;
+const EXPLAIN = /\b(explain|what (is|does)|compare|difference between|why|how does)\b/i;
+// Triple-backtick fenced code blocks, single-backtick spans, double-quoted
+// phrases, and nested single-quoted phrases (≥2 words) all abstain as quoted.
+// The nested single-quote form requires a space inside the quotes so plain
+// apostrophes like "don't" do NOT match.
+const QUOTED = /```[\s\S]*?```|`[^`\n]+`|"[^"\n]{1,200}"|'\w[^'\n]*\s[^'\n]*'|^>[\s\S]*$/m;
+// Multilingual guard (INT-06): Spanish/Portuguese execute-like verbs and
+// accented Latin-1 chars indicate a non-English prompt. Such prompts abstain
+// as ambiguous rather than dispatching on a coincidentally-shared execute verb
+// (e.g. Portuguese "execute a próxima fase" must NOT dispatch).
+const MULTILINGUAL = /[À-ſ]|\b(ejecuta|ejecutar|executar|inicia|iniciar|verifique|verificar|pr[oó]xima?|siguiente|fases?|ahora|trabalho)\b/i;
+const EXECUTE_VERB = /\b(run|execute|start|create|debug|troubleshoot|bug|fix|ship|deploy|plan|verify|review|resume|go to|continue|finish)\b/i;
+
+function outcome(disposition, reason_code) {
+  return {
+    disposition,
+    dispatch_eligible: disposition === 'execute',
+    reason_code,
+    policy_version: INTENT_POLICY_VERSION,
+  };
+}
+
+/**
+ * Classify a single prompt into one of eight dispositions. Pure function:
+ * no prompt retention, no eval/Function, no side effects. Empty or
+ * non-string prompts abstain (ambiguous) rather than silently dispatch.
+ */
+export function classifyIntent(prompt, { policyVersion } = {}) {
+  if (policyVersion !== undefined && policyVersion !== INTENT_POLICY_VERSION) {
+    return outcome('ambiguous', 'policy_version_mismatch');
+  }
+  const text = typeof prompt === 'string' ? prompt : '';
+  if (text.trim().length === 0) {
+    return outcome('ambiguous', 'empty_prompt');
+  }
+
+  // Precedence (Pitfall 1): prohibition → quoted → hypothetical → negated
+  // → preview → explain → execute. Execute additionally requires
+  // !NEGATION.test && !PROHIBITION.test (belt-and-suspenders; the earlier
+  // checks already short-circuit those cases).
+  if (PROHIBITION.test(text)) {
+    return outcome('prohibited', 'prohibition_marker');
+  }
+  if (QUOTED.test(text)) {
+    return outcome('quoted', 'quoted_or_code_block');
+  }
+  if (HYPOTHETICAL.test(text)) {
+    return outcome('hypothetical', 'hypothetical_marker');
+  }
+  if (NEGATION.test(text)) {
+    return outcome('negated', 'negation_marker');
+  }
+  if (PREVIEW.test(text)) {
+    return outcome('preview', 'preview_marker');
+  }
+  if (EXPLAIN.test(text)) {
+    return outcome('explain', 'explain_marker');
+  }
+  // Multilingual abstention (INT-06): a non-English prompt never dispatches
+  // even if it shares an execute-like verb with English (e.g. Portuguese
+  // "execute a próxima fase"). Precedence: after explain, before execute.
+  if (MULTILINGUAL.test(text)) {
+    return outcome('ambiguous', 'multilingual_abstention');
+  }
+  if (EXECUTE_VERB.test(text) && !NEGATION.test(text) && !PROHIBITION.test(text)) {
+    return outcome('execute', 'explicit_execute_verb');
+  }
+  return outcome('ambiguous', 'no_execute_marker');
+}

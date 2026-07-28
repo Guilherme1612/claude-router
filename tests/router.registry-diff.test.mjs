@@ -112,7 +112,7 @@ test('D-01 and D-02 preserve strong identity across rename and move with old/new
   assert.deepEqual(move.events[0].new_provenance, movedAndEdited.provenance);
 });
 
-test('D-03 weak similarity is remove-plus-add with sorted non-authoritative diagnostics', () => {
+test('D-03 exact fingerprints preserve continuity while merely similar evidence remains advisory', () => {
   const before = observation({ name: 'planner', content: { body: 'same' } });
   const after = observation({
     name: 'planner-renamed',
@@ -122,18 +122,17 @@ test('D-03 weak similarity is remove-plus-add with sorted non-authoritative diag
     content: { body: 'same' },
   });
   const result = diffFingerprintTrees(tree([before]), tree([after]));
-  assert.deepEqual(eventTypes(result), ['removed', 'added']);
-  assert.equal(result.diagnostics.length, 1);
-  assert.equal(result.diagnostics[0].code, 'possible_match');
-  assert.equal(result.diagnostics[0].authoritative, false);
+  assert.deepEqual(eventTypes(result), ['renamed']);
+  assert.equal(result.events[0].continuity.authority, 'exact_fingerprint');
+  assert.equal(result.diagnostics.length, 0);
   assert.deepEqual(result.diagnostics, [...result.diagnostics].sort((a, b) => stableStringify(a).localeCompare(stableStringify(b))));
 
   const weakScope = diffFingerprintTrees(
     tree([observation()]),
     tree([observation({ scope: { kind: 'project', repository: 'repo:router', worktree: 'main' } })]),
   );
-  assert.deepEqual(eventTypes(weakScope), ['removed', 'added']);
-  assert.equal(weakScope.diagnostics[0].authoritative, false);
+  assert.deepEqual(eventTypes(weakScope), ['scope_changed']);
+  assert.equal(weakScope.events[0].continuity.authority, 'exact_fingerprint');
 });
 
 test('D-04 emits one event with fixed precedence and ordered facets for compound changes', () => {
@@ -285,4 +284,68 @@ test('state cache round-trips atomically and invalid states request a clean scan
     }
     assert.equal(readFileSync(statePath, 'utf8').includes(root), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('[phase21-red:mutation] path fallback separates live duplicates and unique exact bytes preserve move continuity', () => {
+  const before = observation({
+    name: 'portable',
+    canonical_identity: undefined,
+    runtime_variants: [{ runtime: 'claude', native_identity: 'shared' }],
+    content: { body: 'exact bytes' },
+  });
+  const duplicate = {
+    ...before,
+    provenance: provenance('claude_global', 'skills/portable-copy/SKILL.md'),
+  };
+  const simultaneous = diffFingerprintTrees(tree(), tree([before, duplicate]));
+  assert.equal(new Set(simultaneous.events.map(event => event.canonical_id)).size, 2);
+
+  const moved = {
+    ...before,
+    name: 'portable-moved',
+    provenance: provenance('codex_global', 'skills/portable-moved/SKILL.md'),
+    invocation: { runtime: 'codex', command: '$portable', args: [] },
+    runtime_variants: [{ runtime: 'codex', native_identity: 'different-native-id' }],
+  };
+  const continuity = diffFingerprintTrees(tree([before]), tree([moved]));
+  assert.equal(continuity.events.length, 1);
+  assert.equal(continuity.events[0].primary, 'moved');
+  assert.equal(continuity.events[0].continuity.authority, 'exact_fingerprint');
+});
+
+test('[phase21-red:mutation] ambiguous exact N-to-M fingerprints never transfer identity', () => {
+  const base = observation({
+    canonical_identity: undefined,
+    runtime_variants: [{ runtime: 'claude', native_identity: 'shared' }],
+    content: { body: 'duplicate bytes' },
+  });
+  const oldEntries = ['a', 'b'].map(name => ({
+    ...base,
+    name,
+    provenance: provenance('claude_global', `skills/${name}/SKILL.md`),
+  }));
+  const newEntries = ['c', 'd'].map(name => ({
+    ...base,
+    name,
+    provenance: provenance('codex_global', `skills/${name}/SKILL.md`),
+  }));
+  const result = diffFingerprintTrees(tree(oldEntries), tree(newEntries));
+  assert.deepEqual(eventTypes(result), ['removed', 'removed', 'added', 'added']);
+  assert.equal(result.events.some(event => event.continuity?.authoritative), false);
+});
+
+test('[phase21-red:mutation] partial scan suppresses removals only inside the unreadable subtree', () => {
+  const denied = observation({
+    canonical_identity: 'router/denied',
+    provenance: provenance('claude_global', 'skills/denied/SKILL.md'),
+  });
+  const healthy = observation({
+    canonical_identity: 'router/healthy',
+    provenance: provenance('claude_global', 'skills/healthy/SKILL.md'),
+  });
+  const result = diffFingerprintTrees(
+    tree([denied, healthy]),
+    tree([], [{ code: 'read_error', logical_root: 'claude_global', relative_path: 'skills/denied' }]),
+  );
+  assert.deepEqual(result.events.map(event => event.canonical_id), ['router/healthy']);
 });

@@ -65,14 +65,13 @@ function harness(overrides = {}) {
   return { scheduler, callbacks, scans, writes, errors, controller };
 }
 
-test('duplicate and filename-less hints coalesce while a continuous flood respects maximum latency', async () => {
+test('filename-less hints reconcile immediately while duplicate hints and a continuous flood remain bounded', async () => {
   const h = harness();
   await h.controller.ready;
   assert.equal(h.scans.length, 1, 'startup repair runs immediately');
   const emit = h.callbacks.get('/virtual/claude');
   emit('change'); emit('change', 'same.md'); emit('rename', undefined);
-  await h.scheduler.advance(249); assert.equal(h.scans.length, 1);
-  await h.scheduler.advance(1); assert.equal(h.scans.length, 2);
+  await h.scheduler.advance(0); assert.equal(h.scans.length, 2);
   for (let elapsed = 0; elapsed < 1_500; elapsed += 200) {
     emit('change', 'flood.md');
     await h.scheduler.advance(200);
@@ -136,6 +135,72 @@ test('failed reconcile retains the last valid state and reports the error', asyn
   await h.controller.close();
 });
 
+test('[phase21-red:convergence] watcher exposes complete-baseline authority and four-state operational inspection', async () => {
+  const h = harness();
+  assert.equal(h.controller.inspect().state, 'reconciling');
+  await h.controller.ready;
+  const current = h.controller.inspect();
+  assert.equal(current.state, 'current');
+  assert.equal(current.trigger, 'startup');
+  assert.equal(current.last_complete_fingerprint_state.hash, 'scan-1');
+  assert.match(current.active_generation_id, /^generation-/);
+  assert.equal(current.candidate_generation_id, null);
+  assert.deepEqual(current.pending_changes, []);
+  assert.deepEqual(current.stale_roots, []);
+  assert.deepEqual(current.unreadable_roots, []);
+  assert.equal(current.reason_code, 'reconciliation_complete');
+  assert.equal(current.next_recovery_action, null);
+  assert.ok(['current', 'reconciling', 'degraded', 'failed'].includes(current.state));
+  await h.controller.close();
+});
+
+test('[phase21-red:convergence] authoritative triggers are immediate and periodic repair defaults to five minutes', async () => {
+  const triggers = [];
+  const h = harness({ repairMs: undefined, async reconcile(context) { triggers.push(context.trigger); } });
+  await h.controller.ready;
+  assert.deepEqual(triggers, ['startup']);
+  h.callbacks.get('/virtual/claude')('rename', undefined);
+  await h.scheduler.advance(0);
+  assert.deepEqual(triggers, ['startup', 'ambiguous-event']);
+  await h.scheduler.advance(300_000);
+  assert.equal(triggers.at(-1), 'periodic-repair');
+  await h.controller.authoritative('watcher-restart');
+  assert.equal(triggers.at(-1), 'watcher-restart');
+  await h.controller.authoritative('root-replacement');
+  assert.equal(triggers.at(-1), 'root-replacement');
+  await h.controller.authoritative('fingerprint-mismatch');
+  assert.equal(triggers.at(-1), 'fingerprint-mismatch');
+  await h.controller.close();
+});
+
+test('[phase21-red:convergence] incomplete scan degrades without replacing the last complete fingerprint', async () => {
+  let incomplete = false;
+  const h = harness({
+    async scan() {
+      return incomplete
+        ? {
+            hash: 'partial',
+            roots: ['claude_global', 'codex_home'],
+            logicalRoots: [
+              { logicalRoot: 'claude_global', complete: false, diagnosticCodes: ['read_error'] },
+              { logicalRoot: 'codex_home', complete: true, diagnosticCodes: [] },
+            ],
+          }
+        : { hash: 'complete', roots: ['claude_global', 'codex_home'], logicalRoots: [] };
+    },
+  });
+  await h.controller.ready;
+  incomplete = true;
+  await h.controller.authoritative('dropped-events');
+  const state = h.controller.inspect();
+  assert.equal(state.state, 'degraded');
+  assert.equal(state.reason_code, 'incomplete_scan');
+  assert.deepEqual(state.unreadable_roots, ['claude_global']);
+  assert.equal(state.last_complete_fingerprint_state.hash, 'complete');
+  assert.deepEqual(h.writes, ['complete']);
+  await h.controller.close();
+});
+
 test('deployed reconciler consumes the real lifecycle diff and advances acquisition only after both publications', async () => {
   const initial = { claude: { observations: [], diagnostics: [] }, codex: { observations: [], diagnostics: [] }, generation: 0 };
   const lifecycle = { events: [], diagnostics: [], marker: 'authoritative-diff' };
@@ -187,12 +252,20 @@ function reconcilerCapability(overrides = {}) {
 }
 
 test('installed reconciliation publishes eligible inactive candidate and deterministic report without activation', async () => {
-  const writes = [], activations = [];
+  const writes = [], activations = [], assemblyOptions = [];
   const activeBytes = '{"active":true}\n';
-  const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
+  const reconcile = createRegistryReconciler({
+    candidate_path: '/candidate',
+    report_path: '/report',
+    mode_map_path: '/owned/mode-map.json',
+    workflow_declarations_path: '/owned/workflow-declarations.json',
+  }, {
     acquireRegistry: () => ({ generation: 0 }),
     refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
-    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } }),
+    assembleRegistry: (_next, options) => {
+      assemblyOptions.push(options);
+      return { registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: { activated: false } };
+    },
     readActive: async () => ({ bytes: activeBytes, fingerprint: createHash('sha256').update(activeBytes).digest('hex') }),
     activate: value => activations.push(value),
     writeJson: async (path, value) => writes.push({ path, value }),
@@ -204,6 +277,8 @@ test('installed reconciliation publishes eligible inactive candidate and determi
   assert.equal(writes[1].value.active_bytes, activeBytes);
   assert.deepEqual(activations, []);
   assert.equal(reconcile.lastReconciliation.disposition, 'eligible');
+  assert.equal(assemblyOptions[0].modeMapPath, '/owned/mode-map.json');
+  assert.equal(assemblyOptions[0].workflowDeclarationsPath, '/owned/workflow-declarations.json');
 });
 
 test('eligible watcher pipeline maps then verifies then activates, including safe unmapped', async () => {

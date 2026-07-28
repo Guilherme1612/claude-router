@@ -1,9 +1,9 @@
 ---
 phase: 16
 slug: workflow-first-orchestration-and-context-budgets
-status: draft
+status: validated
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-07-16
 ---
 
@@ -107,4 +107,4 @@ No user-facing visual or interactive behavior requires human verification in Pha
 - [x] Manual inspection is limited to the Phase 17 file-boundary assertion and supplements rather than replaces automation.
 - [x] `nyquist_compliant: true` is declared in frontmatter.
 
-**Approval:** ready for execution after independent plan-checker confirms this contract and the three plans agree.
+**Approval:** validated 2026-07-23 after post-milestone Nyquist reconciliation; full sequential suite passed.

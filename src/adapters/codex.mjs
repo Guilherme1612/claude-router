@@ -3,8 +3,21 @@ import { createAdapter } from './claude.mjs';
 
 function layout(rel) {
   if (rel === 'config.toml' || rel === 'config.unsupported.toml') return { type: 'config', format: 'toml' };
+  if (/^(AGENTS|CLAUDE)\.md$/.test(rel) || /^instructions\/[^/]+\.md$/.test(rel)) {
+    return { type: 'instruction', semanticType: 'instruction', lifecycleRole: 'instruction', format: 'text' };
+  }
   if (/^skills\/[^/]+\/SKILL\.md$/.test(rel) || /^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'skill', format: 'markdown' };
-  if (/^plugins\/[^/]+\/plugin\.json$/.test(rel)) return { type: 'plugin', format: 'json' };
+  if (/^plugins\/[^/]+\/plugin\.json$/.test(rel)) {
+    return { type: 'plugin', semanticType: 'container', lifecycleRole: 'container', format: 'json' };
+  }
+  if (/^plugins\/[^/]+\/(tools|commands|agents|hooks|resources)\/.+\.(json|md|toml)$/.test(rel)) {
+    const family = rel.split('/')[2];
+    const types = { tools: 'tool', commands: 'command', agents: 'agent', hooks: 'hook', resources: 'resource' };
+    return { type: types[family], format: rel.endsWith('.md') ? 'markdown' : rel.endsWith('.toml') ? 'toml' : 'json' };
+  }
+  if (/^capabilities\/[^/]+$/.test(rel)) {
+    return { type: 'opaque', semanticType: 'unknown', lifecycleRole: 'opaque', format: 'opaque' };
+  }
   if (/^agents\/[^/]+\.(toml|json)$/.test(rel)) return { type: 'agent', format: rel.endsWith('.toml') ? 'toml' : 'json' };
   if (/^hooks\/[^/]+\.json$/.test(rel)) return { type: 'hook', format: 'json' };
   if (/^bindings\/[^/]+\.json$/.test(rel)) return { type: 'binding', format: 'json' };

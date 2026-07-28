@@ -121,7 +121,12 @@ function canonicalCandidate(candidate) {
     }
     return { id: stableCapabilityId(record), ...canonical };
   });
-  return { schema_version: candidate.schema_version ?? 1, records: sorted(records) };
+  return {
+    schema_version: candidate.schema_version ?? 1,
+    records: sorted(records),
+    ...(candidate.relationships ? { relationships: candidate.relationships } : {}),
+    ...(Array.isArray(candidate.rejected_overlays) ? { rejected_overlays: candidate.rejected_overlays } : {}),
+  };
 }
 
 function scopeApplies(recordScope, requestedScope) {

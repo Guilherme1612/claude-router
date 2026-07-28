@@ -14,6 +14,8 @@ import { discoverRoots as discoverClaude } from '../src/adapters/claude.mjs';
 import { discoverRoots as discoverCodex } from '../src/adapters/codex.mjs';
 import { diffFingerprintTrees } from '../src/registry/diff.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
+import { mapCandidateRegistry } from '../src/registry/map.mjs';
+import { contentFingerprint, stableCapabilityId } from '../src/registry/identity.mjs';
 
 function artifact(root, runtime, scope, category, name, data) {
   const base = scope === 'global' ? join(root, runtime) : join(root, 'project', `.${runtime}`);
@@ -181,5 +183,119 @@ test('REG-03 incremental return remains byte-identical after every supported mut
       codex: { ...previous.codex, observations: [...previous.codex.observations].reverse(), diagnostics: [...previous.codex.diagnostics].reverse() },
     }, { events: [], diagnostics: [] }, options);
     assert.equal(stableStringify(forward), stableStringify(reversed));
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+function modeMapFile(root, entries) {
+  const path = join(root, 'mode-map.json');
+  writeFileSync(path, JSON.stringify({ schema_version: 2, entries }));
+  return path;
+}
+
+test('mode-map stamping seeds record mapping.explicit_subjects so the mapper publishes dispatch routes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-modemap-'));
+  try {
+    mkdirSync(join(root, 'claude'), { recursive: true });
+    mkdirSync(join(root, 'codex'), { recursive: true });
+    // Skill named to match the slash entry id; agent named to match recommended_agents[0].
+    artifact(root, 'claude', 'global', 'skills', 'gsd-debug', { invocation: { command: 'gsd-debug', args: [] }, dependencies: [] });
+    artifact(root, 'claude', 'global', 'agents', 'gsd-debugger', { invocation: { command: 'gsd-debugger', args: [] }, dependencies: [] });
+    // A skill that carries its own artifact-provided mapping — must be preserved (union, not overwrite).
+    artifact(root, 'claude', 'global', 'skills', 'custom', {
+      invocation: { command: 'custom', args: [] },
+      dependencies: [],
+      mapping: { explicit_subjects: ['route:custom-artifact'] },
+    });
+    const modeMapPath = modeMapFile(root, [
+      { id: 'gsd-debug', mode: 'gsd-debug', invoke_kind: 'slash', recommended_skills: [], recommended_agents: [] },
+      { id: 'agent-gsd-debugger', mode: 'agent-gsd-debugger', invoke_kind: 'agent', recommended_skills: [], recommended_agents: ['gsd-debugger'] },
+      { id: 'custom', mode: 'custom', invoke_kind: 'slash', recommended_skills: [], recommended_agents: [] },
+      { id: 'warn-unwired', mode: 'warn-unwired', invoke_kind: 'warn', recommended_skills: [], recommended_agents: [] },
+    ]);
+    const baseOptions = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'), modeMapPath };
+    const base = buildFullRegistry(baseOptions);
+    const overlays = base.registry.records.map((record, index) => ({
+      schema_version: 1,
+      kind: 'contract-overlay-v1',
+      overlay_id: `mode-map-safe:${index}`,
+      provenance: 'correction',
+      binding: {
+        stable_id: stableCapabilityId(record),
+        source_fingerprint: contentFingerprint(record),
+        scope: record.scope,
+        runtime: record.invocation.runtime,
+      },
+      fields: {
+        reversibility: { value: 'reversible' },
+        risk: { value: 'low' },
+      },
+    }));
+    const options = { ...baseOptions, overlays };
+    const built = buildFullRegistry(options);
+
+    // Slash entry id matches the skill name → stamped.
+    const debug = built.registry.records.find(r => r.name === 'gsd-debug');
+    assert.deepEqual(debug.mapping.explicit_subjects, ['gsd-debug']);
+    // Agent entry resolves via recommended_agents[0] → the agent record is stamped with the entry id.
+    const debuggerAgent = built.registry.records.find(r => r.name === 'gsd-debugger');
+    assert.deepEqual(debuggerAgent.mapping.explicit_subjects, ['agent-gsd-debugger']);
+    // Artifact-provided mapping is preserved and unioned with the stamped subject.
+    const custom = built.registry.records.find(r => r.name === 'custom');
+    assert.deepEqual(custom.mapping.explicit_subjects, ['custom', 'route:custom-artifact']);
+    assert.equal(debug.eligibility.eligible, true);
+    // Warn entries never produce routes (no record stamped with 'warn-unwired').
+    assert.equal(built.registry.records.some(r => r.mapping?.explicit_subjects?.includes('warn-unwired')), false);
+
+    // End-to-end: the real mapper accepts the normalized, contract-eligible records.
+    const reconciliation = { disposition: 'eligible', verdicts: [] };
+    const mapping = mapCandidateRegistry({ candidate: built.registry, reconciliation, existingMappings: [], policy: undefined });
+    assert.ok(mapping.summary.mapped >= 2, `expected >=2 mapped subjects, got ${mapping.summary.mapped}`);
+    assert.ok(mapping.subjects.filter(subject => subject.disposition === 'mapped').length >= 2);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('mode-map stamping is a no-op when modeMapPath is absent or the file is missing', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-modemap-none-'));
+  try {
+    mkdirSync(join(root, 'claude'), { recursive: true });
+    mkdirSync(join(root, 'codex'), { recursive: true });
+    artifact(root, 'claude', 'global', 'skills', 'gsd-debug', { invocation: { command: 'gsd-debug', args: [] } });
+    const options = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex') };
+    const without = buildFullRegistry(options);
+    const withMissing = buildFullRegistry({ ...options, modeMapPath: join(root, 'does-not-exist.json') });
+    // No mode-map → no stamping; missing file (ENOENT) → no stamping. Byte-identical.
+    assert.equal(stableStringify(without), stableStringify(withMissing));
+    assert.equal(without.registry.records.find(r => r.name === 'gsd-debug').mapping, undefined);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('workflow-declarations stamping adds routes for orchestrator-declared workflows missing from mode-map', () => {
+  const root = mkdtempSync(join(tmpdir(), 'registry-wfdecl-'));
+  try {
+    mkdirSync(join(root, 'claude'), { recursive: true });
+    mkdirSync(join(root, 'codex'), { recursive: true });
+    // gsd-execute-phase is a declared workflow_id but NOT in mode-map.json.
+    // Without workflow-declarations stamping, the compiled index would lack
+    // a gsd-execute-phase route → the calibration quality gate fails.
+    artifact(root, 'claude', 'global', 'skills', 'gsd-execute-phase', { invocation: { command: 'gsd-execute-phase', args: [] } });
+    artifact(root, 'claude', 'global', 'skills', 'gsd-debug', { invocation: { command: 'gsd-debug', args: [] } });
+    const declarationsPath = join(root, 'workflow-declarations.json');
+    writeFileSync(declarationsPath, JSON.stringify({
+      declarations: [{ workflow_id: 'gsd-execute-phase' }, { workflow_id: 'gsd-debug' }],
+    }));
+    const modeMapPath = modeMapFile(root, [
+      { id: 'gsd-debug', mode: 'gsd-debug', invoke_kind: 'slash', recommended_skills: [], recommended_agents: [] },
+    ]);
+    const options = {
+      claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'),
+      modeMapPath, workflowDeclarationsPath: declarationsPath,
+    };
+    const built = buildFullRegistry(options);
+    // gsd-debug is in mode-map → stamped from mode-map.
+    const debug = built.registry.records.find(r => r.name === 'gsd-debug');
+    assert.deepEqual(debug.mapping.explicit_subjects, ['gsd-debug']);
+    // gsd-execute-phase is NOT in mode-map but IS declared → stamped from declarations.
+    const execute = built.registry.records.find(r => r.name === 'gsd-execute-phase');
+    assert.deepEqual(execute.mapping.explicit_subjects, ['gsd-execute-phase']);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });

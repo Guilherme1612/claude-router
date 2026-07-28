@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { stableStringify, validateCapability } from '../registry/schema.mjs';
 
@@ -23,8 +23,8 @@ function diagnostic(code, runtime, logicalRoot, path, reason, severity = 'build-
   return { code, runtime, logical_root: logicalRoot, relative_path: portable(path), reason, severity,
     ...(localPath ? { local_path: localPath } : {}) };
 }
-function walk(root) {
-  const files = [];
+function walk(root, runtime, logicalRoot) {
+  const files = [], diagnostics = [], visited = new Set();
   // Prune dependency trees and VCS metadata: these never carry router-relevant
   // capabilities, and descending into them makes the scanner parse JSONC
   // tsconfig.json files inside plugin package caches as strict JSON, which
@@ -32,14 +32,37 @@ function walk(root) {
   const PRUNE = new Set(['node_modules', '.git', 'tests', 'fixtures']);
   function visit(path) {
     const stat = lstatSync(path);
-    if (stat.isFile() || stat.isSymbolicLink()) files.push(path);
-    else if (stat.isDirectory()) for (const name of readdirSync(path).sort()) {
+    let actual = path;
+    let effective = stat;
+    if (stat.isSymbolicLink()) {
+      try {
+        actual = realpathSync(path);
+        if (!within(root, actual)) {
+          diagnostics.push(diagnostic('path_escape', runtime, logicalRoot, relative(root, path), 'resolved artifact leaves supplied root'));
+          return;
+        }
+        effective = statSync(actual);
+      } catch (error) {
+        diagnostics.push(diagnostic('unsafe_link', runtime, logicalRoot, relative(root, path), error?.code || 'unreadable_link'));
+        return;
+      }
+    }
+    if (effective.isFile()) files.push(path);
+    else if (effective.isDirectory()) {
+      const canonical = realpathSync(actual);
+      if (visited.has(canonical)) {
+        diagnostics.push(diagnostic('cycle', runtime, logicalRoot, relative(root, path) || '.', 'canonical directory already visited'));
+        return;
+      }
+      visited.add(canonical);
+      for (const name of readdirSync(canonical).sort()) {
       if (PRUNE.has(name)) continue;
-      visit(join(path, name));
+        visit(join(canonical, name));
+      }
     }
   }
   try { visit(root); } catch (error) { if (error?.code !== 'ENOENT') throw error; }
-  return files;
+  return { files, diagnostics };
 }
 function splitCollection(value, delimiter = ',') {
   const parts = []; let start = 0; let quote = null; let depth = 0;
@@ -182,6 +205,9 @@ function claudeLayout(rel) {
   // recognized plugin metadata path is `plugins/<id>/plugin.json`.
   if (rel.startsWith('plugins/marketplaces/')) return null;
   if (rel === 'settings.json') return { type: 'settings', format: 'json' };
+  if (/^(CLAUDE|AGENTS)\.md$/.test(rel) || /^instructions\/[^/]+\.md$/.test(rel)) {
+    return { type: 'instruction', semanticType: 'instruction', lifecycleRole: 'instruction', format: 'text' };
+  }
   if (/^skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'skill', format: 'markdown' };
   if (/^plugins\/[^/]+\/skills\/[^/]+\/SKILL\.md$/.test(rel)
     || /^plugins\/.+\/\.claude\/skills\/[^/]+\/SKILL\.md$/.test(rel)) return { type: 'plugin_skill', format: 'markdown' };
@@ -190,7 +216,20 @@ function claudeLayout(rel) {
   if (/^commands\/[^/]+\.md$/.test(rel)) return { type: 'command', format: 'markdown' };
   if (/^hooks\/.+\.json$/.test(rel)) return { type: 'hook', format: 'json' };
   if (/^dependencies\/.+\.json$/.test(rel)) return { type: 'dependency', format: 'json' };
-  if (/^plugins\/[^/]+\/plugin\.json$/.test(rel)) return { type: 'plugin_metadata', format: 'json' };
+  if (/^plugins\/[^/]+\/plugin\.json$/.test(rel)) {
+    return { type: 'plugin', semanticType: 'container', lifecycleRole: 'container', format: 'json' };
+  }
+  if (/^plugins\/[^/]+\/(tools|commands|agents|hooks|resources)\/.+\.(json|md|toml)$/.test(rel)) {
+    const family = rel.split('/')[2];
+    const types = { tools: 'tool', commands: 'command', agents: 'agent', hooks: 'hook', resources: 'resource' };
+    return {
+      type: types[family],
+      format: rel.endsWith('.md') ? 'markdown' : rel.endsWith('.toml') ? 'toml' : 'json',
+    };
+  }
+  if (/^capabilities\/[^/]+$/.test(rel)) {
+    return { type: 'opaque', semanticType: 'unknown', lifecycleRole: 'opaque', format: 'opaque' };
+  }
   if (/^(skills|plugins|agents-store|agents|commands|hooks|bindings|dependencies)\/.+\.json$/.test(rel)) {
     const map = { skills: 'skill', plugins: 'plugin_skill', 'agents-store': 'agents_store_skill', agents: 'agent', commands: 'command', hooks: 'hook', bindings: 'binding', dependencies: 'dependency' };
     return { type: map[rel.split('/')[0]], format: 'json' };
@@ -317,15 +356,31 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     const bytes = readFileSync(actual);
     let data;
     try {
-      data = recognized.format === 'markdown' ? markdown(bytes) : recognized.format === 'toml' ? toml(bytes) : JSON.parse(bytes.toString('utf8'));
+      data = recognized.format === 'markdown' ? markdown(bytes)
+        : recognized.format === 'toml' ? toml(bytes)
+          : recognized.format === 'json' ? JSON.parse(bytes.toString('utf8'))
+            : { schema_version: 1 };
     } catch (error) {
       const name = basename(dirname(requested)) === 'skills' ? basename(requested, extname(requested)) : basename(requested, extname(requested));
       return { partial: { runtime, type: recognized.type === 'settings' ? 'binding' : recognized.type, name, scope: options.scope || { kind: 'global' }, logicalRoot, relativePath, sourceFingerprint: fingerprint(bytes) },
         diagnostic: diagnostic('malformed_artifact', runtime, logicalRoot, relativePath, `recognizable ${recognized.format} artifact is malformed: ${error.message}`, 'dispatch-blocking') };
     }
     if (data.schema_version !== undefined && data.schema_version !== 1) return { diagnostic: diagnostic('unsupported_schema', runtime, logicalRoot, relativePath, `unsupported schema version: ${String(data.schema_version)}`) };
-    const base = { runtime, type: recognized.type, name: data.name || basename(dirname(requested)), data, scope: options.scope || { kind: 'global' }, logicalRoot, relativePath, sourceFingerprint: fingerprint(bytes) };
-    if (recognized.type === 'plugin_metadata') return { ignored: true };
+    const fallbackName = recognized.format === 'opaque'
+      ? basename(requested)
+      : basename(requested, extname(requested));
+    const base = {
+      runtime,
+      type: recognized.type,
+      semanticType: recognized.semanticType,
+      lifecycleRole: recognized.lifecycleRole,
+      name: data.name || fallbackName,
+      data,
+      scope: options.scope || { kind: 'global' },
+      logicalRoot,
+      relativePath,
+      sourceFingerprint: fingerprint(bytes),
+    };
     if (recognized.type === 'settings') {
       const records = [];
       // The installer-owned router hook consumes the candidate registry; it is
@@ -361,15 +416,41 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     const normalizedHook = hookObservation(nativeRecord, nativeInvocation, scope, rootPath);
     const declared = Array.isArray(nativeRecord.data.dependencies);
     const items = declared ? nativeRecord.data.dependencies.map((entry) => ({ id: String(entry.id), available: entry.available === true })) : [];
-    const command = nativeInvocation.command || nativeRecord.name;
-    const dispatchable = Boolean(command) && items.every((entry) => entry.available) && (!normalizedHook || normalizedHook.valid);
+    const semanticType = nativeRecord.semanticType || ({
+      binding: 'hook',
+      mcp: 'container',
+      plugin: 'container',
+      settings: 'configuration',
+    }[nativeRecord.type] || (['command', 'skill', 'agent', 'hook', 'tool', 'resource'].includes(nativeRecord.type)
+      ? nativeRecord.type : 'tool'));
+    const lifecycleRole = nativeRecord.lifecycleRole || ({
+      hook: 'event-bound',
+      container: 'container',
+      configuration: 'configuration',
+      instruction: 'instruction',
+      unknown: 'opaque',
+      resource: 'resource',
+    }[semanticType] || 'invocable');
+    const inert = ['container', 'configuration', 'instruction', 'unknown'].includes(semanticType);
+    const command = inert ? null : (nativeInvocation.command || nativeRecord.name);
+    const dispatchable = !inert && Boolean(command) && items.every((entry) => entry.available) && (!normalizedHook || normalizedHook.valid);
+    const pluginMatch = nativeRecord.relativePath.match(/^plugins\/([^/]+)\/(.+)$/);
+    const containerId = pluginMatch ? `${runtime}:plugin:${pluginMatch[1]}` : null;
     const record = { schema_version: 1, type: nativeRecord.type, name: nativeRecord.name,
+      native_type: `${runtime}:${nativeRecord.type}`, semantic_type: semanticType, lifecycle_role: lifecycleRole,
       description: typeof nativeRecord.data.description === 'string' ? nativeRecord.data.description : null,
       lifecycle: dispatchable ? 'ready' : 'partial', scope, dispatchable,
-      invocation: { runtime, command: String(command), args: Array.isArray(nativeInvocation.args) ? nativeInvocation.args.map(String) : [] },
+      invocation: dispatchable
+        ? { availability: 'available', runtime, command: String(command), args: Array.isArray(nativeInvocation.args) ? nativeInvocation.args.map(String) : [] }
+        : { availability: 'unavailable', reason: inert ? 'inert-artifact' : 'requirements-unavailable' },
       dependencies: { state: declared ? 'declared' : 'unknown', items },
-      provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion, ...packageProvenance(nativeRecord.relativePath) }],
+      provenance: [{ runtime, scope: scope.kind, logical_root: nativeRecord.logicalRoot, relative_path: nativeRecord.relativePath, source_fingerprint: nativeRecord.sourceFingerprint, adapter: adapterVersion, parser: `${nativeRecord.type}@1`, ...packageProvenance(nativeRecord.relativePath) }],
+      adapter_evidence: [{ namespace: runtime, native_type: `${runtime}:${nativeRecord.type}`, adapter: adapterVersion, parser: `${nativeRecord.type}@1` }],
       runtime_variants: [{ runtime, native_identity: String(nativeRecord.data.native_identity || nativeRecord.name), native_invocation: nativeInvocation }],
+      ...(containerId ? {
+        container_id: containerId,
+        member_provenance: { container_id: containerId, relative_path: pluginMatch[2] },
+      } : {}),
       ...(normalizedHook ? { hook_observation: normalizedHook } : {}),
       conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
       ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
@@ -389,7 +470,9 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     const observations = [], diagnostics = [];
     for (const spec of [...rootSpecs].sort((a, b) => a.logicalRoot.localeCompare(b.logicalRoot))) {
       let canonicalRoot; try { canonicalRoot = realpathSync(resolve(spec.root)); } catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
-      for (const path of walk(canonicalRoot).sort()) {
+      const walked = walk(canonicalRoot, runtime, spec.logicalRoot);
+      diagnostics.push(...walked.diagnostics);
+      for (const path of walked.files.sort()) {
         const rel = portable(relative(canonicalRoot, path));
         if (!layout(rel)) continue;
         const parsed = parseArtifact(path, { root: canonicalRoot, logicalRoot: spec.logicalRoot, scope: spec.scope });

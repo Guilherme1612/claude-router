@@ -4,8 +4,8 @@ slug: close-gap-tok-02-orc-01-wire-orchestrator-select-transitions
 # status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
 # audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
 status: validated
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-07-17
 ---
 
@@ -72,11 +72,11 @@ One row per task across Plans 02/03/04, using the Requirement→Test Map from RE
 
 Plan 04 completes Wave 0 during execution. The 5 gaps from RESEARCH.md Validation Architecture Wave 0 Gaps section:
 
-- [ ] `tests/router.autonomous-lifecycle.test.mjs` — add D-09 assertions (closure/budget/summary-index present in published tuple; empty mapping → blocked, no route; required-overflow → non-dispatchable; Flow 11 `dispatch_eligible` flips to PASS).
-- [ ] `tests/router.test-mode-seam.test.mjs` — add D-09 assertions (bundle presence of orchestrator modules `modules/orchestrator/{select,transitions,budget}.mjs` + `workflow-declarations.json`; baked closure readable from tuple).
-- [ ] Audit + update ~10 test files referencing `schema_version: 1` / old `COMPILED_INDEX_COMPATIBILITY` shape (schema-bump churn — Common Pitfall #1): `router.compiled-index`, `router.lifecycle-recovery`, `router.evolution-visibility`, `router.registry-watcher`, `router.evolve-proposal`, `router.registry-diff`, `router.weights-blend`, `router.evolve-integration`, `router.context-prompt-integration`, `router.registry-schema`. Bump tuple `schema_version` to `2` and extend compatibility objects with `orchestrator_contract_version` + `context_contract_version`. Leave registry/mapping/capsule `schema_version: 1` alone (those are unrelated schemas).
-- [ ] `tests/router.lifecycle-recovery.test.mjs` + `tests/router.compiled-index.test.mjs` — audit for empty-mapping publish calls that relied on the removed `canonical_record` fallback (Common Pitfall #4); every publish must now provide at least one mapped subject.
-- [ ] `release/v1.2-matrix.json` — add Phase 19 secondary evidence entry (label `phase-19-live-path`) for ORC-01 + TOK-02 (Q3 resolution — additive JSON edit closing the traceability gap).
+- [x] `tests/router.autonomous-lifecycle.test.mjs` — D-09 sibling, no-fallback, budget, and dispatch assertions.
+- [x] `tests/router.test-mode-seam.test.mjs` — deployed orchestrator bundle and baked-closure assertions.
+- [x] Compiled-index fixtures use schema 2 with orchestrator/context compatibility members.
+- [x] `tests/router.lifecycle-recovery.test.mjs` + `tests/router.compiled-index.test.mjs` — empty-mapping/no-fallback behavior covered.
+- [x] `release/v1.2-matrix.json` — `phase-19-live-path` secondary evidence for ORC-01 and TOK-02.
 
 *Framework install: none — `node:test` is built-in (Node 22).*
 
@@ -96,11 +96,11 @@ All phase behaviors have automated verification. The test_mode seam drives the E
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s
-- [ ] `nyquist_compliant: true` set in frontmatter (deferred until Plan 04 completes Wave 0; set by validate-phase)
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags
+- [x] Feedback latency < 30s
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending (validate-phase sets this after Plan 04 completes Wave 0 and the Nyquist Dimension 8 gate passes)
+**Approval:** validated 2026-07-23 — focused 11-file suite passed 85/85; full sequential suite passed 724/724 with 3 environment-dependent skips.

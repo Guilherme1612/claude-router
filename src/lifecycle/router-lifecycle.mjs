@@ -9,8 +9,14 @@ import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
 import { reconcileCandidate } from '../registry/reconcile.mjs';
 import { stableStringify } from '../registry/schema.mjs';
+import { recoverReleaseTuple } from '../prompt/publish-index.mjs';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
+export const RUNTIME_PROFILES = Object.freeze(['claude', 'codex', 'combined']);
+export const RECOMMENDATION_KINDS = Object.freeze(['command', 'skill', 'agent', 'workflow', 'mcp', 'tool']);
+export const ROUTE_COMPATIBILITY_MATRIX = Object.freeze(RUNTIME_PROFILES.flatMap(profile => (
+  RECOMMENDATION_KINDS.map(kind => `${profile}:${kind}`)
+)));
 
 export function fingerprint(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -328,7 +334,8 @@ export async function installRouter(options) {
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
   const built = (options.buildRegistry || buildFullRegistry)({ claudeRoot: p.claudeRoot, codexRoot: p.codexRoot,
-    ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}) });
+    ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}),
+    ...(options.contractOverlays ? { overlays: options.contractOverlays } : {}) });
   const emptyActiveRegistry = { schema_version: 1, records: [] };
   const activeBytes = stableStringify(emptyActiveRegistry) + '\n';
   const reconciliation = reconcileCandidate({
@@ -343,16 +350,23 @@ export async function installRouter(options) {
   const candidateValue = stableStringify(candidatePublication) + '\n';
   const reportValue = stableStringify({ ...reconciliation, diagnostics: built.diagnostics, summary: { ...built.summary, activated: false } }) + '\n';
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+  const repoRoot = resolve(sourceRoot, '..');
   const moduleNames = [
     'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
+    'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
+    'steward/startup-pointer.mjs', 'steward/startup-ack.mjs', 'steward/state.mjs',
+    'steward/draft.mjs', 'steward/refresh.mjs', 'steward/suggestion.mjs',
+    'health/thresholds.mjs', 'health/admin.mjs', 'health/catalog.mjs',
+    'health/outcome-schema.mjs', 'health/score.mjs', 'health/store.mjs',
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
+    'orchestrator/approval.mjs',
     'orchestrator/workflow-declarations.json',
     // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)
     // and CLI (Wave 3) canary triggers can import canary-controller / evidence /
@@ -365,6 +379,45 @@ export async function installRouter(options) {
   const moduleValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => (
     moduleNames.map(name => [join(runtimeRoot, 'modules', name), readFileSync(join(sourceRoot, name))])
   ));
+  // Blocker-2 fix: deploy the production-verify gate fixtures so the 5 subprocess
+  // gates in PRODUCTION_GATE_RUNNERS (validate.mjs) can run from ownedRoot in
+  // production. The fixtures live in the dev repo under tests/ + repoRoot; the
+  // installer previously deployed modules/ only, so `node --test tests/...` and
+  // `node router.calibrate.mjs` ENOENT'd → verification_non_passing → activation
+  // skipped. Two groups are deployed:
+  //   1. gateEntryNames  — owned at <ownedRoot>/<name> (router.calibrate.mjs +
+  //      calibration-tasks.json). calibrate is the calibration_quality gate
+  //      entrypoint; calibration-tasks.json is read by calibrate AND by the
+  //      registry-map fixture (repoRoot-relative).
+  //   2. gateFixtureNames — owned at <ownedRoot>/tests/<name>. The 10 fixtures
+  //      back the regression_suite (6), privacy (1), latency (1), and
+  //      token_budget (2) gates.
+  // A src/ mirror of modules/ is also deployed because 4 regression fixtures
+  // (registry-schema/adapters/diff/reconcile/map) and router.calibrate.mjs
+  // import `../src/registry/...` / `./src/registry/...` (dev-layout paths);
+  // ownedRoot has modules/ not src/, so the mirror makes those imports resolve
+  // without modifying the dev fixtures. validate.mjs subprocess env now
+  // inherits the real HOME so fixtures find the deployed hook via homedir().
+  const gateEntryNames = ['router.calibrate.mjs', 'calibration-tasks.json'];
+  const gateFixtureNames = [
+    'tests/router.registry-schema.test.mjs',
+    'tests/router.adapters.test.mjs',
+    'tests/router.registry-diff.test.mjs',
+    'tests/router.registry-reconcile.test.mjs',
+    'tests/router.route-targets.test.mjs',
+    'tests/router.registry-map.test.mjs',
+    'tests/router.privacy.test.mjs',
+    'tests/router.perf-evolved.test.mjs',
+    'tests/router-graphify-integration.test.mjs',
+    'tests/router.inject.test.mjs',
+  ];
+  const gateFixtureValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => [
+    ...gateEntryNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
+    ...gateFixtureNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
+    // src/ mirror of modules/ so `../src/...` / `./src/...` imports in the
+    // fixtures and router.calibrate.mjs resolve in production.
+    ...moduleNames.map(name => [join(runtimeRoot, 'src', name), readFileSync(join(sourceRoot, name))]),
+  ]);
   const controllerConfig = {
     schema_version: 1,
     claude_root: p.claudeRoot,
@@ -383,6 +436,19 @@ export async function installRouter(options) {
     report_path: p.reportPath,
     activation_root: p.ownedRoot,
     active_path: join(p.ownedRoot, 'active.json'),
+    // mode-map.json is the router's workflow brain (task-signal → mode/skills/agents).
+    // The registry build stamps per-record `mapping.explicit_subjects` from it so
+    // mapCandidateRegistry seeds dispatch subjects → publishCompiledIndex can emit
+    // routes. Not in ownedValues (not deployed/overwritten): like telemetry.jsonl,
+    // it is a user-reviewed/mutation data file that pre-exists at ownedRoot.
+    mode_map_path: join(p.ownedRoot, 'mode-map.json'),
+    // workflow-declarations.json is the orchestrator's declared-workflow contract
+    // (deployed to modules/orchestrator/). The registry build stamps declared
+    // workflow_ids onto matching records so the compiled index has routes for every
+    // orchestrator-declared workflow (e.g. gsd-execute-phase), which the calibration
+    // quality gate requires.
+    workflow_declarations_path: join(p.ownedRoot, 'modules', 'orchestrator', 'workflow-declarations.json'),
+    ...(options.contractOverlays ? { contract_overlays: options.contractOverlays } : {}),
     // EVO-05: the watcher ingests routing telemetry into the canary evidence
     // store. The hook appends to ~/.claude/router/telemetry.jsonl which equals
     // join(ownedRoot, 'telemetry.jsonl') for a global install.
@@ -409,9 +475,11 @@ export async function installRouter(options) {
   const { verification_runners: _strippedRunners, ...serializableConfig } = controllerConfig;
   const controllerConfigValue = stableStringify(serializableConfig) + '\n';
   const configurationFingerprint = fingerprint(stableStringify(serializableConfig));
+  const readinessValues = [
+    ...moduleValues, ...gateFixtureValues, [p.controllerConfigPath, controllerConfigValue],
+  ];
   const ownedValues = [
-    ...moduleValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
-    [p.controllerConfigPath, controllerConfigValue],
+    ...readinessValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
   ];
   for (const [file] of ownedValues) {
     const owned = existingManifest?.files?.some(entry => entry.path === file);
@@ -489,6 +557,9 @@ export async function installRouter(options) {
     const manifest = {
       schema_version: MANIFEST_SCHEMA_VERSION,
       state: 'complete',
+      runtime_profiles: RUNTIME_PROFILES,
+      recommendation_kinds: RECOMMENDATION_KINDS,
+      route_matrix: ROUTE_COMPATIBILITY_MATRIX,
       roots: { claude: p.claudeRoot, codex: p.codexRoot },
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
@@ -516,7 +587,14 @@ export async function installRouter(options) {
         // behind, leaving the owned root non-empty after uninstall.
         join(p.ownedRoot, 'modules'), join(p.codexOwnedRoot, 'modules'),
         ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'modules', name))))],
-        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))]],
+        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))],
+        // Blocker-2: prune the deployed gate-fixture trees. `src` mirrors
+        // modules/ (isomorphic subdir layout) and `tests` holds the 10 gate
+        // fixtures; both must be empty before the owned root can be removed.
+        join(p.ownedRoot, 'src'), join(p.codexOwnedRoot, 'src'),
+        join(p.ownedRoot, 'tests'), join(p.codexOwnedRoot, 'tests'),
+        ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'src', name))))],
+        ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'src', name))))]],
       runtime_state_inventory: {
         immutable: { path: join(p.ownedRoot, 'versions'), owned_by_version_manifests: true },
         mutable: [p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'), p.controllerStatusPath, p.controllerControlPath, p.scanStatePath],
@@ -540,7 +618,10 @@ export async function installRouter(options) {
       && fileMatches(p.codexRouterPath, sourceFingerprint)
       && (!deployEvolve || fileMatches(p.codexEvolvePath, evolveFingerprint))
       && fileMatches(p.codexMarkerPath, markerFingerprint)
-      && ownedValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
+      // candidate/report are controller-owned mutable state after startup. The first
+      // reconcile can legitimately replace their installer seed bytes before the
+      // controller publishes `ready`; only immutable deployment inputs belong here.
+      && readinessValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
     return {
@@ -663,6 +744,9 @@ export async function restartController(options) {
   const p = paths(options);
   const config = readJson(p.controllerConfigPath, null, 'controller config');
   if (!config) throw new Error('controller config is missing; install the router first');
+  if (existsSync(join(p.ownedRoot, 'release-tuples'))) {
+    recoverReleaseTuple({ ownedRoot: p.ownedRoot, now: options.now ?? Date.now() });
+  }
   const configurationFingerprint = fingerprint(stableStringify(config));
   const current = readyController(p, configurationFingerprint, options.controllerStaleMs ?? 5_000);
   if (current) {

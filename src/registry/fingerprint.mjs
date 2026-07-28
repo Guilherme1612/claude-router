@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
-  mkdir, open, readFile as readFileFs, readdir, realpath, rename, rm,
+  mkdir, open, readFile as readFileFs, readdir, realpath, rename, rm, stat,
 } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, posix, relative, resolve, sep } from 'node:path';
 import { stableStringify } from './schema.mjs';
@@ -46,7 +46,13 @@ function buildSubtreeHashes(roots, entries) {
   return nodes;
 }
 
-async function walk(rootPath, logicalRoot, options, entries, diagnostics, current = rootPath) {
+async function walk(rootPath, logicalRoot, options, entries, diagnostics, current = rootPath, visited = new Set()) {
+  const canonicalCurrent = await realpath(current);
+  if (visited.has(canonicalCurrent)) {
+    diagnostics.push(diagnostic('cycle', logicalRoot, portablePath(relative(rootPath, current).replaceAll(sep, '/')) || '.', 'canonical_directory_revisited'));
+    return;
+  }
+  visited.add(canonicalCurrent);
   let children;
   try {
     children = await readdir(current, { withFileTypes: true });
@@ -78,11 +84,19 @@ async function walk(rootPath, logicalRoot, options, entries, diagnostics, curren
       diagnostics.push(diagnostic('path_escape', logicalRoot, relativePath, 'outside_logical_root'));
       continue;
     }
-    if (child.isDirectory()) {
-      await walk(rootPath, logicalRoot, options, entries, diagnostics, canonical);
+    const linked = child.isSymbolicLink();
+    let kind = child;
+    if (linked) {
+      try { kind = await (options.stat || stat)(canonical); } catch (error) {
+        diagnostics.push(diagnostic('unsafe_link', logicalRoot, relativePath, error?.code || 'UNKNOWN'));
+        continue;
+      }
+    }
+    if (kind.isDirectory()) {
+      await walk(rootPath, logicalRoot, options, entries, diagnostics, canonical, visited);
       continue;
     }
-    if (!child.isFile()) continue;
+    if (!kind.isFile()) continue;
     try {
       const bytes = await options.readFile(canonical);
       entries.push({
@@ -146,7 +160,13 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     }
     const ignoredRelativePaths = (spec.ignoredRelativePaths || []).map(portablePath);
     if (ignoredRelativePaths.some(value => !value)) throw new TypeError('ignoredRelativePaths must be portable');
-    normalizedSpecs.push({ logicalRoot: spec.logicalRoot.trim(), canonicalRoot, ignoredRelativePaths, rootMissing });
+    normalizedSpecs.push({
+      logicalRoot: spec.logicalRoot.trim(),
+      canonicalRoot,
+      ignoredRelativePaths,
+      rootMissing,
+      rootReplaced: Boolean(spec.expectedCanonicalRoot && canonicalRoot && spec.expectedCanonicalRoot !== canonicalRoot),
+    });
   }
   normalizedSpecs.sort((a, b) => a.logicalRoot.localeCompare(b.logicalRoot));
   if (new Set(normalizedSpecs.map(spec => spec.logicalRoot)).size !== normalizedSpecs.length) {
@@ -157,6 +177,9 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     if (spec.rootMissing) {
       diagnostics.push({ code: 'root_missing', logical_root: spec.logicalRoot, relative_path: '.', reason: 'ENOENT' });
       continue;
+    }
+    if (spec.rootReplaced) {
+      diagnostics.push({ code: 'root_replaced', logical_root: spec.logicalRoot, relative_path: '.', reason: 'canonical_identity_changed' });
     }
     await walk(spec.canonicalRoot, spec.logicalRoot, { readFile, ignoredRelativePaths: spec.ignoredRelativePaths }, entries, diagnostics);
   }
@@ -171,7 +194,21 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     schema_version: SCHEMA_VERSION, roots, root_hashes: rootHashes,
     subtree_hashes: subtreeHashes, entries, diagnostics,
   };
-  return { ...canonical, hash: hash(canonical) };
+  const incompleteCodes = new Set(['access_denied', 'read_error', 'scan_error', 'path_escape', 'unsafe_link', 'cycle', 'root_replaced']);
+  const logicalRoots = normalizedSpecs.map((spec) => {
+    const diagnosticCodes = [...new Set(diagnostics
+      .filter((item) => item.logical_root === spec.logicalRoot)
+      .map((item) => item.code))].sort();
+    const complete = !diagnosticCodes.some((code) => incompleteCodes.has(code));
+    return {
+      logicalRoot: spec.logicalRoot,
+      complete,
+      status: complete ? 'complete' : 'incomplete',
+      canonicalRoot: spec.logicalRoot,
+      diagnosticCodes,
+    };
+  });
+  return { ...canonical, logicalRoots, hash: hash(canonical) };
 }
 
 function invalidState(code) {
