@@ -203,3 +203,10 @@ test('D-5 scope isolation: no src/health/*.mjs module imports activate.mjs or pu
     assert.ok(!re.test(source), `${path} imports activate.mjs or publish-index.mjs (D-5 violation)`);
   }
 });
+
+test('UX-08 / UX-09: prompt route consumes only the bounded pointer loader', () => {
+  const routePath = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'context', 'prompt-route.mjs');
+  const source = readFileSync(routePath, 'utf8');
+  assert.doesNotMatch(source, /refreshSuggestionPointer|src\/health|health\/|deriveObservations|selectSuggestion|readdir|history|telemetry|fetch\s*\(|node:https?|model/i);
+  assert.match(source, /loadStartupPointer/);
+});
