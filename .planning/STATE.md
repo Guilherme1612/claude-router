@@ -4,17 +4,17 @@ milestone: v1.3
 milestone_name: Adaptive Local Capability Steward and Intent-Native Routing
 current_phase: 26
 current_phase_name: Coherent Publication and Dual-Runtime Release
-status: milestone_audited_pr_open
-stopped_at: v1.3 audit ship_with_deferred; PR #1 open; awaiting merge
-last_updated: "2026-07-28T19:12:00.000Z"
+status: "v1.3 milestone shipped — PR #1 merged to main (c109a16)"
+stopped_at: "v1.3 audit ship_with_deferred; PR #1 open; awaiting merge"
+last_updated: "2026-07-28T18:25:22.112Z"
 last_activity: 2026-07-28
-last_activity_desc: v1.3 milestone audit (ship_with_deferred), mapping-metadata gap confirmed closed, branch pushed (e914786..f4fd112), PR #1 updated
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 31
   completed_plans: 31
   percent: 100
+last_activity_desc: Phase 26 review fixes applied, release evidence regenerated, 9/9 phase gates green (1102 pass)
 ---
 
 # Project State
@@ -30,8 +30,8 @@ See: .planning/PROJECT.md (updated 2026-07-23)
 
 Phase: 26 — Coherent Publication and Dual-Runtime Release
 Plan: All 8 plans complete
-Status: Phase verified — ready for milestone audit
-Last activity: 2026-07-28 — Phase 26 review fixes applied, release evidence regenerated, 9/9 phase gates green (1102 pass)
+Status: v1.3 milestone shipped — PR #1 merged to main (c109a16)
+Last activity: 2026-07-28
 
 Progress: [██████████] 100%
 
