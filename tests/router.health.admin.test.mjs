@@ -161,6 +161,25 @@ test('HLTH-05 recover: restores from state.disposed.json', () => {
   } finally { cleanupOwnedRoot(tmp); }
 });
 
+test('HLTH-05 recover: both state.json and state.disposed.json exist → state_json_authoritative (WR-02)', () => {
+  const tmp = makeOwnedRoot();
+  try {
+    // state.json is the authoritative, newer snapshot.
+    writeState(tmp, { 'skill:debug': { tier: 'high' } });
+    // Simulate a stale disposed snapshot alongside it.
+    writeFileSync(join(tmp, 'health', 'state.disposed.json'), JSON.stringify({ stale: true }), { mode: 0o600 });
+    const result = recover({ healthRoot: join(tmp, 'health') });
+    assert.equal(result.ok, true);
+    assert.equal(result.reason_code, 'recover_restored');
+    assert.equal(result.data.recovered_from, 'state_json_authoritative');
+    // state.json is unchanged (authoritative).
+    const parsed = JSON.parse(readFileSync(join(tmp, 'health', 'state.json'), 'utf8'));
+    assert.deepEqual(parsed, { 'skill:debug': { tier: 'high' } });
+    // The stale disposed snapshot is discarded.
+    assert.equal(existsSync(join(tmp, 'health', 'state.disposed.json')), false);
+  } finally { cleanupOwnedRoot(tmp); }
+});
+
 test('HLTH-05 recover: rebuilds from outcomes.jsonl when disposed is missing', () => {
   const tmp = makeOwnedRoot();
   try {

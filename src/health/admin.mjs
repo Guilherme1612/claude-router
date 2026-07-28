@@ -20,7 +20,7 @@
 // disposed file is missing. None of the three mutates outcomes.jsonl (the raw
 // evidence is preserved across every admin command).
 
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scoreCapability } from './score.mjs';
 
@@ -108,13 +108,13 @@ export function recover({ healthRoot } = {}) {
   const outcomesPath = join(healthRoot, 'outcomes.jsonl');
 
   if (existsSync(disposedPath)) {
-    // If state.json somehow also exists, prefer the disposed snapshot only
-    // when state.json is missing; otherwise leave state.json alone and report
-    // restored-from-disposed only if we actually moved it.
+    // If state.json somehow also exists, state.json is authoritative — nothing
+    // was restored from the disposed snapshot. Report that explicitly (WR-02:
+    // the prior `recovered_from: 'disposed'` was misleading because no move
+    // happened) and discard the stale disposed snapshot best-effort.
     if (existsSync(statePath)) {
-      // Both exist — remove the disposed snapshot (state.json is authoritative)
-      // and report restored without clobbering state.json.
-      return canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: countCapabilities(statePath) });
+      try { rmSync(disposedPath); } catch { /* best-effort */ }
+      return canonical('health', true, 'recover_restored', { recovered_from: 'state_json_authoritative', capability_count: countCapabilities(statePath) });
     }
     renameSync(disposedPath, statePath);
     return canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: countCapabilities(statePath) });
