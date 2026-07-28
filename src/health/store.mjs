@@ -131,7 +131,13 @@ export function createHealthStore({ root } = {}) {
         if (!record || typeof record !== 'object') { corrupt += 1; continue; }
         // Preserve compaction marker lines (they carry compacted_at_ms).
         if (record.compacted_at_ms !== undefined) { kept.push(line); continue; }
-        if (!Number.isSafeInteger(record.timestamp_ms) || record.timestamp_ms < retentionFloor) { dropped += 1; continue; }
+        // WR-03: a valid JSON object with a non-integer/missing timestamp_ms is
+        // corrupt, not retention-expired. Counting it as `dropped` folded a
+        // data-integrity signal into the retention-expired count, defeating
+        // the audit-trail distinction WR-05 introduced. Track it as corrupt
+        // so the marker distinguishes tampering from natural retention.
+        if (!Number.isSafeInteger(record.timestamp_ms)) { corrupt += 1; continue; }
+        if (record.timestamp_ms < retentionFloor) { dropped += 1; continue; }
         kept.push(line);
       }
       // WR-05: track corrupt/unreadable lines separately from retention-expired
