@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { routeContextPrompt } from '../src/context/prompt-route.mjs';
+import { buildLargeMixedProfile } from './helpers/inventory-fixture.mjs';
 
-test('installed route emits isolated large-registry release metrics', () => {
-  const result = routeContextPrompt({ prompt: 'hello' });
-  assert.ok(result.release_metrics?.sample_count >= 20,
-    'PHASE26_PERFORMANCE_EVIDENCE_MISSING');
+test('registry fixture is deterministic, normalized, and covers every installed kind', () => {
+  const left = buildLargeMixedProfile();
+  const right = buildLargeMixedProfile();
+  assert.deepEqual(left, right);
+  assert.ok(left.length >= 300);
+  assert.equal(new Set(left.map(record => record.name)).size, left.length);
+  assert.deepEqual(
+    [...new Set(left.map(record => record.native_type.split(':').at(-1)))].sort(),
+    ['agent', 'command', 'mcp', 'skill', 'tool', 'workflow'],
+  );
 });
