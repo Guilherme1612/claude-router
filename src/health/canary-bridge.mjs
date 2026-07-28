@@ -39,7 +39,7 @@
 // call promoteThresholdCandidate directly.
 
 import { createHash } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -120,6 +120,11 @@ function createHealthPublication() {
     },
     // activateCandidate — write thresholds.json + active.json pointer under
     // health/versions/<policy_version>/ (D-5 isolated from release-tuples).
+    // WR-04: write both temp files + fsync BEFORE either rename so a failure
+    // during the second write leaves no partially-visible state. If the
+    // thresholds rename succeeds but the active.json rename fails, clean up
+    // the orphaned thresholds.json best-effort so readActivePointer does not
+    // surface a bundle with no active pointer to it.
     activateCandidate(activation) {
       const root = activation?.ownedRoot;
       if (!root || typeof root !== 'string') {
@@ -134,13 +139,38 @@ function createHealthPublication() {
       const bundle = { policy_version, weights, tier_boundaries, cooldown_ms, calibration_corpus_version };
       const file = join(dir, 'thresholds.json');
       const tmp = `${file}.tmp-${process.pid}-${Date.now()}`;
-      durableWrite(tmp, JSON.stringify(bundle));
-      renameSync(tmp, file);
-      // Update the active.json pointer (mirror release-tuples/active.json
-      // discipline but ISOLATED under health/ — D-5).
-      const pointerTmp = `${root}/active.json.tmp-${process.pid}-${Date.now()}`;
-      durableWrite(pointerTmp, JSON.stringify({ policy_version }));
-      renameSync(pointerTmp, join(root, 'active.json'));
+      const pointerPath = join(root, 'active.json');
+      const pointerTmp = `${pointerPath}.tmp-${process.pid}-${Date.now()}`;
+      // Phase 1 — write both temp files and fsync (no renames yet, so a
+      // failure here changes nothing visible). On any failure, clean up both
+      // temps best-effort and return rejected.
+      try {
+        durableWrite(tmp, JSON.stringify(bundle));
+        durableWrite(pointerTmp, JSON.stringify({ policy_version }));
+      } catch (err) {
+        try { rmSync(tmp, { force: true }); } catch { /* best-effort */ }
+        try { rmSync(pointerTmp, { force: true }); } catch { /* best-effort */ }
+        return { activation_status: 'rejected', reason_code: 'activation_write_failed', detail: String(err?.message || err) };
+      }
+      // Phase 2 — rename both into place. If the thresholds rename succeeds
+      // but the pointer rename fails, remove the orphaned thresholds.json so
+      // readActivePointer still returns the prior version.
+      try {
+        renameSync(tmp, file);
+      } catch (err) {
+        try { rmSync(tmp, { force: true }); } catch { /* best-effort */ }
+        try { rmSync(pointerTmp, { force: true }); } catch { /* best-effort */ }
+        return { activation_status: 'rejected', reason_code: 'activation_write_failed', detail: String(err?.message || err) };
+      }
+      try {
+        renameSync(pointerTmp, pointerPath);
+      } catch (err) {
+        // thresholds.json was renamed but the pointer was not — remove the
+        // orphaned bundle so a later loadThresholds does not surface it.
+        try { rmSync(file, { force: true }); } catch { /* best-effort */ }
+        try { rmSync(pointerTmp, { force: true }); } catch { /* best-effort */ }
+        return { activation_status: 'rejected', reason_code: 'activation_write_failed', detail: String(err?.message || err) };
+      }
       return { activation_status: 'activated', version_id: policy_version };
     },
   });
