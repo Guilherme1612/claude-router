@@ -2,7 +2,7 @@
 phase: 13
 slug: target-safety-hook-reconciliation-and-quarantine
 date: 2026-07-15
-status: approved
+status: validated
 nyquist_compliant: true
 ---
 

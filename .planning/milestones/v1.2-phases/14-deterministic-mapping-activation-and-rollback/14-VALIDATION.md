@@ -1,7 +1,7 @@
 ---
 phase: 14
 slug: deterministic-mapping-activation-and-rollback
-status: approved
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-07-15

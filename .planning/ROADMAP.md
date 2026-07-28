@@ -5,7 +5,7 @@
 - ✅ **[v1.0 Claude Router MVP](milestones/v1.0-ROADMAP.md)** — Phases 1-4 (shipped 2026-07-09)
 - ✅ **[v1.1 Inspectable Routing Control Layer](milestones/v1.1-ROADMAP.md)** — Phases 5-10 (shipped 2026-07-14)
 - ✅ **[v1.2 Autonomous Dual-Runtime Control Plane](milestones/v1.2-ROADMAP.md)** — Phases 11-20 (shipped 2026-07-23)
-- 🚧 **v1.3 Adaptive Local Capability Steward and Intent-Native Routing** — Phases 21-26 (planned)
+- 🚧 **v1.3 Adaptive Local Capability Steward and Intent-Native Routing** — Phases 21-26 (audited 2026-07-28, verdict: ship_with_deferred)
 
 ## Overview
 
@@ -50,11 +50,11 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
 **Milestone Goal:** Make Router framework-agnostic, lightweight, locally adaptive, and able to turn explicit natural-language intent into the correct safe action using the capabilities actually installed in each user's `.claude` and `.codex` environments.
 
 - [x] **Phase 21: Authoritative Personalized Inventory** - Discover and reconcile installed capabilities as framework-neutral local truth. (completed 2026-07-26)
-- [ ] **Phase 22: Conservative Contracts and Relationship Graph** - Infer inspectable capability meaning, uncertainty, and typed relationships.
+- [x] **Phase 22: Conservative Contracts and Relationship Graph** - Infer inspectable capability meaning, uncertainty, and typed relationships. (completed 2026-07-27)
 - [x] **Phase 23: Intent-Safe State-Aware Execution** - Route explicit action intent through authoritative state to one safe installed capability. (completed 2026-07-27)
-- [ ] **Phase 24: Privacy-Safe Outcomes and Capability Health** - Turn bounded local outcomes into conservative, evidence-backed health observations.
-- [ ] **Phase 25: Advisory Stewardship and Guarded Drafts** - Surface one useful recommendation without silently mutating personal capabilities.
-- [ ] **Phase 26: Coherent Publication and Dual-Runtime Release** - Prove the complete v1.3 tuple preserves latency, compatibility, rollback, and recovery.
+- [x] **Phase 24: Privacy-Safe Outcomes and Capability Health** - Turn bounded local outcomes into conservative, evidence-backed health observations. (completed 2026-07-28)
+- [x] **Phase 25: Advisory Stewardship and Guarded Drafts** - Surface one useful recommendation without silently mutating personal capabilities. (completed 2026-07-28)
+- [x] **Phase 26: Coherent Publication and Dual-Runtime Release** - Prove the complete v1.3 tuple preserves latency, compatibility, rollback, and recovery. (completed 2026-07-28)
 
 ## Phase Details
 
@@ -143,23 +143,23 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
   3. Health observations distinguish missing, unavailable, stale, unused, duplicate, overlapping, complementary, repeatedly ineffective, and reusable-workflow opportunities with reason codes, evidence windows, opportunity counts, freshness, confidence, and non-destructive remedies.
   4. Rare or new recovery, incident, release, and migration capabilities remain unjudged when evidence is insufficient, while versioned thresholds, decay, cooldown, and multilingual calibration are testable and canary-guarded.
 
-**Plans**: 4 plans
+**Plans**: 4/4 plans executed
 
 **Wave 1**
 
-- [ ] 24-01-PLAN.md — Tracer: outcome schema + privacy boundary + minimal observer + inspect, end-to-end
+- [x] 24-01-PLAN.md — Tracer: outcome schema + privacy boundary + minimal observer + inspect, end-to-end
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 24-02-PLAN.md — Full 9-kind observation capture (HLTH-03) + usefulness scoring (HLTH-06) + rare-role unjudged tier (HLTH-07)
+- [x] 24-02-PLAN.md — Full 9-kind observation capture (HLTH-03) + usefulness scoring (HLTH-06) + rare-role unjudged tier (HLTH-07)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 24-03-PLAN.md — Health observation catalog: 10 kinds + HLTH-10 required fields (HLTH-08/09/10) + admin reset/dispose/recover (HLTH-05)
+- [x] 24-03-PLAN.md — Health observation catalog: 10 kinds + HLTH-10 required fields (HLTH-08/09/10) + admin reset/dispose/recover (HLTH-05)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 24-04-PLAN.md — Versioned thresholds + canary-guarded activation + multilingual calibration plumbing (HLTH-11)
+- [x] 24-04-PLAN.md — Versioned thresholds + canary-guarded activation + multilingual calibration plumbing (HLTH-11)
 
 ### Phase 25: Advisory Stewardship and Guarded Drafts
 
@@ -174,7 +174,15 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
   4. Missing-capability remediation requires explicit approval before a draft and preview, shows exact paths, semantic changes, dependencies, conflicts, route effects, verification and rollback implications, and never automatically installs or publishes the result.
   5. Router presents no dashboard, timeline, per-session summary, unranked finding dump, or maintenance-command suite.
 
-**Plans**: TBD
+**Plans**: 4/4 plans complete
+
+Plans:
+
+- [x] 25-01-PLAN.md — Deterministic one-item suggestion policy and private interaction state
+- [x] 25-02-PLAN.md — Complete preview-only drafts with fresh explicit approval
+- [x] 25-03-PLAN.md — Canonical `/router suggestion` CLI interaction family
+- [x] 25-04-PLAN.md — Precomputed bounded startup pointer and read-only hot-path consumer
+
 **UI hint**: yes
 
 ### Phase 26: Coherent Publication and Dual-Runtime Release
@@ -190,7 +198,36 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
   4. Existing command, skill, agent, workflow, MCP, and tool recommendations remain compatible across installed Claude and Codex environments, including recommendation-only fail-open behavior and approval-gated mutations.
   5. Release evidence shows warm routing p95 below 25ms, every measured route below 100ms, bounded injected context, and safe publish/rollback/recovery under realistic large local registries.
 
-**Plans**: TBD
+**Plans**: 8/8 plans complete
+
+**Wave 0**
+
+- [x] 26-01-PLAN.md — Clean mode-map baseline and failure-capable Phase 26 behavioral owners
+
+**Wave 1**
+
+- [x] 26-02-PLAN.md — Complete immutable tuple and bounded read-only prompt projection
+
+**Wave 2**
+
+- [x] 26-03-PLAN.md — Dependency-complete invalidation and full/incremental tuple equivalence
+
+**Wave 3**
+
+- [x] 26-04-PLAN.md — Existing verifier/canary activation, rollback, and recovery lifecycle
+
+**Wave 4**
+
+- [x] 26-05-PLAN.md — Installed Claude/Codex six-kind lifecycle compatibility
+- [x] 26-06-PLAN.md — Approval authority preservation and recommendation fail-open behavior
+
+**Wave 5**
+
+- [x] 26-07-PLAN.md — Realistic 300-record installed-route performance and context evidence
+
+**Wave 6**
+
+- [x] 26-08-PLAN.md — Existing release runner v1.3 evidence matrix and final gates
 
 ## Progress
 
@@ -209,11 +246,11 @@ Full phase details, decisions, and tech debt: [v1.2-ROADMAP](milestones/v1.2-ROA
 | 19. Close gap TOK-02 + ORC-01 | v1.2 | 4/4 | Complete | 2026-07-22 |
 | 20. Close gap EVO-05 | v1.2 | 5/5 | Complete | 2026-07-22 |
 | 21. Authoritative Personalized Inventory | v1.3 | 6/6 | Complete    | 2026-07-26 |
-| 22. Conservative Contracts and Relationship Graph | v1.3 | 0/TBD | Not started | - |
+| 22. Conservative Contracts and Relationship Graph | v1.3 | 6/6 | Complete    | 2026-07-27 |
 | 23. Intent-Safe State-Aware Execution | v1.3 | 3/3 | Complete    | 2026-07-27 |
-| 24. Privacy-Safe Outcomes and Capability Health | v1.3 | 0/TBD | Not started | - |
-| 25. Advisory Stewardship and Guarded Drafts | v1.3 | 0/TBD | Not started | - |
-| 26. Coherent Publication and Dual-Runtime Release | v1.3 | 0/TBD | Not started | - |
+| 24. Privacy-Safe Outcomes and Capability Health | v1.3 | 4/4 | Complete    | 2026-07-28 |
+| 25. Advisory Stewardship and Guarded Drafts | v1.3 | 4/4 | Complete    | 2026-07-28 |
+| 26. Coherent Publication and Dual-Runtime Release | v1.3 | 8/8 | Complete   | 2026-07-28 |
 
 ---
 *Roadmap updated 2026-07-23 for v1.3 planning. Prior milestone details are archived under `.planning/milestones/`.*
