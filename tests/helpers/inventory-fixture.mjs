@@ -18,6 +18,10 @@ export const mutationPlayback = Object.freeze([
   'removal',
 ]);
 
+export const recommendationKinds = Object.freeze([
+  'command', 'skill', 'agent', 'workflow', 'mcp', 'tool',
+]);
+
 function record(name, overrides = {}) {
   const runtime = overrides.runtime || 'claude';
   const scope = overrides.scope || { kind: 'global' };
@@ -60,6 +64,26 @@ function record(name, overrides = {}) {
     diagnostics: [],
     ...overrides,
   };
+}
+
+export function buildLargeMixedProfile(size = 312) {
+  if (!Number.isSafeInteger(size) || size < 300) {
+    throw new TypeError('large fixture size must be an integer of at least 300');
+  }
+  return Array.from({ length: size }, (_, index) => {
+    const kind = recommendationKinds[index % recommendationKinds.length];
+    const runtime = index % 2 === 0 ? 'claude' : 'codex';
+    const semanticType = kind === 'workflow' ? 'skill' : kind === 'mcp' ? 'tool' : kind;
+    const name = `p${index.toString(36).padStart(3, '0')}`;
+    return record(name, {
+      runtime,
+      type: semanticType,
+      native_type: `${runtime}:${kind}`,
+      semantic_type: semanticType,
+      invocation: { availability: 'available', runtime, command: kind, args: [name] },
+      dependencies: { state: 'declared', items: [] },
+    });
+  });
 }
 
 export function buildClaudeHeavyProfile() {
