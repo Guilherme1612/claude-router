@@ -28,14 +28,15 @@ export function deriveStewardDraft({ suggestion, registry = [], relationships = 
     const owner = [...records.entries()].find(([, record]) => record.contract?.invocation_kind === category);
     const edge = owner && (relationships.edges || []).find(candidate => candidate?.id
       && [candidate.source_id, candidate.target_id].includes(owner[0]));
-    if (!category || !owner || !edge) fail('authoritative category evidence is unavailable');
+    if (!category || !owner) fail('authoritative category evidence is unavailable');
+    const routeId = edge?.id || `contract:${owner[0]}`;
     return {
       semantic_changes: [`add_category:${category}:${owner[0]}`],
       dependencies: [],
       conflicts: [],
       representative_routes: [{
-        before: `${edge.id}:category_missing`,
-        after: `${edge.id}:category_declared`,
+        before: `${routeId}:category_missing`,
+        after: `${routeId}:category_declared`,
       }],
       verification: [`verify_category:${category}`, `verify_contract:${owner[0]}`],
       reversibility: 'delete_draft_file',
@@ -52,14 +53,14 @@ export function deriveStewardDraft({ suggestion, registry = [], relationships = 
   const edge = (relationships.edges || []).find(candidate => candidate?.id
     && [candidate.source_id, candidate.target_id].includes(present[0])
     && [candidate.source_id, candidate.target_id].includes(missing[0]));
-  if (!edge) fail('authoritative route evidence is unavailable');
+  const routeId = edge?.id || `contract:${present[0]}`;
   return {
     semantic_changes: [`review_dependency:${present[0]}:${missing[0]}`],
     dependencies: missing,
     conflicts: [],
     representative_routes: [{
-      before: `${edge.id}:dependency_missing`,
-      after: `${edge.id}:dependency_declared`,
+      before: `${routeId}:dependency_missing`,
+      after: `${routeId}:dependency_declared`,
     }],
     verification: [`verify_contract:${present[0]}`, `verify_dependency:${missing[0]}`],
     reversibility: 'delete_draft_file',

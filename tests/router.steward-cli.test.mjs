@@ -93,18 +93,21 @@ test('suggestion empty and detail expose one bounded private canonical projectio
 });
 
 test('production suggestion and draft derive authoritative local inputs without injected steward data', () => {
-  const root = mkdtempSync(join(tmpdir(), 'router-steward-live-cli-'));
-  try {
+  for (const record of [{
+    canonical_identity: 'skill:debug',
+    semantic_type: 'skill',
+    contract: { dependencies: ['skill:ghost'] },
+  }, {
+    canonical_identity: 'skill:agent-owner',
+    semantic_type: 'skill',
+    contract: { invocation_kind: 'agent' },
+  }]) {
+    const root = mkdtempSync(join(tmpdir(), 'router-steward-live-cli-'));
+    try {
     mkdirSync(join(root, 'registry'), { recursive: true });
     writeFileSync(join(root, 'registry', 'registry.json'), JSON.stringify({
-      records: [{
-        canonical_identity: 'skill:debug',
-        semantic_type: 'skill',
-        contract: { dependencies: ['skill:ghost'] },
-      }],
-      relationships: {
-        edges: [{ id: 'route:debug', source_id: 'skill:debug', target_id: 'skill:ghost' }],
-      },
+      records: [record],
+      relationships: { edges: [] },
     }));
     const inspect = runRouterControl({
       argv: ['suggestion', '--owned-root', root],
@@ -116,8 +119,18 @@ test('production suggestion and draft derive authoritative local inputs without 
       dependencies: { now: () => NOW },
     });
     assert.equal(proposal.result.reason_code, 'draft_approval_required');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
+    const approved = runRouterControl({
+      argv: [
+        'suggestion', 'draft', '--confirm', inspect.result.data.suggestion.fingerprint,
+        '--execute', '--approval', proposal.result.data.approval_token, '--owned-root', root,
+      ],
+      dependencies: { now: () => NOW },
+    });
+    assert.equal(approved.result.reason_code, 'draft_preview_ready');
+    assert.equal(approved.result.data.authority, 'draft_file_only');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   }
 });
 

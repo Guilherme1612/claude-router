@@ -196,18 +196,18 @@ test('production draft binds exact affected contracts and differs with observati
   const first = deriveStewardDraft({
     suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:ghost-a'] }),
     registry,
-    relationships: { edges: [{ id: 'route:alpha', source_id: 'skill:alpha', target_id: 'skill:ghost-a' }] },
+    relationships: { edges: [] },
   });
   const second = deriveStewardDraft({
     suggestion: suggestion({ affected_capability_ids: ['skill:beta', 'skill:ghost-b'] }),
     registry,
-    relationships: { edges: [{ id: 'route:beta', source_id: 'skill:beta', target_id: 'skill:ghost-b' }] },
+    relationships: { edges: [] },
   });
   assert.deepEqual(first.dependencies, ['skill:ghost-a']);
   assert.deepEqual(first.semantic_changes, ['review_dependency:skill:alpha:skill:ghost-a']);
   assert.deepEqual(first.representative_routes, [{
-    before: 'route:alpha:dependency_missing',
-    after: 'route:alpha:dependency_declared',
+    before: 'contract:skill:alpha:dependency_missing',
+    after: 'contract:skill:alpha:dependency_declared',
   }]);
   assert.notDeepEqual(first, second);
   const category = deriveStewardDraft({
@@ -221,12 +221,12 @@ test('production draft binds exact affected contracts and differs with observati
       semantic_type: 'skill',
       contract: { invocation_kind: 'agent' },
     }],
-    relationships: { edges: [{ id: 'route:agent', source_id: 'skill:alpha', target_id: 'route:agent' }] },
+    relationships: { edges: [] },
   });
   assert.deepEqual(category.semantic_changes, ['add_category:agent:skill:alpha']);
   assert.throws(() => deriveStewardDraft({
-    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:ghost-a'] }),
+    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:not-declared'] }),
     registry,
     relationships: { edges: [] },
-  }), /authoritative route evidence/);
+  }), /exact affected contract evidence/);
 });
