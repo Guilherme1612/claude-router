@@ -97,6 +97,10 @@ export function inProcessControllerLauncher(runners, holder = {}) {
               try { handle.close().catch(() => {}).then(resolve, resolve); }
               catch { resolve(); }
             }
+            else if (child.exitCode !== null) {
+              // runRegistryWatcher rejected (e.g. ready rejection); handle will never be set.
+              resolve();
+            }
             else setTimeout(poll, 5);
           };
           poll();

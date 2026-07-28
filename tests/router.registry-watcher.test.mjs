@@ -474,6 +474,21 @@ test('evaluation and paired publication failures retain baselines and retry from
   }
 });
 
+test('ready rejection closes all fs.watch handles to prevent leaks', async () => {
+  const handles = [];
+  const h = harness({
+    watchFactory(path, options, callback) {
+      const handle = { closed: false, close() { handle.closed = true; } };
+      handles.push(handle);
+      return handle;
+    },
+    async scan() { throw new Error('initial scan denied'); },
+  });
+  await assert.rejects(h.controller.ready, /initial scan denied/);
+  assert.ok(handles.length > 0, 'at least one watch handle was created before rejection');
+  assert.ok(handles.every(item => item.closed), 'all watch handles closed after ready rejection');
+});
+
 test('close releases watchers and timers and makes callbacks inert', async () => {
   const h = harness();
   await h.controller.ready;
