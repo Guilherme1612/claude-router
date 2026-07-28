@@ -39,7 +39,7 @@
 // call promoteThresholdCandidate directly.
 
 import { createHash } from 'node:crypto';
-import { closeSync, fsyncSync, mkdirSync, openSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -95,17 +95,30 @@ function durableWrite(path, bytes) {
 // into applyCanaryDecision. This is NOT a gate suite; it is the persistence
 // adapter (mirror of how router-control.mjs injects the registry publication).
 // D-5: writes ONLY under ~/.claude/router/health/versions/, never touches
-// release-tuples/active.json.
-function createHealthPublication() {
+// release-tuples/active.json. Exported for direct unit testing of the
+// recoverActiveVersion path-handling fix (WR-02).
+export function createHealthPublication() {
   return Object.freeze({
     // Health v1 has no rollback journal — never blocks recovery.
     recoverRollbackJournal({ ownedRoot }) {
       return { recovery_status: 'clear', reason_code: 'no_rollback_journal' };
     },
-    // Read the active health policy_version pointer.
+    // Read the active health policy_version pointer. The caller passes the
+    // versions root (join(healthRoot, 'versions')) as `ownedRoot` here — see
+    // promoteThresholdCandidate line 200 + applyCanaryDecision activation
+    // passing. readActivePointer appends another 'versions/' segment, so
+    // calling it with the versions root would read
+    // `<healthRoot>/versions/versions/active.json` (a nonexistent path) and
+    // always return null. Read active.json directly instead.
     recoverActiveVersion({ ownedRoot }) {
-      const active = readActivePointer(ownedRoot);
-      return { recovery_status: 'clear', version_id: active };
+      const pointerPath = join(ownedRoot, 'active.json');
+      if (!existsSync(pointerPath)) return { recovery_status: 'clear', version_id: null };
+      try {
+        const parsed = JSON.parse(readFileSync(pointerPath, 'utf8'));
+        return { recovery_status: 'clear', version_id: parsed?.policy_version ?? null };
+      } catch {
+        return { recovery_status: 'clear', version_id: null };
+      }
     },
     // Health v1: rollback is a future concern. A not-ready preview causes
     // applyCanaryDecision to surface recovery_required rather than silently

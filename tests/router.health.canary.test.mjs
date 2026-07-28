@@ -203,7 +203,7 @@ test('HLTH-11 regression: score.mjs behavioral no-op — all Plan 24-02 score te
 
 // ---- Task 2: canary bridge — threshold activation through evaluateCandidate ----
 
-import { promoteThresholdCandidate } from '../src/health/canary-bridge.mjs';
+import { promoteThresholdCandidate, createHealthPublication } from '../src/health/canary-bridge.mjs';
 import { createEvidenceStore } from '../src/evolution/evidence.mjs';
 
 const bridgeSource = readFileSync(BRIDGE_PATH, 'utf8');
@@ -419,6 +419,45 @@ test('HLTH-11 D-canary: versions/active.json pointer lives under health/versions
     'versions root must be <ownedRoot>/versions/');
   assert.ok(!vroot.includes('release-tuples'),
     'versions root must not be under release-tuples/');
+  rmSync(root, { recursive: true, force: true });
+});
+
+// WR-02: recoverActiveVersion receives the versions root (join(healthRoot,
+// 'versions')) as `ownedRoot` because promoteThresholdCandidate computes
+// `root = healthVersionsRoot(ownedRoot)` and passes that as activation.ownedRoot
+// and applyCanaryDecision's ownedRoot. readActivePointer appends 'versions/'
+// itself, so delegating to it would read
+// `<healthRoot>/versions/versions/active.json` — a nonexistent path — and
+// always return null. This test promotes a candidate (writing active.json at
+// the correct path), then calls recoverActiveVersion with the versions root
+// and asserts the correct policy_version is returned. Before the fix this
+// returned null.
+test('WR-02 recoverActiveVersion reads active.json from the correct path when passed the versions root', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const promoted = promoteThresholdCandidate({
+    candidate: makeValidCandidate('health-policy-v2'),
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(promoted.status, 'promoted');
+  const vroot = healthVersionsRoot(root);
+  const publication = createHealthPublication();
+  const recovered = publication.recoverActiveVersion({ ownedRoot: vroot });
+  assert.equal(recovered.recovery_status, 'clear');
+  assert.equal(recovered.version_id, 'health-policy-v2',
+    `expected recoverActiveVersion to read active.json from the versions root, got ${JSON.stringify(recovered)}`);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('WR-02 recoverActiveVersion returns null version_id when active.json is absent (no double-versions read)', () => {
+  const root = tempOwnedRoot();
+  const vroot = healthVersionsRoot(root);
+  mkdirSync(vroot, { recursive: true });
+  const publication = createHealthPublication();
+  const recovered = publication.recoverActiveVersion({ ownedRoot: vroot });
+  assert.equal(recovered.recovery_status, 'clear');
+  assert.equal(recovered.version_id, null);
   rmSync(root, { recursive: true, force: true });
 });
 
