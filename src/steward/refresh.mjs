@@ -48,6 +48,8 @@ function loadInputs(ownedRoot, now) {
     contracts,
     outcomes: createHealthStore({ root: join(ownedRoot, 'health') }).readWindow({ now }).records,
     state: createStewardStore({ root: join(ownedRoot, 'steward') }).readState(),
+    healthDisposed: existsSync(join(ownedRoot, 'health', 'state.disposed.json'))
+      && !existsSync(join(ownedRoot, 'health', 'state.json')),
   };
 }
 
@@ -58,18 +60,19 @@ export function refreshSuggestionPointer({
 } = {}) {
   if (typeof ownedRoot !== 'string') throw new TypeError('ownedRoot is required');
   const inputs = (dependencies.loadInputs || loadInputs)(ownedRoot, now);
-  const catalog = (dependencies.deriveObservations || deriveObservations)({
-    registry: inputs.registry,
-    relationships: inputs.relationships,
-    contracts: inputs.contracts,
-    outcomes: inputs.outcomes,
-    now,
-  });
-  const selected = (dependencies.selectSuggestion || selectSuggestion)({
-    observations: catalog.observations,
-    state: inputs.state,
-    now,
-  });
+  const selected = inputs.healthDisposed
+    ? { reason_code: 'suggestion_none', suggestion: null }
+    : (dependencies.selectSuggestion || selectSuggestion)({
+      observations: (dependencies.deriveObservations || deriveObservations)({
+        registry: inputs.registry,
+        relationships: inputs.relationships,
+        contracts: inputs.contracts,
+        outcomes: inputs.outcomes,
+        now,
+      }).observations,
+      state: inputs.state,
+      now,
+    });
   const pointer = (dependencies.startupPointer || startupPointer)(selected, inputs.state, now);
   return (dependencies.compileStartupPointer || compileStartupPointer)({ ownedRoot, pointer });
 }

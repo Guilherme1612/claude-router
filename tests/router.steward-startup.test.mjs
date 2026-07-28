@@ -183,6 +183,34 @@ test('refresh producer derives one pointer from fixed authoritative inputs', () 
   }
 });
 
+test('refresh producer clears stale availability while health is disposed', () => {
+  const ownedRoot = root('router-steward-disposed-');
+  let compiled;
+  try {
+    refreshSuggestionPointer({
+      ownedRoot,
+      now: NOW,
+      dependencies: {
+        loadInputs: () => ({
+          registry: [], relationships: {}, contracts: new Map(), outcomes: [],
+          state: { schema_version: 1, dismissed: {}, snoozed_until: {}, cooldown_at: {} },
+          healthDisposed: true,
+        }),
+        deriveObservations: () => ({ observations: [OBSERVATION] }),
+        selectSuggestion: () => ({
+          reason_code: 'suggestion_selected',
+          suggestion: { fingerprint: FINGERPRINT },
+        }),
+        compileStartupPointer: value => { compiled = value.pointer; return { status: 'stored' }; },
+      },
+    });
+    assert.equal(compiled.available, false);
+    assert.equal(compiled.fingerprint, null);
+  } finally {
+    rmSync(ownedRoot, { recursive: true, force: true });
+  }
+});
+
 test('compile atomically replaces stale availability with a 0600 bounded record', () => {
   const ownedRoot = root('router-steward-compile-');
   try {
