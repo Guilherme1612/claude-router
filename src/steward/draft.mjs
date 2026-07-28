@@ -17,6 +17,21 @@ const FINGERPRINT = /^[a-f0-9]{64}$/;
 const TOKEN = /^[a-z][a-z0-9_:-]{0,127}$/;
 const MAX_ITEMS = 32;
 
+function readContractField(contract, field) {
+  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return undefined;
+  if (Object.hasOwn(contract, 'fields')) {
+    const fields = contract.fields;
+    if (!fields || typeof fields !== 'object' || Array.isArray(fields)) return undefined;
+    const envelope = fields[field];
+    if (!envelope || typeof envelope !== 'object' || Array.isArray(envelope)
+        || envelope.state !== 'known' || !Object.hasOwn(envelope, 'value')) {
+      return undefined;
+    }
+    return envelope.value;
+  }
+  return contract[field];
+}
+
 export function deriveStewardDraft({ suggestion, registry = [], relationships = {} } = {}) {
   const current = normalizeSuggestion(suggestion);
   const records = new Map(registry.map(record => [record.stable_id || stableCapabilityId(record), record]));
@@ -25,7 +40,9 @@ export function deriveStewardDraft({ suggestion, registry = [], relationships = 
     const category = affected.length === 1 && affected[0].startsWith('semantic_type:')
       ? affected[0].slice('semantic_type:'.length)
       : null;
-    const owner = [...records.entries()].find(([, record]) => record.contract?.invocation_kind === category);
+    const owner = [...records.entries()].find(([, record]) => (
+      readContractField(record.contract, 'invocation_kind') === category
+    ));
     const edge = owner && (relationships.edges || []).find(candidate => candidate?.id
       && [candidate.source_id, candidate.target_id].includes(owner[0]));
     if (!category || !owner) fail('authoritative category evidence is unavailable');
@@ -45,9 +62,14 @@ export function deriveStewardDraft({ suggestion, registry = [], relationships = 
   }
   const missing = affected.filter(id => !records.has(id));
   const present = affected.filter(id => records.has(id));
+  const dependencies = present.length === 1
+    ? readContractField(records.get(present[0])?.contract, 'dependencies')
+    : undefined;
   if (current.observation_kind !== 'missing_dependency'
       || missing.length !== 1 || present.length !== 1
-      || !records.get(present[0])?.contract?.dependencies?.includes(missing[0])) {
+      || !Array.isArray(dependencies)
+      || dependencies.some(dependency => typeof dependency !== 'string')
+      || !dependencies.includes(missing[0])) {
     fail('exact affected contract evidence is unavailable');
   }
   const edge = (relationships.edges || []).find(candidate => candidate?.id

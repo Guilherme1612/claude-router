@@ -5,6 +5,9 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { buildCapabilityContract } from '../src/registry/contract.mjs';
+import { stableCapabilityId } from '../src/registry/identity.mjs';
+import { buildClaudeHeavyProfile } from './helpers/inventory-fixture.mjs';
 
 const NOW = 1_800_000_000_000;
 
@@ -189,25 +192,34 @@ test('draft module has no install, activation, publication, or routing mutation 
 
 test('production draft binds exact affected contracts and differs with observation evidence', async () => {
   const { deriveStewardDraft } = await import('../src/steward/draft.mjs');
+  const evidence = value => [{
+    value, provenance: 'adapter', confidence_basis_points: 10000,
+    freshness: 'fresh', rule: 'draft-test-v1',
+  }];
+  const base = buildClaudeHeavyProfile()[0];
+  const alpha = { ...base, name: 'alpha', canonical_identity: 'skill:alpha' };
+  const beta = { ...base, name: 'beta', canonical_identity: 'skill:beta' };
+  const alphaId = stableCapabilityId(alpha);
+  const betaId = stableCapabilityId(beta);
   const registry = [
-    { canonical_identity: 'skill:alpha', contract: { dependencies: ['skill:ghost-a'] } },
-    { canonical_identity: 'skill:beta', contract: { dependencies: ['skill:ghost-b'] } },
+    { ...alpha, contract: buildCapabilityContract(alpha, { dependencies: evidence(['skill:ghost-a']) }) },
+    { ...beta, contract: buildCapabilityContract(beta, { dependencies: evidence(['skill:ghost-b']) }) },
   ];
   const first = deriveStewardDraft({
-    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:ghost-a'] }),
+    suggestion: suggestion({ affected_capability_ids: [alphaId, 'skill:ghost-a'] }),
     registry,
     relationships: { edges: [] },
   });
   const second = deriveStewardDraft({
-    suggestion: suggestion({ affected_capability_ids: ['skill:beta', 'skill:ghost-b'] }),
+    suggestion: suggestion({ affected_capability_ids: [betaId, 'skill:ghost-b'] }),
     registry,
     relationships: { edges: [] },
   });
   assert.deepEqual(first.dependencies, ['skill:ghost-a']);
-  assert.deepEqual(first.semantic_changes, ['review_dependency:skill:alpha:skill:ghost-a']);
+  assert.deepEqual(first.semantic_changes, [`review_dependency:${alphaId}:skill:ghost-a`]);
   assert.deepEqual(first.representative_routes, [{
-    before: 'contract:skill:alpha:dependency_missing',
-    after: 'contract:skill:alpha:dependency_declared',
+    before: `contract:${alphaId}:dependency_missing`,
+    after: `contract:${alphaId}:dependency_declared`,
   }]);
   assert.notDeepEqual(first, second);
   const category = deriveStewardDraft({
@@ -217,15 +229,14 @@ test('production draft binds exact affected contracts and differs with observati
       affected_capability_ids: ['semantic_type:agent'],
     }),
     registry: [{
-      canonical_identity: 'skill:alpha',
-      semantic_type: 'skill',
-      contract: { invocation_kind: 'agent' },
+      ...alpha,
+      contract: buildCapabilityContract(alpha, { invocation_kind: evidence('agent') }),
     }],
     relationships: { edges: [] },
   });
-  assert.deepEqual(category.semantic_changes, ['add_category:agent:skill:alpha']);
+  assert.deepEqual(category.semantic_changes, [`add_category:agent:${alphaId}`]);
   assert.throws(() => deriveStewardDraft({
-    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:not-declared'] }),
+    suggestion: suggestion({ affected_capability_ids: [alphaId, 'skill:not-declared'] }),
     registry,
     relationships: { edges: [] },
   }), /exact affected contract evidence/);

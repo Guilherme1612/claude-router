@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import { renderSuggestionText, runRouterControl } from '../src/cli/router-control.mjs';
+import { buildCapabilityContract } from '../src/registry/contract.mjs';
+import { buildClaudeHeavyProfile } from './helpers/inventory-fixture.mjs';
 
 const NOW = 1_800_000_000_000;
 const OBSERVATION = {
@@ -93,15 +95,15 @@ test('suggestion empty and detail expose one bounded private canonical projectio
 });
 
 test('production suggestion and draft derive authoritative local inputs without injected steward data', () => {
-  for (const record of [{
-    canonical_identity: 'skill:debug',
-    semantic_type: 'skill',
-    contract: { dependencies: ['skill:ghost'] },
-  }, {
-    canonical_identity: 'skill:agent-owner',
-    semantic_type: 'skill',
-    contract: { invocation_kind: 'agent' },
-  }]) {
+  const evidence = value => [{
+    value, provenance: 'adapter', confidence_basis_points: 10000,
+    freshness: 'fresh', rule: 'draft-cli-test-v1',
+  }];
+  const base = { ...buildClaudeHeavyProfile()[0], canonical_identity: 'skill:debug' };
+  for (const record of [
+    { ...base, contract: buildCapabilityContract(base, { dependencies: evidence(['skill:ghost']) }) },
+    { ...base, contract: buildCapabilityContract(base, { invocation_kind: evidence('agent') }) },
+  ]) {
     const root = mkdtempSync(join(tmpdir(), 'router-steward-live-cli-'));
     try {
     mkdirSync(join(root, 'registry'), { recursive: true });
