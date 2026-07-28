@@ -3,7 +3,7 @@ import {
   rmdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
@@ -398,7 +398,7 @@ export async function installRouter(options) {
   // ownedRoot has modules/ not src/, so the mirror makes those imports resolve
   // without modifying the dev fixtures. validate.mjs subprocess env now
   // inherits the real HOME so fixtures find the deployed hook via homedir().
-  const gateEntryNames = ['router.calibrate.mjs', 'calibration-tasks.json'];
+  const gateEntryNames = ['router.calibrate.mjs', 'calibration-tasks.json', 'build-manifest.mjs'];
   const gateFixtureNames = [
     'tests/router.registry-schema.test.mjs',
     'tests/router.adapters.test.mjs',
@@ -624,11 +624,35 @@ export async function installRouter(options) {
       && readinessValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
+    // Fresh-account onboarding: run the inventory manifest builder once after a
+    // verified deploy so the router can route on a brand-new account. Warn-and-
+    // continue on failure (router fail-opens on a missing manifest). Runs once for
+    // claude's ownedRoot; codex's hook imports claude's router.mjs → shares it.
+    let manifestBuilt = false;
+    try {
+      const defaultManifestBuilder = (nodeBinary, scriptPath, env) =>
+        spawnSync(nodeBinary, [scriptPath], { env, encoding: 'utf8', timeout: 30_000 });
+      const build = (options.manifestBuilder || defaultManifestBuilder)(
+        options.nodeBinary || process.execPath,
+        join(p.ownedRoot, 'build-manifest.mjs'),
+        { ...process.env,
+          ROUTER_CLAUDE_HOME: p.claudeRoot,
+          ROUTER_AGENTS_SKILLS_DIR: join(dirname(p.claudeRoot), '.agents', 'skills'),
+          ROUTER_CLAUDE_JSON: join(dirname(p.claudeRoot), '.claude.json'),
+          ROUTER_MANIFEST_OUT: join(p.ownedRoot, 'claude-inventory-manifest.json'),
+          ROUTER_PROJECT_SKILL_DIRS: '', ROUTER_PROJECT_MCP_JSON: '', ROUTER_PROJECT_CONFIG_PATH: '' });
+      manifestBuilt = !(build && (build.status !== 0 || build.error));
+      if (!manifestBuilt) console.warn(`router: manifest builder failed — run: node ~/.claude/router/build-manifest.mjs (status=${build?.status ?? 'no-exit'})`);
+    } catch (buildError) {
+      manifestBuilt = false;
+      console.warn(`router: manifest builder errored — ${buildError.message}`);
+    }
     return {
       status: existingManifest && routerHealthy && (!deployEvolve || evolveHealthy) && codexRouterHealthy && (!deployEvolve || codexEvolveHealthy) && markerHealthy && bindingExists && codexBindingExists && created.length === 0
         ? 'already-installed'
         : existingManifest ? 'repaired' : 'installed',
       ready,
+      manifestBuilt,
       manifestPath: p.manifestPath,
       routerPath: p.routerPath,
       candidatePath: p.candidatePath,
