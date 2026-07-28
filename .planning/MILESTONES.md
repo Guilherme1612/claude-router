@@ -1,5 +1,44 @@
 # Milestones
 
+## v1.3 Adaptive Local Capability Steward and Intent-Native Routing (Shipped: 2026-07-28)
+
+**Phases completed:** 6 phases, 31 plans, 57 tasks
+
+**Key accomplishments:**
+
+- Framework-neutral inventory records now preserve native evidence, scope, lifecycle, dependency, and compound provenance while preventing inert or unknown artifacts from gaining invocation authority.
+- Claude and Codex adapters now enumerate personalized known and future capability types through a shared inert normalization boundary, with cycle-safe canonical traversal and portable per-root completeness evidence.
+- Path-separated identities, exact one-to-one continuity, and deterministic reference closure now prevent stale dispatch authority across every required inventory mutation.
+- Byte-exact semantic convergence now separates watcher operations from complete inventory authority, retaining last-known-good state across incomplete scans and failed reconciliation.
+- Bounded read-only inventory inspection now exposes exact operational state, safe stable-ID provenance, and framework-neutral semantic availability through matching plain-text and canonical JSON contracts.
+- Portable full-path fallback identities and exact-source continuity assertions now match the approved Phase 21 identity contract without changing production code.
+- Deterministic field-level capability contracts with privacy-safe evidence, canonical bytes, and fail-closed recommendation-only uncertainty
+- Versioned optional overlays now correct only exact installed contracts, while unsafe or stale inputs remain deterministic, privacy-safe, and inert.
+- Bounded canonical relationship edges with type-specific evidence gates and lifecycle-safe reverse invalidation.
+- One bounded evaluator now derives all dispatch gates, rejects authored authority, and preserves visible recommendation-only reasons for every unsafe or unknown state.
+- The existing router CLI now explains bounded contract evidence, uncertainty, rejected overlays, typed relationships, eligibility, and correction paths without exposing authored values or mutating active state.
+- Validated contracts are now built for every authoritative record before exact overlays, while absent safety evidence deterministically blocks dispatch eligibility.
+- 8-layer dispatch tracer (intent → action → state → transition → capability → approval → closure → next-prompt) shipped as four framework-neutral stdlib-only modules with a 14-test green suite, plus the full 8-disposition intent classifier matrix
+- Adversarial intent corpus (minimal pairs, nested quotes, multilingual abstention, unsafe targets) + action mapper expanded to debug/create-phase verbs with the full blocked/clarify reason-code vocabulary, all framework-neutral via contract-only authority
+- Approval gate wired (needsApproval / bindApproval / verifyApproval with three-leg fail-closed: missing → stale → mismatch → bound) and the full EXEC-05/06/09/10 dispatch matrix composed at the boundary — destructive-with-approval dispatches, destructive-without/stale/mismatch fail closed, post-work next-prompt re-reads fresh state, all framework-neutral (grep gsd- = 0)
+- 1. [Rule 1 - Bug] Fixed `syncSync` is not a `node:fs` export
+- 1. [Rule 2 - Missing critical functionality] Added `priorWorkflowState` to the cursor shape
+- 1. [Rule 3 - Blocking] Inlined MIN_CONFIDENCE=8500 rather than exporting it from relationships.mjs
+- 1. [Rule 1 - Bug] passed published_version: null to applyCanaryDecision (not activePolicyVersion)
+- Deterministic one-item advisory selection with stable semantic identity and atomic private interaction state
+- Fresh exact approval creates one immutable private draft and only then reveals the complete remediation preview, without install or publication authority
+- One canonical suggestion command family with exact-fingerprint interactions and approval-gated, preview-only draft creation
+- Atomic off-path suggestion availability with one fixed bounded startup read and one approved metadata-free notice
+- 1. [Rule 1 - Bug] Corrected the regression fixture at the actual trust boundary
+- All v1.3 decision artifacts now publish under one content identity while the real prompt path consumes one hash-bound, read-only projection.
+- Registry reconciliation now invalidates all decision dependencies deterministically while full and incremental builds publish the same pre-validated tuple value.
+- Complete routing tuples now remain old-or-new across every publication boundary and restart repairs interrupted pointer transitions from verified immutable known-good bytes.
+- The existing installer now records and proves an 18-cell runtime/recommendation compatibility matrix using actual deployed Claude and Codex module bytes.
+- A deterministic 312-record registry now proves installed Claude and Codex routing across all six recommendation kinds with strict isolated latency and context budgets.
+- One matrix-driven runner now proves all nine v1.3 requirements with fresh installed-runtime, lifecycle, authority, regression, latency, and context evidence while preserving v1.2 compatibility.
+
+---
+
 ## v1.2 Autonomous Dual-Runtime Control Plane (Shipped: 2026-07-23)
 
 **Phases completed:** 10 phases, 46 plans, 93 tasks

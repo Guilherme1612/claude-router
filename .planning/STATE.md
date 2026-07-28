@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.3
 milestone_name: Adaptive Local Capability Steward and Intent-Native Routing
-current_phase: 26
-current_phase_name: Coherent Publication and Dual-Runtime Release
-status: "v1.3 milestone shipped — PR #1 merged to main (c109a16)"
-stopped_at: "v1.3 audit ship_with_deferred; PR #1 open; awaiting merge"
-last_updated: "2026-07-28T18:25:22.112Z"
+status: Awaiting next milestone
+stopped_at: Completed 25-04-PLAN.md
+last_updated: "2026-07-28T18:29:12.577Z"
 last_activity: 2026-07-28
+last_activity_desc: Milestone v1.3 completed and archived
 progress:
   total_phases: 6
   completed_phases: 6
   total_plans: 31
   completed_plans: 31
   percent: 100
-last_activity_desc: Phase 26 review fixes applied, release evidence regenerated, 9/9 phase gates green (1102 pass)
+current_phase: 26
+current_phase_name: Coherent Publication and Dual-Runtime Release
 ---
 
 # Project State
@@ -28,12 +28,10 @@ See: .planning/PROJECT.md (updated 2026-07-23)
 
 ## Current Position
 
-Phase: 26 — Coherent Publication and Dual-Runtime Release
-Plan: All 8 plans complete
-Status: v1.3 milestone shipped — PR #1 merged to main (c109a16)
-Last activity: 2026-07-28
-
-Progress: [██████████] 100%
+Phase: Milestone v1.3 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-07-28 — Milestone v1.3 completed and archived
 
 ## Performance Metrics
 
@@ -148,6 +146,10 @@ None yet.
 | Contracts | Public external manifest JSON Schema | Future | v1.3 requirements |
 | Calibration | Broader multilingual execution calibration | Future | v1.3 requirements |
 | Health | Stronger ineffective-capability classification | Future | v1.3 requirements |
+| Release | BLOCKER 2 — live-install release verification stage (REL-05/06/07): release matrix runs mkdtemp+testMode fixtures, so a v1.3 report can pass while real ~/.claude/~/.codex installs stay stale; add read-only live-install manifest/module/pointer verification | Open — v1.3.1 | v1.3 milestone audit (ship_with_deferred) |
+| Release | Orphaned temp-dir watchers — kill duplicate watcher instances left by prior sessions | Open — v1.3.1 | v1.3 milestone close |
+| Release | router.safety-release live-env failures | Open — v1.3.1 | v1.3 milestone close |
+| Activation | Confirm clean watcher reconcile reaches activation_status=activated (soft stale_pointer_sequence recovery) once scan completes | Open — v1.3.1 (user shell) | v1.3 milestone close |
 
 ## Session Continuity
 
@@ -157,4 +159,4 @@ Resume file: None
 
 ## Operator Next Steps
 
-- Run `$gsd-plan-phase 21`
+- Start the next milestone with /gsd-new-milestone

@@ -10,15 +10,15 @@ The user can write the minimum useful prompt and still get the best available wo
 
 ## Current State
 
-**v1.2 shipped and verified on 2026-07-23.** The router is now a guarded dual-runtime control plane: a canonical Claude + Codex capability registry with evidence-gated SHA-256 identities; incremental change detection via a portable Merkle-style fingerprint tree and single-flight watcher; fail-closed target safety, hook reconciliation, and inactive quarantine; deterministic mapping through a frozen eight-gate verifier into atomic version-pointer activation with cross-process CAS and crash-recoverable rollback; privacy-safe bounded context capsules that recover authoritative workflow state; workflow-first orchestration that resolves the next valid transition before selecting capabilities and loads only least-sufficient bounded context; compiled prompt routing with safe canary evolution; and an end-to-end autonomous lifecycle proving safe propagation, recovery, coexistence, and a full release matrix tying all 20 v1.2 requirements to executable evidence.
+**v1.3 shipped and verified on 2026-07-28.** Router is now a framework-neutral, locally adaptive control plane: installed `.claude` and `.codex` capabilities are authoritative local truth (Phase 21) with conservative capability contracts and typed relationship graphs (Phase 22); explicit natural-language intent resolves through authoritative workflow state to one safe installed capability via a four-gate dispatch path — eligible + intent_permits + state_permits + approval_grants (Phase 23); bounded private outcomes drive conservative capability-health observations (Phase 24); advisory stewardship surfaces one high-confidence recommendation with approval-gated, preview-only drafts and no silent mutation (Phase 25); and coherent publication proves the v1.3 tuple publishes byte-identical, atomic, recoverable artifacts across full and incremental paths with a fail-closed dual-runtime release matrix (Phase 26).
 
-**All 10 phases (11–20) verified.** Phases 19–20 closed the two audit BLOCKERs surfaced in re-verification: ORC-01/TOK-02 live-path wiring (orchestrator baked into publish-index as per-workflow sibling tuples, schema 1→2, prompt-route.mjs read-only projection, blanket fallback removed) and EVO-05 production trigger (telemetry→evidence bridge drives canary promote/rollback via watcher, router-control CLI, and release-runner; CR-01 path-traversal and CR-02 rollback-reason defects closed). Milestone audit passed: 20/20 requirements satisfied and WIRED end-to-end, 5/5 E2E flows COMPLETE, REL-01 latency gates pass (warm p95 15.63ms <25, max route 22.98ms <100).
+**All 6 phases (21–26) verified — 27/27 phase success criteria met, 1102/1102 tests pass.** Milestone audit verdict `ship_with_deferred`: BLOCKER 2 (live-install release verification stage) deferred to v1.3.1 as release-gate hardening, not a phase blocker. PR #1 merged to main (c109a16). v1.3.1 follow-ups open: live-install release gate, orphaned temp-dir watchers, router.safety-release live-env failures, and watcher-reconcile activation confirmation (see STATE.md Deferred Items).
 
-**v1.3 Phase 23 complete (2026-07-27):** Intent-Safe State-Aware Execution — three additive modules over the phases 21/22 pipeline: an eight-disposition intent classifier (`execute`/`explain`/`hypothetical`/`quoted`/`negated`/`prohibited`/`preview`/`ambiguous`, no `eval`/`Function` of prompt content), a framework-neutral action mapper (contract-only `workflow_transitions` authority, `type !== 'hook'` exclusion, debug/create-phase verbs, blocked/clarify reason codes), and an approval gate (SHA-256 fingerprint binding of args/targets/effects/proposalVersion, fail-closed on stale/mismatched/missing expected token). A four-gate dispatch path promotes the three existing gates (eligible + intent_permits + state_permits + approval_grants) rather than adding alongside. Code-review CR-01 (critical fail-open in `verifyApproval`) closed; 15/15 STRIDE threats mitigated (ASVS L1, `threats_open: 0`); focused suite 72/72, 0 new full-suite regressions. Pure modules + tests only — prompt-hook wiring deferred to Phase 26 (REL-01/REL-02).
-
-## Current Milestone: v1.3 Adaptive Local Capability Steward and Intent-Native Routing
+## Last Milestone: v1.3 Adaptive Local Capability Steward and Intent-Native Routing (SHIPPED 2026-07-28)
 
 **Goal:** Make Router framework-agnostic, lightweight, locally adaptive, and able to turn explicit natural-language intent into the correct safe action using the capabilities actually installed in each user's `.claude` and `.codex` environments.
+
+**Next milestone goals:** v1.3.1 release-gate hardening — close BLOCKER 2 (live-install release verification), kill orphaned temp-dir watchers, fix router.safety-release live-env failures, and confirm watcher-reconcile activation. Start with `/gsd-new-milestone` after fresh requirements.
 
 **Target features:**
 - Personalized discovery of commands, skills, agents, hooks, MCPs, tools, and their relationships
@@ -51,16 +51,17 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Workflow-first capability selection and least-sufficient context budgets — v1.2 (Phases 16, 19)
 - ✓ Guarded automatic map updates and reversible self-evolution — v1.2 (Phases 17, 20)
 - ✓ Measured token, latency, safety, and routing-quality improvements — v1.2 (Phase 17, REL-01 gates: warm p95 15.63ms, max route 22.98ms)
+- ✓ Discover and continuously reconcile personalized Claude and Codex capabilities without ecosystem-specific assumptions — v1.3 (Phase 21)
+- ✓ Infer safe, correctable capability contracts and compile them into the existing capability map — v1.3 (Phase 22)
+- ✓ Route explicit natural-language action intent to the correct locally available capability using authoritative workflow state — v1.3 (Phase 23)
+- ✓ Prevent execution for explanatory, hypothetical, quoted, negated, prohibited, ambiguous, or unsafe requests — v1.3 (Phase 23, eight-disposition classifier + approval gate)
+- ✓ Analyze bounded local outcome signals to recommend missing, unhealthy, stale, or reusable capabilities — v1.3 (Phase 24)
+- ✓ Surface only high-confidence startup observations and one prioritized `/router suggestion` — v1.3 (Phase 25)
+- ✓ Preserve prompt-time determinism, latency, privacy, and guarded mutation controls — v1.3 (Phase 26, warm p95 <25ms, max route <100ms, context 194B <2048B)
 
 ### Active
 
-- [ ] Discover and continuously reconcile personalized Claude and Codex capabilities without ecosystem-specific assumptions.
-- [ ] Infer safe, correctable capability contracts and compile them into the existing capability map.
-- [ ] Route explicit natural-language action intent to the correct locally available capability using authoritative workflow state.
-- [ ] Prevent execution for explanatory, hypothetical, quoted, negated, prohibited, ambiguous, or unsafe requests.
-- [ ] Analyze bounded local outcome signals to recommend missing, unhealthy, stale, or reusable capabilities.
-- [ ] Surface only high-confidence startup observations and one prioritized `/router suggestion`.
-- [ ] Preserve prompt-time determinism, latency, privacy, and guarded mutation controls.
+(None — v1.3 requirements shipped. v1.3.1 release-gate hardening items are tracked in STATE.md Deferred Items; fresh requirements will be defined via `/gsd-new-milestone`.)
 
 ### Out of Scope
 
@@ -120,4 +121,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-27 after Phase 23 (Intent-Safe State-Aware Execution)*
+*Last updated: 2026-07-28 after v1.3 milestone ship*
