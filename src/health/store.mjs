@@ -12,7 +12,8 @@
 // MAX_RETENTION_MS, MINIMUM_SAMPLES come from src/evolution/evidence.mjs so the
 // health store shares the same decay/retention policy as the evidence store.
 
-import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { HALF_LIFE_MS, MAX_RETENTION_MS, MINIMUM_SAMPLES } from '../evolution/evidence.mjs';
@@ -21,8 +22,45 @@ import { validateOutcomeEnvelope } from './outcome-schema.mjs';
 export { HALF_LIFE_MS, MAX_RETENTION_MS, MINIMUM_SAMPLES };
 
 const DEFAULT_COMPACT_MAX_BYTES = 1024 * 1024; // 1 MB
+const waitArray = new Int32Array(new SharedArrayBuffer(4));
 
-export function createHealthStore({ root } = {}) {
+function mutationLock(root, { timeout_ms = 2_000, stale_ms = 30_000 } = {}) {
+  const path = join(root, '.mutation.lock');
+  const deadline = Date.now() + timeout_ms;
+  const token = randomUUID();
+  while (Date.now() <= deadline) {
+    try {
+      mkdirSync(path, { mode: 0o700 });
+      writeFileSync(join(path, 'owner.json'), JSON.stringify({
+        token, pid: process.pid, started_at: Date.now(),
+      }), { mode: 0o600 });
+      return {
+        acquired: true,
+        release() {
+          try {
+            const owner = JSON.parse(readFileSync(join(path, 'owner.json'), 'utf8'));
+            if (owner.token === token) rmSync(path, { recursive: true, force: true });
+          } catch { /* lock ownership changed or root unavailable */ }
+        },
+      };
+    } catch (error) {
+      if (error.code !== 'EEXIST') return { acquired: false, reason_code: 'mutation_lock_failed' };
+      try {
+        const owner = JSON.parse(readFileSync(join(path, 'owner.json'), 'utf8'));
+        let alive = true;
+        try { process.kill(owner.pid, 0); } catch { alive = false; }
+        if (!alive && Date.now() - owner.started_at > stale_ms) {
+          rmSync(path, { recursive: true, force: true });
+          continue;
+        }
+      } catch { /* owner publication may still be in progress */ }
+      Atomics.wait(waitArray, 0, 0, 10);
+    }
+  }
+  return { acquired: false, reason_code: 'mutation_lock_timeout' };
+}
+
+export function createHealthStore({ root, lock: lockOptions } = {}) {
   const healthRoot = root || join(homedir(), '.claude', 'router', 'health');
   mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
   const outcomesPath = join(healthRoot, 'outcomes.jsonl');
@@ -46,8 +84,14 @@ export function createHealthStore({ root } = {}) {
     append(record) {
       const validated = validateOutcomeEnvelope(record);
       if (validated.status !== 'accepted') return validated;
-      appendFileSync(outcomesPath, `${JSON.stringify(validated.signal)}\n`, { flag: 'a', mode: 0o600 });
-      return { status: 'stored', fingerprint: validated.signal.fingerprint };
+      const lock = mutationLock(healthRoot, lockOptions);
+      if (!lock.acquired) return { status: 'denied', reason_code: lock.reason_code };
+      try {
+        appendFileSync(outcomesPath, `${JSON.stringify(validated.signal)}\n`, { flag: 'a', mode: 0o600 });
+        return { status: 'stored', fingerprint: validated.signal.fingerprint };
+      } finally {
+        lock.release();
+      }
     },
 
     // readWindow returns records in the [fromMs, toMs] window, filtered by
@@ -115,42 +159,40 @@ export function createHealthStore({ root } = {}) {
     // compaction marker line is appended so the audit trail records the
     // compaction event (T-24-07 repudiation mitigation).
     compact({ maxBytes = DEFAULT_COMPACT_MAX_BYTES, now = Date.now() } = {}) {
-      let stat;
-      try { stat = statSync(outcomesPath); } catch { return { status: 'no_file', dropped: 0 }; }
-      if (stat.size <= maxBytes) return { status: 'unchanged', dropped: 0 };
+      const lock = mutationLock(healthRoot, lockOptions);
+      if (!lock.acquired) return { status: 'blocked', reason_code: lock.reason_code, dropped: 0 };
+      try {
+        let stat;
+        try { stat = statSync(outcomesPath); } catch { return { status: 'no_file', dropped: 0 }; }
+        if (stat.size <= maxBytes) return { status: 'unchanged', dropped: 0 };
 
-      const lines = readOutcomesLines();
-      const retentionFloor = now - MAX_RETENTION_MS;
-      const kept = [];
-      let dropped = 0;
-      let corrupt = 0;
-      for (const line of lines) {
-        if (line.length === 0) continue;
-        let record;
-        try { record = JSON.parse(line); } catch { corrupt += 1; continue; }
-        if (!record || typeof record !== 'object') { corrupt += 1; continue; }
-        // Preserve compaction marker lines (they carry compacted_at_ms).
-        if (record.compacted_at_ms !== undefined) { kept.push(line); continue; }
-        // WR-03: a valid JSON object with a non-integer/missing timestamp_ms is
-        // corrupt, not retention-expired. Counting it as `dropped` folded a
-        // data-integrity signal into the retention-expired count, defeating
-        // the audit-trail distinction WR-05 introduced. Track it as corrupt
-        // so the marker distinguishes tampering from natural retention.
-        if (!Number.isSafeInteger(record.timestamp_ms)) { corrupt += 1; continue; }
-        if (record.timestamp_ms < retentionFloor) { dropped += 1; continue; }
-        kept.push(line);
+        const lines = readOutcomesLines();
+        const retentionFloor = now - MAX_RETENTION_MS;
+        const kept = [];
+        let dropped = 0;
+        let corrupt = 0;
+        for (const line of lines) {
+          if (line.length === 0) continue;
+          let record;
+          try { record = JSON.parse(line); } catch { corrupt += 1; continue; }
+          if (!record || typeof record !== 'object') { corrupt += 1; continue; }
+          // Preserve compaction marker lines (they carry compacted_at_ms).
+          if (record.compacted_at_ms !== undefined) { kept.push(line); continue; }
+          if (!Number.isSafeInteger(record.timestamp_ms)) { corrupt += 1; continue; }
+          if (record.timestamp_ms < retentionFloor) { dropped += 1; continue; }
+          kept.push(line);
+        }
+        const marker = { compacted_at_ms: now, dropped, corrupt_line_skipped: corrupt, policy_version: 'health-policy-v1' };
+        const rewritten = [...kept, JSON.stringify(marker)].join('\n');
+        const tmp = `${outcomesPath}.compact-${process.pid}-${Date.now()}`;
+        writeFileSync(tmp, `${rewritten}\n`, { mode: 0o600 });
+        let fd;
+        try { fd = openSync(tmp, 'r'); fsyncSync(fd); } catch { /* best-effort */ } finally { if (fd !== undefined) try { closeSync(fd); } catch { /* best-effort */ } }
+        renameSync(tmp, outcomesPath);
+        return { status: 'compacted', dropped };
+      } finally {
+        lock.release();
       }
-      // WR-05: track corrupt/unreadable lines separately from retention-expired
-      // drops so the compaction marker audit trail distinguishes the two (mirror
-      // of readWindow's corrupt_line_skipped field).
-      const marker = { compacted_at_ms: now, dropped, corrupt_line_skipped: corrupt, policy_version: 'health-policy-v1' };
-      const rewritten = [...kept, JSON.stringify(marker)].join('\n');
-      const tmp = `${outcomesPath}.compact-${process.pid}-${Date.now()}`;
-      writeFileSync(tmp, `${rewritten}\n`, { mode: 0o600 });
-      let fd;
-      try { fd = openSync(tmp, 'r'); fsyncSync(fd); } catch { /* best-effort */ } finally { if (fd !== undefined) try { closeSync(fd); } catch { /* best-effort */ } }
-      renameSync(tmp, outcomesPath);
-      return { status: 'compacted', dropped };
     },
   });
 }

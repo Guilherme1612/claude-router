@@ -12,7 +12,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -152,6 +152,22 @@ test('HLTH-04: bounded compaction drops stale records and appends a compaction m
   const marker = lines.map((l) => { try { return JSON.parse(l); } catch { return null; } }).find((r) => r && r.compacted_at_ms !== undefined);
   assert.ok(marker, 'no compaction marker line found');
   assert.equal(marker.policy_version, 'health-policy-v1');
+});
+
+test('HLTH-04: append and compaction fail closed while the shared mutation lock is held', () => {
+  const healthRoot = mkdtempSync(join(tmpdir(), 'router-health-lock-'));
+  const store = createHealthStore({ root: healthRoot, lock: { timeout_ms: 0 } });
+  mkdirSync(join(healthRoot, '.mutation.lock'), { mode: 0o700 });
+  writeFileSync(join(healthRoot, '.mutation.lock', 'owner.json'), JSON.stringify({
+    pid: process.pid, started_at: Date.now(),
+  }));
+  const observed = deriveSelectedOutcome(
+    { ts: Date.now(), prompt_signature: createHash('sha256').update('locked').digest('hex'), suggested_skills: [{ canonical_identity: 'skill:debug', scope: { kind: 'global' } }], suggested_agents: [], confidence_tier: 'high', guards_fired: [], route_id: 'locked' },
+    { stableCapabilityIdFn: stableCapabilityId },
+  );
+  assert.equal(store.append(observed.signal).reason_code, 'mutation_lock_timeout');
+  assert.equal(store.compact({ maxBytes: 0 }).reason_code, 'mutation_lock_timeout');
+  assert.equal(existsSync(store.outcomesPath), false);
 });
 
 test('HLTH-01: no raw prompt fixture appears in any persisted record', () => {
