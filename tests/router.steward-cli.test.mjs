@@ -102,7 +102,9 @@ test('production suggestion and draft derive authoritative local inputs without 
         semantic_type: 'skill',
         contract: { dependencies: ['skill:ghost'] },
       }],
-      relationships: {},
+      relationships: {
+        edges: [{ id: 'route:debug', source_id: 'skill:debug', target_id: 'skill:ghost' }],
+      },
     }));
     const inspect = runRouterControl({
       argv: ['suggestion', '--owned-root', root],
@@ -132,6 +134,59 @@ test('human suggestion renderer groups fields, bounds lines, and gives recovery 
     assert.equal(renderSuggestionText({
       command: 'suggestion', ok: false, reason_code: 'unsafe_suggestion_input', data: {}, warnings: [],
     }), 'unsafe_suggestion_input; inspect local health state and retry.\n');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('human renderer groups interaction and approved preview states with bounded lines', () => {
+  const f = fixture();
+  try {
+    const empty = fixture([]);
+    try {
+      const text = renderSuggestionText(empty.run('suggestion').result);
+      assert.match(text, /^No actionable suggestion\n/);
+      assert.doesNotMatch(text, /\u001b\[/);
+    } finally { rmSync(empty.root, { recursive: true, force: true }); }
+    const fingerprint = selected(f).fingerprint;
+    for (const outcome of [
+      f.run('suggestion', 'dismiss', '--confirm', fingerprint),
+      (() => {
+        const other = fixture();
+        try {
+          const id = selected(other).fingerprint;
+          return other.run('suggestion', 'snooze', '--confirm', id, '--until', String(NOW + 1000));
+        } finally { rmSync(other.root, { recursive: true, force: true }); }
+      })(),
+      (() => {
+        const other = fixture();
+        try {
+          const id = selected(other).fingerprint;
+          return other.run(
+            'suggestion', 'correct', '--confirm', id,
+            '--proposal-json', '{"reason_code":"dependency_restored"}',
+          );
+        } finally { rmSync(other.root, { recursive: true, force: true }); }
+      })(),
+    ]) {
+      const text = renderSuggestionText(outcome.result);
+      assert.match(text, /^ACTION\n/);
+      assert.ok(Math.max(...text.trimEnd().split('\n').map(line => line.length)) < 160);
+    }
+    const approved = fixture();
+    try {
+      const id = selected(approved).fingerprint;
+      const proposal = approved.run('suggestion', 'draft', '--confirm', id);
+      const result = approved.run(
+        'suggestion', 'draft', '--confirm', id, '--execute',
+        '--approval', proposal.result.data.approval_token,
+      );
+      const text = renderSuggestionText(result.result);
+      for (const heading of ['DRAFT PREVIEW', 'PATHS', 'CHANGES', 'ROUTE EFFECTS', 'VERIFICATION', 'ROLLBACK']) {
+        assert.match(text, new RegExp(`(?:^|\\n)${heading}\\n`));
+      }
+      assert.ok(Math.max(...text.trimEnd().split('\n').map(line => line.length)) < 160);
+    } finally { rmSync(approved.root, { recursive: true, force: true }); }
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

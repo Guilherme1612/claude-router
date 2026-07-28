@@ -5,6 +5,7 @@ import {
 } from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { bindApproval, verifyApproval } from '../orchestrator/approval.mjs';
+import { stableCapabilityId } from '../registry/identity.mjs';
 import { stableStringify } from '../registry/schema.mjs';
 
 export const DRAFT_PROPOSAL_VERSION = 'steward-draft-v1';
@@ -16,16 +17,51 @@ const FINGERPRINT = /^[a-f0-9]{64}$/;
 const TOKEN = /^[a-z][a-z0-9_:-]{0,127}$/;
 const MAX_ITEMS = 32;
 
-export function deriveStewardDraft({ suggestion } = {}) {
+export function deriveStewardDraft({ suggestion, registry = [], relationships = {} } = {}) {
   const current = normalizeSuggestion(suggestion);
+  const records = new Map(registry.map(record => [record.stable_id || stableCapabilityId(record), record]));
+  const affected = current.affected_capability_ids;
+  if (current.observation_kind === 'missing_category') {
+    const category = affected.length === 1 && affected[0].startsWith('semantic_type:')
+      ? affected[0].slice('semantic_type:'.length)
+      : null;
+    const owner = [...records.entries()].find(([, record]) => record.contract?.invocation_kind === category);
+    const edge = owner && (relationships.edges || []).find(candidate => candidate?.id
+      && [candidate.source_id, candidate.target_id].includes(owner[0]));
+    if (!category || !owner || !edge) fail('authoritative category evidence is unavailable');
+    return {
+      semantic_changes: [`add_category:${category}:${owner[0]}`],
+      dependencies: [],
+      conflicts: [],
+      representative_routes: [{
+        before: `${edge.id}:category_missing`,
+        after: `${edge.id}:category_declared`,
+      }],
+      verification: [`verify_category:${category}`, `verify_contract:${owner[0]}`],
+      reversibility: 'delete_draft_file',
+      rollback_implications: 'none_until_install',
+    };
+  }
+  const missing = affected.filter(id => !records.has(id));
+  const present = affected.filter(id => records.has(id));
+  if (current.observation_kind !== 'missing_dependency'
+      || missing.length !== 1 || present.length !== 1
+      || !records.get(present[0])?.contract?.dependencies?.includes(missing[0])) {
+    fail('exact affected contract evidence is unavailable');
+  }
+  const edge = (relationships.edges || []).find(candidate => candidate?.id
+    && [candidate.source_id, candidate.target_id].includes(present[0])
+    && [candidate.source_id, candidate.target_id].includes(missing[0]));
+  if (!edge) fail('authoritative route evidence is unavailable');
   return {
-    semantic_changes: [`review_${current.observation_kind}`],
-    dependencies: current.observation_kind === 'missing_dependency'
-      ? current.affected_capability_ids
-      : [],
+    semantic_changes: [`review_dependency:${present[0]}:${missing[0]}`],
+    dependencies: missing,
     conflicts: [],
-    representative_routes: [{ before: 'current_contract', after: 'draft_contract' }],
-    verification: ['verify_contract'],
+    representative_routes: [{
+      before: `${edge.id}:dependency_missing`,
+      after: `${edge.id}:dependency_declared`,
+    }],
+    verification: [`verify_contract:${present[0]}`, `verify_dependency:${missing[0]}`],
     reversibility: 'delete_draft_file',
     rollback_implications: 'none_until_install',
   };

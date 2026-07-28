@@ -7,7 +7,7 @@ import test from 'node:test';
 import { ingestTelemetryEvidence } from '../src/health/observe.mjs';
 import { dispose, recover, reset } from '../src/health/admin.mjs';
 import { runRouterControl } from '../src/cli/router-control.mjs';
-import { routeContextPrompt } from '../src/context/prompt-route.mjs';
+import { appendStartupNotice, routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { refreshSuggestionPointer } from '../src/steward/refresh.mjs';
 import { startupPointer } from '../src/steward/suggestion.mjs';
 import { acknowledgeStartupNotice } from '../src/steward/startup-ack.mjs';
@@ -310,11 +310,20 @@ test('startup adds only the approved line from the pointer loader', () => {
       handled: false,
       reason_code: 'instruction_not_contextual',
       additional_context: NOTICE,
+      startup_notice_emitted: true,
+      startup_notice_pointer: AVAILABLE,
     });
-    assert.doesNotMatch(JSON.stringify(available), new RegExp(FINGERPRINT));
+    assert.doesNotMatch(available.additional_context, new RegExp(FINGERPRINT));
   } finally {
     rmSync(ownedRoot, { recursive: true, force: true });
   }
+});
+
+test('startup notice reports not emitted when the byte cap drops it', () => {
+  const result = appendStartupNotice({ additional_context: 'x'.repeat(2048) }, AVAILABLE);
+  assert.equal(result.startup_notice_emitted, false);
+  assert.equal(result.additional_context, 'x'.repeat(2048));
+  assert.equal(Object.hasOwn(result, 'startup_notice_pointer'), false);
 });
 
 test('UserPromptSubmit consumer has no producer, health, discovery, history, network, or model reference', () => {

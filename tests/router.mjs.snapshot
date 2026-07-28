@@ -2676,18 +2676,21 @@ export function inspectDecision(prompt, options = {}) {
   }
 }
 
-function main(payload) {
+function main(payload, { additionalContext = '' } = {}) {
   const startNs = process.hrtime.bigint();
   if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
   const prompt = payload?.prompt ?? payload?.message;
   if (!payload || typeof prompt !== 'string') return;
-  inspectDecision(prompt, {
+  const decision = inspectDecision(prompt, {
     cwd: process.cwd(),
     mutateCache: true,
     logTelemetry: true,
-    emitInjection: true,
+    emitInjection: false,
     includePrompt: false,
   });
+  const composed = [decision.final_injected_context, additionalContext].filter(Boolean).join('\n\n');
+  if (composed) emit(composed);
+  return { additionalContext: composed };
 }
 
 export function explainLastDecision(options = {}) {
@@ -2895,8 +2898,8 @@ if (isMain()) {
         || join(ROUTER_DIR, 'modules', 'context', 'prompt-route.mjs');
       const { routeContextPrompt } = await import(modulePath);
       const routed = routeContextPrompt({ prompt, ownedRoot, projectRoot });
-      if (routed.additional_context) {
-        emit(routed.additional_context);
+      const emitted = main(payload, { additionalContext: routed.additional_context || '' });
+      if (routed.startup_notice_emitted && emitted.additionalContext) {
         try {
           const ackPath = process.env.ROUTER_STARTUP_ACK_MODULE_PATH
             || join(ROUTER_DIR, 'modules', 'steward', 'startup-ack.mjs');
@@ -2905,10 +2908,8 @@ if (isMain()) {
             process.env.ROUTER_STARTUP_POINTER_MODULE_PATH
               || join(ROUTER_DIR, 'modules', 'steward', 'startup-pointer.mjs')
           );
-          acknowledgeStartupNotice({ ownedRoot, pointer: loadStartupPointer({ ownedRoot }) });
+          acknowledgeStartupNotice({ ownedRoot, pointer: routed.startup_notice_pointer });
         } catch {}
-      } else {
-        main(payload);
       }
     } catch {
       // fail-open: emit nothing, never exit code 2, never a block decision

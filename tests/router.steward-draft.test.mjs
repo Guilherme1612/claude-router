@@ -186,3 +186,47 @@ test('draft module has no install, activation, publication, or routing mutation 
   assert.doesNotMatch(source, /from\s+['"][^'"]*(?:activate|publish|installer|lifecycle|adapter|settings)[^'"]*['"]/);
   assert.match(source, /\['EEXIST', 'ENOTEMPTY'\]/);
 });
+
+test('production draft binds exact affected contracts and differs with observation evidence', async () => {
+  const { deriveStewardDraft } = await import('../src/steward/draft.mjs');
+  const registry = [
+    { canonical_identity: 'skill:alpha', contract: { dependencies: ['skill:ghost-a'] } },
+    { canonical_identity: 'skill:beta', contract: { dependencies: ['skill:ghost-b'] } },
+  ];
+  const first = deriveStewardDraft({
+    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:ghost-a'] }),
+    registry,
+    relationships: { edges: [{ id: 'route:alpha', source_id: 'skill:alpha', target_id: 'skill:ghost-a' }] },
+  });
+  const second = deriveStewardDraft({
+    suggestion: suggestion({ affected_capability_ids: ['skill:beta', 'skill:ghost-b'] }),
+    registry,
+    relationships: { edges: [{ id: 'route:beta', source_id: 'skill:beta', target_id: 'skill:ghost-b' }] },
+  });
+  assert.deepEqual(first.dependencies, ['skill:ghost-a']);
+  assert.deepEqual(first.semantic_changes, ['review_dependency:skill:alpha:skill:ghost-a']);
+  assert.deepEqual(first.representative_routes, [{
+    before: 'route:alpha:dependency_missing',
+    after: 'route:alpha:dependency_declared',
+  }]);
+  assert.notDeepEqual(first, second);
+  const category = deriveStewardDraft({
+    suggestion: suggestion({
+      observation_kind: 'missing_category',
+      reason_code: 'missing_category',
+      affected_capability_ids: ['semantic_type:agent'],
+    }),
+    registry: [{
+      canonical_identity: 'skill:alpha',
+      semantic_type: 'skill',
+      contract: { invocation_kind: 'agent' },
+    }],
+    relationships: { edges: [{ id: 'route:agent', source_id: 'skill:alpha', target_id: 'route:agent' }] },
+  });
+  assert.deepEqual(category.semantic_changes, ['add_category:agent:skill:alpha']);
+  assert.throws(() => deriveStewardDraft({
+    suggestion: suggestion({ affected_capability_ids: ['skill:alpha', 'skill:ghost-a'] }),
+    registry,
+    relationships: { edges: [] },
+  }), /authoritative route evidence/);
+});

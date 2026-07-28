@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -141,12 +141,40 @@ test('UserPromptSubmit emits the startup pointer once then acknowledges cooldown
       },
     });
     const env = { ROUTER_CONTEXT_OWNED_ROOT: root, ROUTER_CONTEXT_PROJECT_ROOT: root };
-    const first = runHook('ordinary prompt', env);
+    const first = runHook('debug this failing test', env);
     assert.match(first.stdout, /Router suggestion available/);
-    const second = runHook('ordinary prompt', env);
+    assert.match(first.stdout, /router-inject/);
+    const second = runHook('debug this failing test', env);
     assert.doesNotMatch(second.stdout, /Router suggestion available/);
+    assert.match(second.stdout, /router-inject/);
     const state = JSON.parse(readFileSync(join(root, 'steward', 'state.json'), 'utf8'));
     assert.ok(Number.isSafeInteger(state.cooldown_at['a'.repeat(64)]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('UserPromptSubmit does not acknowledge a startup notice omitted by the byte cap', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-hook-cap-'));
+  const modulePath = join(root, 'near-cap-route.mjs');
+  try {
+    compileStartupPointer({
+      ownedRoot: root,
+      pointer: {
+        schema_version: 1, policy_version: 'steward-policy-v1',
+        fingerprint: 'b'.repeat(64), available: true, cooldown_until_ms: null,
+      },
+    });
+    writeFileSync(modulePath, `export function routeContextPrompt() {
+      return { handled: false, additional_context: ${JSON.stringify('x'.repeat(2048))}, startup_notice_emitted: false };
+    }\n`);
+    const result = runHook('debug this failing test', {
+      ROUTER_CONTEXT_OWNED_ROOT: root,
+      ROUTER_CONTEXT_PROJECT_ROOT: root,
+      ROUTER_CONTEXT_MODULE_PATH: modulePath,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(existsSync(join(root, 'steward', 'state.json')), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

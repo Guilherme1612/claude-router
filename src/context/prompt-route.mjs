@@ -83,27 +83,35 @@ function authoritativeEvidence(capsule, projectRoot) {
   });
 }
 
+export function appendStartupNotice(result, pointer) {
+  if (!pointer?.available) return result;
+  const additional_context = result.additional_context
+    ? `${result.additional_context}\n${SUGGESTION_NOTICE}`
+    : SUGGESTION_NOTICE;
+  return Buffer.byteLength(additional_context) <= MAX_CONTEXT_BYTES
+    ? {
+      ...result,
+      additional_context,
+      startup_notice_emitted: true,
+      startup_notice_pointer: pointer,
+    }
+    : { ...result, startup_notice_emitted: false };
+}
+
 export function routeContextPrompt({
   prompt, ownedRoot, projectRoot, forceStale = false, authoritative,
   now = Date.now(), compiledFs, loadStartupPointerFn = loadStartupPointer,
 } = {}) {
-  let notice = '';
+  let startupPointer = null;
   if (typeof ownedRoot === 'string') {
     try {
-      if (loadStartupPointerFn({ ownedRoot, now }).available) notice = SUGGESTION_NOTICE;
+      const loaded = loadStartupPointerFn({ ownedRoot, now });
+      if (loaded.available) startupPointer = loaded;
     } catch {
       // The optional startup notice is fail-silent and cannot block routing.
     }
   }
-  const projected = result => {
-    if (!notice) return result;
-    const additional_context = result.additional_context
-      ? `${result.additional_context}\n${notice}`
-      : notice;
-    return Buffer.byteLength(additional_context) <= MAX_CONTEXT_BYTES
-      ? { ...result, additional_context }
-      : result;
-  };
+  const projected = result => appendStartupNotice(result, startupPointer);
   const instruction = parseInstruction(prompt);
   if (instruction.kind === 'none') return projected({ handled: false, reason_code: 'instruction_not_contextual' });
   if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return projected({ handled: false, reason_code: 'context_roots_missing' });

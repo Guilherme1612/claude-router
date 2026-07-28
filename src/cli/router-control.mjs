@@ -552,6 +552,14 @@ export function renderSuggestionText(result) {
   const data = result.data || {};
   if (!result.ok) return `${safeToken(result.reason_code)}; inspect local health state and retry.\n`;
   const lines = [data.heading || `REASON ${safeToken(result.reason_code)}`];
+  if (data.message) {
+    lines[0] = 'ACTION';
+    lines.push(`MESSAGE ${data.message}`, `REASON ${safeToken(result.reason_code)}`);
+    if (data.fingerprint) lines.push(`FINGERPRINT ${data.fingerprint}`);
+    if (data.interaction?.status) lines.push(`STATUS ${data.interaction.status}`);
+    if (data.proposal_id) lines.push(`PROPOSAL ${data.proposal_id}`);
+    if (data.routing_unchanged !== undefined) lines.push(`ROUTING_UNCHANGED ${data.routing_unchanged}`);
+  }
   if (data.body) lines.push(data.body);
   if (data.overview) lines.push('', `OVERVIEW ${stableStringify(data.overview)}`);
   const suggestion = data.suggestion;
@@ -568,8 +576,27 @@ export function renderSuggestionText(result) {
       `NEXT ${suggestion.safe_next_action}`,
       `FINGERPRINT ${suggestion.fingerprint}`);
   }
+  const preview = data.draft_preview;
+  if (preview) {
+    lines[0] = 'DRAFT PREVIEW';
+    const group = (heading, values) => {
+      lines.push('', heading);
+      for (const value of values) lines.push(`- ${typeof value === 'object' ? stableStringify(value) : value}`);
+    };
+    group('PATHS', preview.exact_paths);
+    group('CHANGES', preview.semantic_changes);
+    group('DEPENDENCIES', preview.dependencies);
+    group('CONFLICTS', preview.conflicts.length ? preview.conflicts : ['none']);
+    group('ROUTE EFFECTS', preview.representative_routes);
+    group('VERIFICATION', preview.verification);
+    group('ROLLBACK', [
+      `reversibility=${preview.reversibility}`,
+      `implications=${preview.rollback_implications}`,
+    ]);
+  }
   for (const [key, value] of Object.entries(data).sort(([left], [right]) => left.localeCompare(right))) {
-    if (['heading', 'body', 'overview', 'suggestion', 'warning'].includes(key)) continue;
+    if (['heading', 'body', 'overview', 'suggestion', 'warning', 'message', 'fingerprint',
+      'interaction', 'proposal_id', 'routing_unchanged', 'draft_preview'].includes(key)) continue;
     lines.push(`${safeToken(key).toUpperCase()} ${value !== null && typeof value === 'object' ? stableStringify(value) : String(value)}`);
   }
   const warnings = new Set([data.warning, ...(result.warnings || [])].filter(Boolean));
@@ -829,10 +856,11 @@ function suggestionCommand({ root, positional, options, dependencies }) {
   const store = dependencies.createStewardStore
     ? dependencies.createStewardStore({ root: join(root, 'steward') })
     : createStewardStore({ root: join(root, 'steward') });
+  let stewardEvidence = null;
   const observations = typeof dependencies.stewardObservations === 'function'
     ? dependencies.stewardObservations({ root })
     : dependencies.stewardObservations
-      || loadStewardObservations({ ownedRoot: root, now }).observations;
+      || (stewardEvidence = loadStewardObservations({ ownedRoot: root, now })).observations;
   let selected;
   try {
     selected = (dependencies.selectSuggestion || selectSuggestion)({
@@ -895,7 +923,11 @@ function suggestionCommand({ root, positional, options, dependencies }) {
     const draft = typeof dependencies.stewardDraft === 'function'
       ? dependencies.stewardDraft({ root, suggestion: selected.suggestion })
       : dependencies.stewardDraft
-        || deriveStewardDraft({ ownedRoot: root, suggestion: selected.suggestion, now });
+        || deriveStewardDraft({
+          suggestion: selected.suggestion,
+          registry: stewardEvidence?.registry,
+          relationships: stewardEvidence?.relationships,
+        });
     try {
       const request = { root: store.stewardRoot, suggestion: selected.suggestion, draft };
       const preview = (dependencies.previewDraft || previewDraft)(request);
