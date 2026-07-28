@@ -159,6 +159,29 @@ function capsule() {
   };
 }
 
+function makeActiveProjectionRoutable(root, tupleVersionId) {
+  const projectionPath = join(
+    root, 'release-tuples', 'versions', tupleVersionId, 'prompt-projection.json',
+  );
+  const projection = JSON.parse(readFileSync(projectionPath, 'utf8'));
+  projection.budget.by_workflow['gsd-execute-phase'] = {
+    report: null,
+    dispatch_eligible: true,
+    reason_code: 'within_budget',
+  };
+  const bytes = `${JSON.stringify(projection)}\n`;
+  writeFileSync(projectionPath, bytes);
+  const digest = createHash('sha256').update(bytes).digest('hex');
+  for (const name of ['active.json', 'known-good.json']) {
+    const path = join(root, 'release-tuples', name);
+    const pointer = JSON.parse(readFileSync(path, 'utf8'));
+    if (pointer.tuple_version_id !== tupleVersionId) continue;
+    pointer.prompt_projection_sha256 = digest;
+    writeFileSync(path, `${JSON.stringify(pointer)}\n`);
+  }
+  return { path: projectionPath, projection };
+}
+
 test('invalid recommendation data suppresses advice without changing verified routing or state', () => {
   const root = mkdtempSync(join(tmpdir(), 'router-phase26-suggestion-'));
   try {
@@ -170,12 +193,11 @@ test('invalid recommendation data suppresses advice without changing verified ro
       available: true,
       cooldown_until_ms: null,
     });
+    const routable = makeActiveProjectionRoutable(root, publication.tuple_version_id);
     const pointerPath = join(root, 'release-tuples', 'active.json');
     const pointer = JSON.parse(readFileSync(pointerPath, 'utf8'));
-    const projectionPath = join(
-      root, 'release-tuples', 'versions', publication.tuple_version_id, 'prompt-projection.json',
-    );
-    const projection = JSON.parse(readFileSync(projectionPath, 'utf8'));
+    const projectionPath = routable.path;
+    const projection = routable.projection;
     projection.suggestion_reference = { available: true, fingerprint: 'not-a-fingerprint' };
     const bytes = `${JSON.stringify(projection)}\n`;
     writeFileSync(projectionPath, bytes);
@@ -183,13 +205,13 @@ test('invalid recommendation data suppresses advice without changing verified ro
     writeFileSync(pointerPath, `${JSON.stringify(pointer)}\n`);
     const before = snapshot(root);
     const routed = routeContextPrompt({
-      prompt: 'continue',
+      prompt: 'execute phase 26',
       ownedRoot: root,
       projectRoot: root,
       now: NOW + 1,
     });
     assert.equal(routed.handled, true);
-    assert.equal(routed.resolution.dispatch_eligible, true);
+    assert.equal(routed.resolution.dispatch_eligible, true, JSON.stringify(routed));
     assert.equal(routed.compiled.source, 'active');
     assert.equal(routed.startup_notice_emitted, undefined);
     assert.deepEqual(snapshot(root), before);
@@ -209,6 +231,7 @@ test('corrupt active prompt projection falls back only to verified known-good ro
       available: false,
       cooldown_until_ms: null,
     });
+    makeActiveProjectionRoutable(root, oldPublication.tuple_version_id);
     const knownGoodPath = join(root, 'release-tuples', 'known-good.json');
     const oldKnownGood = readFileSync(knownGoodPath);
     const active = publish(root, 'b', {
@@ -218,6 +241,7 @@ test('corrupt active prompt projection falls back only to verified known-good ro
       available: true,
       cooldown_until_ms: null,
     });
+    makeActiveProjectionRoutable(root, active.tuple_version_id);
     writeFileSync(knownGoodPath, oldKnownGood);
     const projectionPath = join(
       root, 'release-tuples', 'versions', active.tuple_version_id, 'prompt-projection.json',
@@ -225,13 +249,13 @@ test('corrupt active prompt projection falls back only to verified known-good ro
     writeFileSync(projectionPath, '{');
     const before = snapshot(root);
     const routed = routeContextPrompt({
-      prompt: 'continue',
+      prompt: 'execute phase 26',
       ownedRoot: root,
       projectRoot: root,
       now: NOW + 1,
     });
     assert.equal(routed.handled, true);
-    assert.equal(routed.resolution.dispatch_eligible, true);
+    assert.equal(routed.resolution.dispatch_eligible, true, JSON.stringify(routed));
     assert.equal(routed.compiled.source, 'known_good');
     assert.equal(routed.compiled.tuple_version_id, oldPublication.tuple_version_id);
     assert.equal(routed.startup_notice_emitted, undefined);
