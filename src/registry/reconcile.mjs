@@ -65,6 +65,11 @@ function canonicalAliases(aliases) {
 
 const REFERENCE_TYPES = new Set([
   'alias', 'equivalence', 'workflow', 'correction', 'mapping', 'compiled-route', 'relationship',
+  'dependency', 'adapter', 'inference-rule', 'manifest', 'negative-evidence',
+]);
+
+export const INVALIDATION_CLASSES = Object.freeze([
+  'node', 'edge', 'dependency', 'adapter', 'inference-rule', 'manifest', 'correction', 'negative-evidence',
 ]);
 
 function canonicalReferences(input, candidate, events) {
@@ -103,8 +108,16 @@ function canonicalReferences(input, candidate, events) {
 function invalidationClosure(candidate, events, references) {
   const seeds = new Set();
   for (const event of events) {
-    if (['removed', 'replaced', 'disabled'].includes(event?.primary)
+    const changeClass = event?.change_class;
+    if (changeClass !== undefined && !INVALIDATION_CLASSES.includes(changeClass)) {
+      throw new TypeError(`unsupported invalidation class: ${changeClass}`);
+    }
+    if ((['removed', 'replaced', 'disabled'].includes(event?.primary) || changeClass)
       && typeof event.canonical_id === 'string') seeds.add(event.canonical_id);
+    for (const id of event?.affected_ids || []) {
+      if (typeof id !== 'string' || !id.trim()) throw new TypeError('affected_ids must contain non-empty strings');
+      seeds.add(id.trim());
+    }
   }
   for (const record of candidate.records) {
     if (record.enabled === false || record.lifecycle !== 'ready'
@@ -402,10 +415,17 @@ export function reconcileCandidate(options = {}) {
       disposition: hasBlocking ? 'quarantined' : 'eligible',
       verdicts,
       ...invalidation,
+      invalidation_classes: [...INVALIDATION_CLASSES],
     };
     return {
       ...canonical,
       report_fingerprint: fingerprint(canonical),
+      invalidation_fingerprint: fingerprint({
+        classes: INVALIDATION_CLASSES,
+        invalidated_ids: invalidation.invalidated_ids,
+        evidence: invalidation.invalidation_evidence,
+        references: invalidation.references,
+      }),
       candidate_fingerprint: fingerprint(candidate),
       active_bytes: active.bytes,
       active_fingerprint: active.fingerprint,

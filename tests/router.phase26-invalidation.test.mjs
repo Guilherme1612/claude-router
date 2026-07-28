@@ -12,4 +12,5 @@ test('reconciliation reports complete tuple invalidation for all eight change cl
   assert.deepEqual(result.invalidation_classes, [
     'node', 'edge', 'dependency', 'adapter', 'inference-rule', 'manifest', 'correction', 'negative-evidence',
   ], 'PHASE26_INVALIDATION_INCOMPLETE');
+  assert.match(result.invalidation_fingerprint, /^[a-f0-9]{64}$/);
 });
