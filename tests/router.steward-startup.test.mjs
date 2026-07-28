@@ -175,7 +175,9 @@ test('refresh producer derives one pointer from fixed authoritative inputs', () 
       },
     });
     assert.equal(result.status, 'stored');
-    assert.deepEqual(calls, [AVAILABLE]);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].pointer, AVAILABLE);
+    assert.equal(calls[0].ownedRoot, ownedRoot);
   } finally {
     rmSync(ownedRoot, { recursive: true, force: true });
   }

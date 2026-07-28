@@ -15,6 +15,7 @@ import { inspect as healthInspect, reset as healthReset, dispose as healthDispos
 import { selectSuggestion } from '../steward/suggestion.mjs';
 import { createStewardStore } from '../steward/state.mjs';
 import { approveDraftCreation, previewDraft } from '../steward/draft.mjs';
+import { refreshSuggestionPointer } from '../steward/refresh.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -824,9 +825,23 @@ function suggestionCommand({ root, positional, options, dependencies }) {
   } catch {
     return { result: canonical('suggestion', false, 'unsafe_suggestion_input'), exitCode: EXIT.unsafe };
   }
+  const refresh = result => {
+    try {
+      (dependencies.refreshSuggestionPointer || refreshSuggestionPointer)({ ownedRoot: root, now });
+      return result;
+    } catch {
+      return {
+        ...result,
+        result: {
+          ...result.result,
+          warnings: [...result.result.warnings, 'suggestion_pointer_refresh_failed'].sort(),
+        },
+      };
+    }
+  };
   if (subcommand === 'inspect') {
     const empty = selected.reason_code === 'suggestion_none';
-    return {
+    return refresh({
       result: canonical('suggestion', true, selected.reason_code, empty ? {
         heading: 'No actionable suggestion',
         body: 'Router found no novel, high-confidence action that passes the current policy.',
@@ -838,7 +853,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
         suggestion: selected.suggestion,
       }),
       exitCode: EXIT.success,
-    };
+    });
   }
   if (!SUGGESTION_FINGERPRINT.test(options.confirm || '')) {
     return { result: canonical(`suggestion ${subcommand}`, false, 'invalid_suggestion_fingerprint'), exitCode: EXIT.usage };
@@ -888,7 +903,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
         now,
       });
       const ok = ['stored', 'unchanged'].includes(created.status);
-      return {
+      const outcome = {
         result: canonical('suggestion draft', ok, created.reason_code, ok ? {
           authority: created.authority,
           draft_id: created.draft_id,
@@ -898,6 +913,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
           : ['approval_required', 'approval_mismatch'].includes(created.reason_code)
             ? EXIT.usage : EXIT.unsafe,
       };
+      return created.status === 'stored' ? refresh(outcome) : outcome;
     } catch {
       return { result: canonical('suggestion draft', false, 'unsafe_draft_input'), exitCode: EXIT.unsafe };
     }
@@ -905,7 +921,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
   try {
     if (subcommand === 'dismiss') {
       const interaction = store.dismiss(options.confirm, { now });
-      return {
+      const outcome = {
         result: canonical('suggestion dismiss', interaction.status !== 'blocked',
           interaction.reason_code || 'suggestion_dismissed', {
             message: 'Suggestion dismissed',
@@ -914,11 +930,12 @@ function suggestionCommand({ root, positional, options, dependencies }) {
           }),
         exitCode: interaction.status === 'blocked' ? EXIT.mutation : EXIT.success,
       };
+      return interaction.status === 'stored' ? refresh(outcome) : outcome;
     }
     if (subcommand === 'snooze') {
       const until = Number(options.until);
       const interaction = store.snooze(options.confirm, until, { now });
-      return {
+      const outcome = {
         result: canonical('suggestion snooze', interaction.status !== 'blocked',
           interaction.reason_code || 'suggestion_snoozed', {
             message: `Suggestion snoozed until ${until}`,
@@ -928,11 +945,12 @@ function suggestionCommand({ root, positional, options, dependencies }) {
           }),
         exitCode: interaction.status === 'blocked' ? EXIT.mutation : EXIT.success,
       };
+      return interaction.status === 'stored' ? refresh(outcome) : outcome;
     }
     if (subcommand === 'correct') {
       const correction = parseJsonOption(options.proposal_json, null);
       const interaction = store.correct(options.confirm, correction, { now });
-      return {
+      const outcome = {
         result: canonical('suggestion correct', true, 'suggestion_correction_saved', {
           message: 'Correction proposal saved; routing unchanged',
           fingerprint: options.confirm,
@@ -941,6 +959,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
         }),
         exitCode: EXIT.success,
       };
+      return interaction.status === 'stored' ? refresh(outcome) : outcome;
     }
   } catch (error) {
     const usageError = error.message === 'invalid_arguments'
@@ -1315,15 +1334,24 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
         return { result, exitCode: result.ok ? EXIT.success : EXIT.invalid };
       }
       if (subcommand === 'reset') {
-        const result = healthReset({ healthRoot });
+        const result = healthReset({
+          healthRoot, ownedRoot: root,
+          refreshSuggestionPointerFn: dependencies.refreshSuggestionPointer,
+        });
         return { result, exitCode: result.ok ? EXIT.success : EXIT.invalid };
       }
       if (subcommand === 'dispose') {
-        const result = healthDispose({ healthRoot });
+        const result = healthDispose({
+          healthRoot, ownedRoot: root,
+          refreshSuggestionPointerFn: dependencies.refreshSuggestionPointer,
+        });
         return { result, exitCode: result.ok ? EXIT.success : EXIT.invalid };
       }
       if (subcommand === 'recover') {
-        const result = healthRecover({ healthRoot });
+        const result = healthRecover({
+          healthRoot, ownedRoot: root,
+          refreshSuggestionPointerFn: dependencies.refreshSuggestionPointer,
+        });
         return { result, exitCode: result.ok ? EXIT.success : EXIT.invalid };
       }
     } catch (error) {

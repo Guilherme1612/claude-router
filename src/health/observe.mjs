@@ -33,6 +33,7 @@ import { stableStringify } from '../registry/schema.mjs';
 import { validateOutcomeEnvelope } from './outcome-schema.mjs';
 import { HALF_LIFE_MS, MAX_RETENTION_MS } from '../evolution/evidence.mjs';
 import { stableCapabilityId } from '../registry/identity.mjs';
+import { refreshSuggestionPointer } from '../steward/refresh.mjs';
 
 export { HALF_LIFE_MS, MAX_RETENTION_MS };
 
@@ -256,6 +257,7 @@ export function ingestTelemetryEvidence({
   store, telemetryPath, workflowStatePath, cursorPath,
   now = Date.now(), stableCapabilityIdFn = stableCapabilityId,
   evidenceWindowMs = DEFAULT_EVIDENCE_WINDOW_MS,
+  ownedRoot, refreshSuggestionPointerFn = refreshSuggestionPointer,
 } = {}) {
   if (!store || typeof store !== 'object') throw new TypeError('store is required');
   if (typeof telemetryPath !== 'string') throw new TypeError('telemetryPath is required');
@@ -331,6 +333,9 @@ export function ingestTelemetryEvidence({
     if (built.status !== 'accepted') { denied += 1; return false; }
     const appended = store.append(built.signal);
     if (appended.status !== 'stored') { denied += 1; return false; }
+    if (typeof ownedRoot === 'string' && typeof refreshSuggestionPointerFn === 'function') {
+      try { refreshSuggestionPointerFn({ ownedRoot, now }); } catch { /* durable evidence remains authoritative */ }
+    }
     ingested += 1;
     kind_counts[outcome_kind] = (kind_counts[outcome_kind] || 0) + 1;
     return true;

@@ -23,9 +23,22 @@
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scoreCapability } from './score.mjs';
+import { refreshSuggestionPointer } from '../steward/refresh.mjs';
 
 function canonical(command, ok, reasonCode, data = {}, warnings = []) {
   return { schema_version: 1, command, ok, reason_code: reasonCode, data, warnings: [...warnings].sort() };
+}
+
+function refresh({ healthRoot, ownedRoot, refreshSuggestionPointerFn, result }) {
+  if (!result.ok) return result;
+  try {
+    (refreshSuggestionPointerFn || refreshSuggestionPointer)({
+      ownedRoot: ownedRoot || join(healthRoot, '..'),
+    });
+    return result;
+  } catch {
+    return { ...result, warnings: [...result.warnings, 'suggestion_pointer_refresh_failed'].sort() };
+  }
 }
 
 // inspect is a read-only projection of outcomes.jsonl with bounded pagination.
@@ -74,7 +87,7 @@ function atomicWriteState(statePath, state) {
 // reset — atomic-write state.json to '{}' (0600 perms). Does NOT touch
 // outcomes.jsonl; the raw evidence is preserved. Returns canonical('health',
 // true, 'reset_ok', { path }).
-export function reset({ healthRoot } = {}) {
+export function reset({ healthRoot, ownedRoot, refreshSuggestionPointerFn } = {}) {
   const statePath = join(healthRoot, 'state.json');
   // WR-01: ensure the health/ dir exists before atomicWriteState writes the
   // temp file inside it. Without this, `router health reset` on a fresh
@@ -82,14 +95,17 @@ export function reset({ healthRoot } = {}) {
   // out of writeFileSync, which the CLI surfaces as internal_error + exit 5.
   mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
   atomicWriteState(statePath, {});
-  return canonical('health', true, 'reset_ok', { path: statePath });
+  return refresh({
+    healthRoot, ownedRoot, refreshSuggestionPointerFn,
+    result: canonical('health', true, 'reset_ok', { path: statePath }),
+  });
 }
 
 // dispose — rename state.json → state.disposed.json (recoverable, not deleted).
 // Does NOT touch outcomes.jsonl. Idempotent: if state.json is already gone and
 // state.disposed.json exists, returns 'already_disposed'; if neither exists,
 // returns 'nothing_to_dispose'.
-export function dispose({ healthRoot } = {}) {
+export function dispose({ healthRoot, ownedRoot, refreshSuggestionPointerFn } = {}) {
   const statePath = join(healthRoot, 'state.json');
   const disposedPath = join(healthRoot, 'state.disposed.json');
   if (!existsSync(statePath)) {
@@ -99,7 +115,10 @@ export function dispose({ healthRoot } = {}) {
   // If a previously-disposed file exists, overwrite it with the current state
   // (the current state is strictly newer than the prior disposed snapshot).
   renameSync(statePath, disposedPath);
-  return canonical('health', true, 'dispose_ok', { disposed_path: disposedPath });
+  return refresh({
+    healthRoot, ownedRoot, refreshSuggestionPointerFn,
+    result: canonical('health', true, 'dispose_ok', { disposed_path: disposedPath }),
+  });
 }
 
 // recover — if state.disposed.json exists, rename it → state.json (atomic).
@@ -107,7 +126,7 @@ export function dispose({ healthRoot } = {}) {
 // state via score.scoreCapability (Plan 24-02). Does NOT touch outcomes.jsonl.
 // Returns canonical('health', true, 'recover_restored' | 'recover_rebuilt',
 // { recovered_from, capability_count }).
-export function recover({ healthRoot } = {}) {
+export function recover({ healthRoot, ownedRoot, refreshSuggestionPointerFn } = {}) {
   const statePath = join(healthRoot, 'state.json');
   const disposedPath = join(healthRoot, 'state.disposed.json');
   const outcomesPath = join(healthRoot, 'outcomes.jsonl');
@@ -119,7 +138,10 @@ export function recover({ healthRoot } = {}) {
     // happened) and discard the stale disposed snapshot best-effort.
     if (existsSync(statePath)) {
       try { rmSync(disposedPath); } catch { /* best-effort */ }
-      return canonical('health', true, 'recover_restored', { recovered_from: 'state_json_authoritative', capability_count: countCapabilities(statePath) });
+      return refresh({
+        healthRoot, ownedRoot, refreshSuggestionPointerFn,
+        result: canonical('health', true, 'recover_restored', { recovered_from: 'state_json_authoritative', capability_count: countCapabilities(statePath) }),
+      });
     }
     renameSync(disposedPath, statePath);
     const capCount = countCapabilities(statePath);
@@ -138,10 +160,16 @@ export function recover({ healthRoot } = {}) {
       } catch {
         const state = rebuildStateFromOutcomes(outcomesPath);
         atomicWriteState(statePath, state);
-        return canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes_after_corrupt_disposed', capability_count: Object.keys(state).length });
+        return refresh({
+          healthRoot, ownedRoot, refreshSuggestionPointerFn,
+          result: canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes_after_corrupt_disposed', capability_count: Object.keys(state).length }),
+        });
       }
     }
-    return canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: capCount });
+    return refresh({
+      healthRoot, ownedRoot, refreshSuggestionPointerFn,
+      result: canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: capCount }),
+    });
   }
 
   // Rebuild from outcomes.jsonl. A missing/corrupt outcomes file yields an
@@ -150,7 +178,10 @@ export function recover({ healthRoot } = {}) {
   mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
   const state = rebuildStateFromOutcomes(outcomesPath);
   atomicWriteState(statePath, state);
-  return canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes', capability_count: Object.keys(state).length });
+  return refresh({
+    healthRoot, ownedRoot, refreshSuggestionPointerFn,
+    result: canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes', capability_count: Object.keys(state).length }),
+  });
 }
 
 function countCapabilities(statePath) {
