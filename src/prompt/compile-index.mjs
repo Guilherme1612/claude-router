@@ -189,7 +189,7 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
   const tupleActivePath = resolve(tupleRoot, 'active.json');
   const tupleActiveRead = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
   const verifyProjection = (pointer, source, reasonCode) => {
-    if (pointer?.schema_version !== 3
+    if (pointer?.schema_version !== 2
       || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')
       || !/^[a-f0-9]{64}$/.test(pointer.prompt_projection_sha256 || '')) return null;
     const read = boundedJson(resolve(tupleRoot, 'versions', pointer.tuple_version_id, 'prompt-projection.json'),
@@ -198,11 +198,11 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
     return promptResult(pointer, read.value, source, reasonCode);
   };
   const verifyTuple = pointer => {
-    if (![2, 3].includes(pointer?.schema_version) || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
+    if (pointer?.schema_version !== 2 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;
     const versionRoot = resolve(tupleRoot, 'versions', pointer.tuple_version_id);
     const manifestRead = boundedJson(resolve(versionRoot, 'manifest.json'), COMPILED_INDEX_LIMITS.metadata_bytes, io);
     const manifest = manifestRead?.value;
-    if (pointer.schema_version === 3) {
+    if (manifest?.schema_version === 2) {
       const expectedNames = Object.keys(TUPLE_MEMBERS);
       if (manifest?.schema_version !== 2
         || Object.keys(manifest.members || {}).sort().join('\0') !== expectedNames.sort().join('\0')) return null;
@@ -217,6 +217,11 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
         || manifest.state !== 'verified' || manifest.tuple_version_id !== pointer.tuple_version_id
         || manifest.verification?.disposition !== 'passing' || manifest.verification?.complete !== true
         || !compatible(manifest.compatibility) || manifest.created_at > now || manifest.expires_at < now
+        || manifest.registry?.payload_sha256 !== manifest.members['registry.json']
+        || manifest.compiled?.payload_sha256 !== manifest.members['index.json']
+        || manifest.closure?.payload_sha256 !== manifest.members['closure.json']
+        || manifest.budget?.payload_sha256 !== manifest.members['budget.json']
+        || manifest.summary_index?.payload_sha256 !== manifest.members['summary-index.json']
         || reads['index.json']?.version_id !== manifest.compiled?.version_id
         || !validRoutes(reads['index.json']?.routes)
         || reads['contracts.json']?.schema_version !== 1
@@ -258,7 +263,7 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
   };
   if (projectionOnly) {
     const activePointer = tupleActiveRead;
-    if (activePointer?.schema_version === 3) {
+    if (activePointer?.schema_version === 2 && activePointer.prompt_projection_sha256) {
       const activeProjection = verifyProjection(activePointer, 'active', 'release_tuple_active');
       if (activeProjection) return activeProjection;
       const knownGoodPointer = boundedJson(resolve(tupleRoot, 'known-good.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;

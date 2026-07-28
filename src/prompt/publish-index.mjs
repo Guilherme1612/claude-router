@@ -284,7 +284,7 @@ export function publishCompiledIndex({
   // Phase 19 Decision 8: pointer schema_version bumped 1→2 alongside the tuple
   // schema bump (compile-index.mjs verifyTuple rejects schema-1 pointers).
   const pointer = {
-    schema_version: 3,
+    schema_version: 2,
     tuple_version_id: tupleVersionId,
     prompt_projection_sha256: sha256(promptProjectionBytes),
   };
