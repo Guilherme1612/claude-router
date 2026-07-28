@@ -134,16 +134,16 @@ function deriveOutcomeKind({
 
   // 2. actually_used — the next telemetry record's downstream_invocations
   //    shows this capability was the one invoked.
-  if (nextRecord && Array.isArray(nextRecord.downstream_invocations) && nextRecord.downstream_invocations.length > 0) {
-    if (nextRecord.downstream_invocations.includes(capabilityId)) {
-      return { outcome_kind: 'actually_used', reason_code: 'downstream_invoked' };
-    }
-    // 4. replaced — a different capability was invoked instead.
-    return { outcome_kind: 'replaced', reason_code: 'downstream_replaced' };
+  if (nextRecord && Array.isArray(nextRecord.downstream_invocations) && nextRecord.downstream_invocations.includes(capabilityId)) {
+    return { outcome_kind: 'actually_used', reason_code: 'downstream_invoked' };
   }
 
   // 3. helpful_reuse — a later record (after the next) reuses this capability
-  //    on a different route_id (reused across intents).
+  //    on a different route_id (reused across intents). Checked before the
+  //    'replaced' fall-through so that, when both signals are present (the
+  //    next record invoked a different capability AND a later record reused
+  //    this one on a different intent), helpful_reuse wins per the documented
+  //    priority order (3 > 4).
   if (Array.isArray(laterRecords)) {
     for (const later of laterRecords) {
       if (!later || !Array.isArray(later.downstream_invocations)) continue;
@@ -151,6 +151,11 @@ function deriveOutcomeKind({
         return { outcome_kind: 'helpful_reuse', reason_code: 'later_reuse_different_intent' };
       }
     }
+  }
+
+  // 4. replaced — a different capability was invoked instead.
+  if (nextRecord && Array.isArray(nextRecord.downstream_invocations) && nextRecord.downstream_invocations.length > 0) {
+    return { outcome_kind: 'replaced', reason_code: 'downstream_replaced' };
   }
 
   // 5-8. workflow-state diff (current vs prior cursor snapshot). When either

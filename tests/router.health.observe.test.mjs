@@ -255,6 +255,47 @@ test('HLTH-03 helpful_reuse: later record (after next) downstream_invocations co
   assert.equal(outcomes[0].outcome_kind, 'helpful_reuse');
 });
 
+test('HLTH-03 helpful_reuse precedence: when both replaced (next) and helpful_reuse (later) signals are present, helpful_reuse wins per documented priority 3 > 4', () => {
+  const { store, telemetryPath, workflowStatePath, cursorPath, now } = setup({
+    records: [
+      makeRecord({ route_id: 'route-a', ts: 1_000 }),
+      // next record — invokes a DIFFERENT capability (would trigger 'replaced')
+      makeRecord({ route_id: 'route-b', ts: 2_000, downstream_invocations: ['skill:other'] }),
+      // later record — reuses this cap on a different route_id (helpful_reuse)
+      makeRecord({ route_id: 'route-c', ts: 3_000, downstream_invocations: [CAP] }),
+    ],
+    workflowState: null,
+  });
+  const result = ingestTelemetryEvidence({ store, telemetryPath, workflowStatePath, cursorPath, now });
+  assert.equal(result.kind_counts.helpful_reuse, 1, `expected helpful_reuse to win over replaced, got ${JSON.stringify(result.kind_counts)}`);
+  const outcomes = readOutcomes(store);
+  assert.equal(outcomes[0].outcome_kind, 'helpful_reuse');
+});
+
+test('HLTH-03 actually_used precedence: when next record invokes this cap AND a later record reuses on a different route, actually_used wins per documented priority 2 > 3', () => {
+  const { store, telemetryPath, workflowStatePath, cursorPath, now } = setup({
+    records: [
+      makeRecord({ route_id: 'route-a', ts: 1_000 }),
+      // next record — invokes this capability (actually_used signal for route-a)
+      makeRecord({ route_id: 'route-b', ts: 2_000, downstream_invocations: [CAP] }),
+      // later record — reuses this cap on a different route_id (would trigger helpful_reuse for route-a)
+      makeRecord({ route_id: 'route-c', ts: 3_000, downstream_invocations: [CAP] }),
+    ],
+    workflowState: null,
+  });
+  const result = ingestTelemetryEvidence({ store, telemetryPath, workflowStatePath, cursorPath, now });
+  // The conflict case is on the first record: both signals present. Per the
+  // documented priority 2 > 3, actually_used must win and helpful_reuse must
+  // NOT be produced for that record. The third record has no next so it
+  // falls through to 'selected'; the second record's next is the third
+  // (which has CAP) so it is also actually_used — those are unrelated to the
+  // conflict assertion, which is why we assert on outcomes[0] and the
+  // absence of any helpful_reuse outcome.
+  assert.equal(result.kind_counts.helpful_reuse, undefined, `expected no helpful_reuse (actually_used should win), got ${JSON.stringify(result.kind_counts)}`);
+  const outcomes = readOutcomes(store);
+  assert.equal(outcomes[0].outcome_kind, 'actually_used');
+});
+
 // ---- Cursor idempotency + rotation ----
 
 test('HLTH-03 cursor idempotent: second call with no new telemetry lines returns ingested:0, skipped:unchanged', () => {
