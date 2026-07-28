@@ -121,7 +121,7 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
     assert.equal(h.timeout, 5, 'timeout is 5');
 
     // enabledPlugins + statusLine intact
-    assert.equal(Object.keys(post.enabledPlugins).length, 4, 'enabledPlugins still 4');
+    assert.deepEqual(post.enabledPlugins, pre.enabledPlugins, 'enabledPlugins unchanged');
     assert.ok(post.statusLine, 'statusLine intact');
   } finally {
     rmSync(dir, { recursive: true, force: true });

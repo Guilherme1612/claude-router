@@ -297,14 +297,13 @@ test('startup adds only the approved line from the pointer loader', () => {
       prompt: 'ordinary prompt',
       ownedRoot,
       projectRoot: ownedRoot,
-      loadStartupPointerFn: () => ({ available: false }),
     });
     assert.deepEqual(silent, { handled: false, reason_code: 'instruction_not_contextual' });
+    compileStartupPointer({ ownedRoot, pointer: AVAILABLE });
     const available = routeContextPrompt({
       prompt: 'ordinary prompt',
       ownedRoot,
       projectRoot: ownedRoot,
-      loadStartupPointerFn: () => AVAILABLE,
     });
     assert.deepEqual(available, {
       handled: false,

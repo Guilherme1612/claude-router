@@ -106,7 +106,7 @@ export function inProcessControllerLauncher(runners, holder = {}) {
     };
     holder.child = child;
     let handle = null;
-    (async () => {
+    holder.ready = (async () => {
       try {
         if (!configPath) throw new Error('controller launcher missing --config');
         const config = JSON.parse(readFileSync(configPath, 'utf8'));
@@ -119,6 +119,7 @@ export function inProcessControllerLauncher(runners, holder = {}) {
       } catch (error) {
         child.exitCode = 1;
         child.error = error;
+        throw error;
       }
     })();
     return child;
