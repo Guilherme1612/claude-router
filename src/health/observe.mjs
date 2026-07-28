@@ -274,19 +274,26 @@ export function ingestTelemetryEvidence({
   }
 
   const lines = readFileSync(telemetryPath, 'utf8').split('\n');
-  let startLine = 0;
-  // Rotation reset — if the file shrank or the cursor's lineCount exceeds the
-  // current line count, re-ingest from line 0 (the file was rotated/truncated).
-  if (cursor && cursor.size <= size && cursor.lineCount <= lines.length) {
-    startLine = cursor.lineCount;
-  }
 
   // Parse all records once — we need access to next + later records for the
-  // downstream_invocations correlation.
+  // downstream_invocations correlation. allRecords excludes empty (trailing)
+  // lines, so the cursor must store a record count, not a raw line count
+  // (CR-01: an off-by-one between lines.length and allRecords.length silently
+  // dropped every newly-appended record after the first ingest).
   const allRecords = [];
   for (const line of lines) {
     if (line.length === 0) continue;
     try { allRecords.push(JSON.parse(line)); } catch { allRecords.push(null); }
+  }
+
+  let startLine = 0;
+  // Rotation reset — if the file shrank or the cursor's recordCount exceeds the
+  // current record count, re-ingest from record 0 (file was rotated/truncated).
+  // Legacy cursors wrote `lineCount` (raw lines incl. trailing empty); a cursor
+  // with no `recordCount` triggers a safe full re-ingest (bounded by retention).
+  if (cursor && cursor.size <= size && typeof cursor.recordCount === 'number'
+      && cursor.recordCount <= allRecords.length) {
+    startLine = cursor.recordCount;
   }
 
   const priorWorkflowState = (cursor && cursor.priorWorkflowState) || null;
@@ -330,7 +337,7 @@ export function ingestTelemetryEvidence({
   try {
     mkdirSync(dirname(cursorPath), { recursive: true, mode: 0o700 });
     writeFileSync(cursorPath, JSON.stringify({
-      size, mtimeMs, lineCount: lines.length,
+      size, mtimeMs, recordCount: allRecords.length,
       workflowStateMtimeMs,
       priorWorkflowState: workflowState,
     }), { mode: 0o600 });
