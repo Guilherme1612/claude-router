@@ -118,3 +118,17 @@ test('v1.3 isolated evidence normalizes the benchmark max_ms measurement', () =>
   assert.equal(result.measurements.max_route_ms, 8);
   assert.ok(result.gate_results.every(gate => gate.pass));
 });
+
+test('required release evidence rejects a partial TAP run with any skipped test', () => {
+  const matrix = loadReleaseMatrix({ matrixPath: MATRIX_PATH });
+  const result = parseChildEvidence({
+    stdout: '# pass 1\n# fail 0\n# skipped 1\nok 1 - unrelated\nok 2 - required # SKIP unavailable\n',
+    stage: 'compatibility',
+    gate_ids: ['REL-06'],
+    thresholds: matrix.thresholds,
+    error: null,
+    skipped: true,
+  });
+  assert.equal(result.reason_code, 'skipped');
+  assert.deepEqual(result.gate_results, []);
+});
