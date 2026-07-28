@@ -55,7 +55,17 @@ function runHook(stdinStr, env = {}) {
 function functionBody(source, name) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} must exist`);
-  const open = source.indexOf('{', start);
+  // The body opens at the first '{' at paren depth 0, so a destructured parameter
+  // like `function main(payload, { additionalContext = '' } = {})` does not fool the
+  // brace matcher into returning the parameter list as the body.
+  let parenDepth = 0;
+  let open = -1;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === '(') parenDepth++;
+    else if (ch === ')') parenDepth--;
+    else if (ch === '{' && parenDepth === 0) { open = i; break; }
+  }
   assert.notEqual(open, -1, `${name} must have a body`);
   let depth = 0;
   for (let i = open; i < source.length; i++) {

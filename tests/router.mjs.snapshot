@@ -65,7 +65,7 @@ const isMain = () => {
 // --- Constants (no /Users/guilherme hardcoding — use os.homedir()) ---------
 const ROUTER_DIR = join(homedir(), '.claude', 'router');
 const MANIFEST = join(ROUTER_DIR, 'claude-inventory-manifest.json');
-const BUILD_PY = join(ROUTER_DIR, 'build_manifest.py');
+const BUILD_SCRIPT = join(ROUTER_DIR, 'build-manifest.mjs');
 const CACHE = join(ROUTER_DIR, 'cache.json');
 const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
@@ -306,7 +306,7 @@ export const SENTINEL = '<!-- router-inject -->';
 
 const STALE_MS = 7 * 24 * 3600 * 1000; // 7 days
 const STALE_REMINDER =
-  '<!-- router: manifest may be stale — run: python3 ~/.claude/router/build_manifest.py -->';
+  '<!-- router: manifest may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 
 const TRIVIAL = new Set([
   'thanks', 'ok', 'great', 'cool', 'nice', 'yes', 'no', 'done', 'sgtm',
@@ -393,16 +393,16 @@ export function sentinelScan(prompt) {
 //   fresh           -> no reminder
 // Accepts optional path args so tests can run against temp dirs without
 // touching the real manifest on disk.
-export function checkFreshness(manifestPath = MANIFEST, buildPyPath = BUILD_PY) {
+export function checkFreshness(manifestPath = MANIFEST, buildScriptPath = BUILD_SCRIPT) {
   try {
     if (!existsSync(manifestPath)) {
       return { status: 'manifest_missing' };
     }
     const manifestMtime = statSync(manifestPath).mtimeMs;
-    const buildPyMtime = existsSync(buildPyPath) ? statSync(buildPyPath).mtimeMs : 0;
+    const buildScriptMtime = existsSync(buildScriptPath) ? statSync(buildScriptPath).mtimeMs : 0;
     const now = Date.now();
     const ageIsOld = now - manifestMtime > STALE_MS;
-    const builderNewer = buildPyMtime > manifestMtime;
+    const builderNewer = buildScriptMtime > manifestMtime;
     if (ageIsOld || builderNewer) {
       return { status: 'stale', reminder: STALE_REMINDER };
     }
@@ -863,7 +863,7 @@ function parseJsonFileStatus(path) {
 
 function manifestHealth(path) {
   const health = parseJsonFileStatus(path);
-  const freshness = checkFreshness(path, BUILD_PY);
+  const freshness = checkFreshness(path, BUILD_SCRIPT);
   let age_hours = null;
   if (health.exists && health.mtime) {
     age_hours = Math.max(0, Math.round(((Date.now() - Date.parse(health.mtime)) / 36e5) * 10) / 10);
@@ -2371,7 +2371,7 @@ export function inspectDecision(prompt, options = {}) {
     bumpEvolution: false,
     includePrompt: false,
     manifestPath: MANIFEST,
-    buildPyPath: BUILD_PY,
+    buildScriptPath: BUILD_SCRIPT,
     modeMapPath: MODE_MAP,
     weightsPath: WEIGHTS,
     cachePath: CACHE,
@@ -2476,7 +2476,7 @@ export function inspectDecision(prompt, options = {}) {
       else if (forced === 'manifest_missing') fresh = { status: 'manifest_missing' };
       else fresh = { status: 'fresh' };
     } else {
-      fresh = checkFreshness(opts.manifestPath, opts.buildPyPath);
+      fresh = checkFreshness(opts.manifestPath, opts.buildScriptPath);
     }
     if (fresh.status === 'stale' && fresh.reminder) {
       state.tier = 'stale';

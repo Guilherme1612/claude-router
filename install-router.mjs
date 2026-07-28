@@ -95,6 +95,9 @@ try {
       console.log(`DRY RUN OK — ${result.changes.length} candidate change(s), no files written.`);
       process.exit(0);
     }
+    if (result.manifestBuilt === false) {
+      console.warn('MANIFEST BUILDER FAILED — run: node ~/.claude/router/build-manifest.mjs');
+    }
     if (result.status === 'already-installed') {
       console.log('ALREADY INSTALLED — verified and ready.');
     } else if (result.status === 'repaired') {

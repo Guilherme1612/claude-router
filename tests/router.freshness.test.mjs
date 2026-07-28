@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 
-const EXPECTED_REMINDER = '<!-- router: manifest may be stale — run: python3 ~/.claude/router/build_manifest.py -->';
+const EXPECTED_REMINDER = '<!-- router: manifest may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-freshness-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -28,8 +28,8 @@ test('checkFreshness: missing manifest -> status manifest_missing, no reminder',
   const m = await importHook();
   withTempDir((dir) => {
     const manifest = join(dir, 'no-such-manifest.json');
-    const buildPy = join(dir, 'no-such-build.py');
-    const r = m.checkFreshness(manifest, buildPy);
+    const buildScript = join(dir, 'no-such-build.py');
+    const r = m.checkFreshness(manifest, buildScript);
     assert.equal(r.status, 'manifest_missing');
     assert.equal(r.reminder, undefined);
   });
@@ -39,14 +39,14 @@ test('checkFreshness: builder newer than manifest -> stale + exact reminder', as
   const m = await importHook();
   withTempDir((dir) => {
     const manifest = join(dir, 'manifest.json');
-    const buildPy = join(dir, 'build_manifest.py');
+    const buildScript = join(dir, 'build-manifest.mjs');
     writeFileSync(manifest, '{}');
-    writeFileSync(buildPy, '# builder');
+    writeFileSync(buildScript, '// builder');
     const oldMs = Date.now() - 10_000;
     const newMs = Date.now();
     utimesSync(manifest, new Date(oldMs), new Date(oldMs));
-    utimesSync(buildPy, new Date(newMs), new Date(newMs));
-    const r = m.checkFreshness(manifest, buildPy);
+    utimesSync(buildScript, new Date(newMs), new Date(newMs));
+    const r = m.checkFreshness(manifest, buildScript);
     assert.equal(r.status, 'stale');
     assert.equal(r.reminder, EXPECTED_REMINDER);
   });
@@ -56,14 +56,14 @@ test('checkFreshness: manifest mtime older than 7 days -> stale + exact reminder
   const m = await importHook();
   withTempDir((dir) => {
     const manifest = join(dir, 'manifest.json');
-    const buildPy = join(dir, 'build_manifest.py');
+    const buildScript = join(dir, 'build-manifest.mjs');
     writeFileSync(manifest, '{}');
-    writeFileSync(buildPy, '# builder');
+    writeFileSync(buildScript, '// builder');
     const veryOld = Date.now() - (8 * 24 * 3600 * 1000);
     const older = Date.now() - (9 * 24 * 3600 * 1000);
     utimesSync(manifest, new Date(veryOld), new Date(veryOld));
-    utimesSync(buildPy, new Date(older), new Date(older));
-    const r = m.checkFreshness(manifest, buildPy);
+    utimesSync(buildScript, new Date(older), new Date(older));
+    const r = m.checkFreshness(manifest, buildScript);
     assert.equal(r.status, 'stale');
     assert.equal(r.reminder, EXPECTED_REMINDER);
   });
@@ -73,14 +73,14 @@ test('checkFreshness: fresh manifest (recent, builder older) -> fresh, no remind
   const m = await importHook();
   withTempDir((dir) => {
     const manifest = join(dir, 'manifest.json');
-    const buildPy = join(dir, 'build_manifest.py');
+    const buildScript = join(dir, 'build-manifest.mjs');
     writeFileSync(manifest, '{}');
-    writeFileSync(buildPy, '# builder');
+    writeFileSync(buildScript, '// builder');
     const now = Date.now();
     const older = Date.now() - 100_000;
     utimesSync(manifest, new Date(now), new Date(now));
-    utimesSync(buildPy, new Date(older), new Date(older));
-    const r = m.checkFreshness(manifest, buildPy);
+    utimesSync(buildScript, new Date(older), new Date(older));
+    const r = m.checkFreshness(manifest, buildScript);
     assert.equal(r.status, 'fresh');
     assert.equal(r.reminder, undefined);
   });

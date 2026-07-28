@@ -12,7 +12,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 
 - **Performance**: Router hook must return within the `UserPromptSubmit` timeout and never delay prompt handling beyond ~100ms. — fail-open, never block.
 - **Coexistence**: Must not break existing `~/.claude/settings.json` hook bindings (gsd + context-mode + caveman) or ralph-loop's Stop-hook. Router's `UserPromptSubmit` binding coexists with caveman's plugin-scoped `caveman-mode-tracker.js` (sentinel marker, no mode-tracking duplication). — the user's setup keeps working.
-- **Manifest freshness**: Manifest is a static snapshot of `~/.claude` + `~/.agents/skills` + known project `.claude/skills` dirs; `build_manifest.py` must be re-run when the setup changes. Router detects staleness gracefully (mtime / builder-changed-since-build) — pass through + one-line reminder, never auto-rebuild inside the hook. — hook stays <100ms.
+- **Manifest freshness**: Manifest is a static snapshot of `~/.claude` + `~/.agents/skills` + known project `.claude/skills` dirs; `build-manifest.mjs` must be re-run when the setup changes. Router detects staleness gracefully (mtime / builder-changed-since-build) — pass through + one-line reminder, never auto-rebuild inside the hook. The builder also runs once at install time (post-readiness) so a fresh account is ready to route. — hook stays <100ms.
 - **Scope filtering**: `impeccable` is project-scoped to AutomaticTrading (in `agents_store_skills[]` and `project_scoped_skills[]`) — router must NOT recommend it globally; filter on `scope != "project"`. — wrong project's skill leaking globally.
 - **MCP guarding**: Do not auto-recommend agents whose `requires_mcp_not_in_manifest` is non-empty — demote to warn tier unless the MCP is wired first. — auto-dispatch would fail.
 - **Authoring convention**: Build the router using the dev-tool skills so its own hook/skill/agent authoring matches setup conventions. — consistency with the framework it routes over.
@@ -137,7 +137,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 
 | File | Format | Purpose | Write path |
 |------|--------|---------|-----------|
-| `claude-inventory-manifest.json` | JSON (208KB) | The registry. Pre-existing. | Rebuilt by `build_manifest.py` (manual / staleness-reminder), **never** by the hook. |
+| `claude-inventory-manifest.json` | JSON (208KB) | The registry. Pre-existing. | Rebuilt by `build-manifest.mjs` (at install time post-readiness, manual, or staleness-reminder), **never** inside the hook. |
 | `mode-map.json` | JSON (few KB) | Task signal → workflow mode + skills + agents, each entry with `invoke_kind: slash\|skill\|agent\|warn`. The router's brain. | User-reviewed Phase 1 deliverable; mutated by evolution in v2/v3. |
 | `cache.json` | JSON (LRU map) | prompt-signature → route. Speeds repeated/similar prompts. | Hook writes (atomic temp+rename). |
 | `telemetry.jsonl` | JSONL append-only | timestamp, prompt signature, suggested mode/skills/agents, tier, graphify-queried flag, downstream invocations, outcome. **No raw prompt text.** | Hook appends. |
@@ -168,7 +168,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 |-------------|-------------|-------------------------|
 | **Hand-rolled BM25, stdlib only** | `wink-bm25-text-search` (npm) | Never for v1. Only if v2/v3 needs BM25F field weighting or persistence and the stdlib version becomes painful. Adds a dependency + install step to a global framework — not worth it at 186 docs. |
 | **Hand-rolled BM25** | `fast-bm25` (npm, TypeScript) | Same — only if field-boost ergonomics outweigh the dependency cost. |
-| **In-memory index rebuild per call** | Persisted `index.json` precomputed by `build_manifest.py` | Only if profiling shows manifest parse + tokenize exceeds ~50ms. At 186 docs it does not. Persisting adds a freshness-coupling risk. |
+| **In-memory index rebuild per call** | Persisted `index.json` precomputed by `build-manifest.mjs` | Only if profiling shows manifest parse + tokenize exceeds ~50ms. At 186 docs it does not. Persisting adds a freshness-coupling risk. |
 | **`additionalContext` (structured JSON stdout)** | Plain stdout text | Stick with `additionalContext` — it composes correctly with caveman's output and keeps block/decision semantics available. Plain stdout works but is less hygienic for coexistence. |
 | **Flat BM25 v1** | Weighted BM25 + outcome feedback (v2/v3) | Per PROJECT-IDEA locked decision. v1 ships flat; evolution needs telemetry data that does not exist yet. |
 | **Top-level settings.json `UserPromptSubmit` binding** | Plugin-scoped binding (like caveman) | Top-level is correct for a personal global framework that is not a distributable plugin. Plugin-scoping is appropriate if the router is ever published as a marketplace plugin. |
@@ -184,7 +184,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 | **Any npm dependency at all in v1** | Global framework → install surface + supply chain. Not justified at this scale. | Stdlib. Revisit only if a concrete need (BM25F, Porter stemmer) emerges in v2. |
 | **`updatedPrompt` field** (modify the prompt) | Undocumented / non-functional (GitHub issue #20833). `UserPromptSubmit` cannot replace the prompt. | `additionalContext` injection only. |
 | **`decision: "block"`** | Erases the user's prompt — the router must never destroy user input. | Always exit 0; fail-open with no `additionalContext` on low-confidence/error. |
-| **Auto-rebuilding the manifest inside the hook** | Spawns `python3 build_manifest.py` — a blocking subprocess that blows the <100ms budget. | Pass-through + one-line staleness reminder; rebuild is manual or scheduled. |
+| **Auto-rebuilding the manifest inside the hook** | Spawns `node ~/.claude/router/build-manifest.mjs` — a blocking subprocess that blows the <100ms budget. | Pass-through + one-line staleness reminder; rebuild is at install time, manual, or scheduled. |
 | **Selecting hooks mid-task** | Hooks are event-bound, not invokable. The manifest's `hooks[]` carry no `description` — not matchable. | Route only over skills/agents/commands. Hooks stay always-on side effects. |
 | **Globally recommending `impeccable`** | It is `scope: "project"` (AutomaticTrading) in the manifest. | Filter on `scope != "project"` before scoring. |
 | **Auto-recommending MCP-backed agents** (context7/exa/firecrawl/jina/perplexity/ref/tavily refs) | `requires_mcp_not_in_manifest` non-empty → auto-dispatch would fail. | Demote to `warn` tier; inject "wire MCP X first" instead. |
@@ -196,7 +196,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 - Because injection noise on non-tasks is worse than no routing.
 - Emit no `additionalContext`, log `outcome=user_explicit`, exit 0.
 - Because overriding an explicit user choice defeats the purpose.
-- Emit a single-line `additionalContext` reminder `"Manifest may be stale — run build_manifest.py"`, log, do NOT route, exit 0.
+- Emit a single-line `additionalContext` reminder `"Manifest may be stale — run node ~/.claude/router/build-manifest.mjs"`, log, do NOT route, exit 0.
 - Because the hook must stay <100ms — no subprocess rebuild.
 - `additionalContext` = `<!-- router-inject mode=... tier=high sig=... -->\nRun /gsd-<mode> <args>\nUse skill <name> because <reason>\nDispatch agent <name> for <subtask>\n<!-- /router-inject -->`.
 - Because the model reads the reminder and acts; the sentinel makes the block attributable.
@@ -222,7 +222,7 @@ A global, self-contained `~/.claude` framework that reads the local Claude inven
 - `UserPromptSubmit` engineering playbook — `https://engineering-playbook.vercel.app/claude-code/userpromptsubmit-hooks` [MEDIUM]
 - GitHub issue #20833 (`updatedPrompt` is undocumented/non-functional) — `https://github.com/anthropics/claude-code/issues/20833` [HIGH]
 - Existing `~/.claude/settings.json` (read directly) [HIGH] — confirms no top-level `UserPromptSubmit` binding, confirms node binary path, confirms hook schema shape used by all other hooks.
-- `~/.claude/router/build_manifest.py` (read directly) [HIGH] — confirms manifest field schema (`name`/`description`/`summary` present on skills/agents/commands; `hooks[]` lack `description`; `scope` field; `requires_mcp_not_in_manifest`).
+- `build-manifest.mjs` (repoRoot, read directly) [HIGH] — Node stdlib port of the former `~/.claude/router/build_manifest.py`; confirms manifest field schema (`name`/`description`/`summary` present on skills/agents/commands; `hooks[]` lack `description`; `scope` field; `requires_mcp_not_in_manifest`).
 - `~/.claude/router/claude-inventory-manifest.json` counts (read directly) [HIGH] — 83 skills + 54 plugin + 9 agents-store + 2 project-scoped + 61 agents + 35 commands = ~244 candidate entries (hooks excluded), well within BM25's sub-millisecond envelope.
 - BM25 algorithm references — `https://burakkanber.com/blog/machine-learning-full-text-search-in-javascript-relevance-scoring/` [MEDIUM, algorithm only; implementation is hand-rolled stdlib].
 
