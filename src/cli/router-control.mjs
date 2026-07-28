@@ -12,6 +12,8 @@ import { assessCalibration, CALIBRATION_CORPUS, evaluateCalibrationCorpus, measu
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
 import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-index.mjs';
 import { inspect as healthInspect, reset as healthReset, dispose as healthDispose, recover as healthRecover } from '../health/admin.mjs';
+import { selectSuggestion } from '../steward/suggestion.mjs';
+import { createStewardStore } from '../steward/state.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -493,7 +495,7 @@ function parse(argv) {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value.length > 4096) throw new TypeError('argument_too_long');
-    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope') {
+    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope' || value === '--until' || value === '--proposal-json' || value === '--approval') {
       const next = args[++index];
       if (!next || next.length > 4096) throw new TypeError('missing_option_value');
       options[value.slice(2).replace('-', '_')] = next;
@@ -544,8 +546,20 @@ export function renderContractText(result) {
   return `${lines.join('\n')}\n`;
 }
 
+export function renderSuggestionText(result) {
+  const data = result.data || {};
+  const lines = [data.heading || `REASON ${safeToken(result.reason_code)}`];
+  if (data.body) lines.push(data.body);
+  for (const [key, value] of Object.entries(data).sort(([left], [right]) => left.localeCompare(right))) {
+    if (key === 'heading' || key === 'body') continue;
+    lines.push(`${safeToken(key).toUpperCase()} ${value !== null && typeof value === 'object' ? stableStringify(value) : String(value)}`);
+  }
+  for (const warning of result.warnings || []) lines.push(`WARNING ${warning}`);
+  return `${lines.join('\n')}\n`;
+}
+
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -776,6 +790,120 @@ function contractCommand({ root, active, positional, options, dependencies }) {
   }
 }
 
+const SUGGESTION_FINGERPRINT = /^[a-f0-9]{64}$/;
+const SUGGESTION_OPTIONS = new Set([
+  'format', 'owned_root', 'confirm', 'until', 'proposal_json', 'execute', 'approval',
+]);
+
+function suggestionCommand({ root, positional, options, dependencies }) {
+  const subcommand = positional[1] || 'inspect';
+  if (!['inspect', 'dismiss', 'snooze', 'correct', 'draft'].includes(subcommand)
+      || positional.length > (subcommand === 'inspect' ? 1 : 2)
+      || Object.keys(options).some((key) => !SUGGESTION_OPTIONS.has(key))) {
+    return { result: canonical('suggestion', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  if (subcommand === 'inspect' && (options.confirm || options.until || options.proposal_json
+      || options.execute || options.approval)) {
+    return { result: canonical('suggestion', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  const now = dependencies.now ? dependencies.now() : Date.now();
+  const store = dependencies.createStewardStore
+    ? dependencies.createStewardStore({ root: join(root, 'steward') })
+    : createStewardStore({ root: join(root, 'steward') });
+  const observations = typeof dependencies.stewardObservations === 'function'
+    ? dependencies.stewardObservations({ root })
+    : dependencies.stewardObservations || [];
+  let selected;
+  try {
+    selected = (dependencies.selectSuggestion || selectSuggestion)({
+      observations,
+      state: store.readState(),
+      now,
+    });
+  } catch {
+    return { result: canonical('suggestion', false, 'unsafe_suggestion_input'), exitCode: EXIT.unsafe };
+  }
+  if (subcommand === 'inspect') {
+    const empty = selected.reason_code === 'suggestion_none';
+    return {
+      result: canonical('suggestion', true, selected.reason_code, empty ? {
+        heading: 'No actionable suggestion',
+        body: 'Router found no novel, high-confidence action that passes the current policy.',
+        overview: selected.overview,
+        suggestion: null,
+      } : {
+        heading: 'Top suggestion',
+        overview: selected.overview,
+        suggestion: selected.suggestion,
+      }),
+      exitCode: EXIT.success,
+    };
+  }
+  if (!SUGGESTION_FINGERPRINT.test(options.confirm || '')) {
+    return { result: canonical(`suggestion ${subcommand}`, false, 'invalid_suggestion_fingerprint'), exitCode: EXIT.usage };
+  }
+  if ((subcommand === 'dismiss' && (options.until || options.proposal_json || options.execute || options.approval))
+      || (subcommand === 'snooze' && (options.proposal_json || options.execute || options.approval
+        || options.until === undefined || !/^\d+$/u.test(options.until)
+        || !Number.isSafeInteger(Number(options.until))))
+      || (subcommand === 'correct' && (options.until || options.execute || options.approval
+        || options.proposal_json === undefined || !parseJsonOption(options.proposal_json, null)))) {
+    return { result: canonical(`suggestion ${subcommand}`, false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  if (!selected.suggestion || options.confirm !== selected.suggestion.fingerprint) {
+    return { result: canonical(`suggestion ${subcommand}`, false, 'suggestion_fingerprint_stale'), exitCode: EXIT.unsafe };
+  }
+  try {
+    if (subcommand === 'dismiss') {
+      const interaction = store.dismiss(options.confirm, { now });
+      return {
+        result: canonical('suggestion dismiss', interaction.status !== 'blocked',
+          interaction.reason_code || 'suggestion_dismissed', {
+            message: 'Suggestion dismissed',
+            fingerprint: options.confirm,
+            interaction,
+          }),
+        exitCode: interaction.status === 'blocked' ? EXIT.mutation : EXIT.success,
+      };
+    }
+    if (subcommand === 'snooze') {
+      const until = Number(options.until);
+      const interaction = store.snooze(options.confirm, until, { now });
+      return {
+        result: canonical('suggestion snooze', interaction.status !== 'blocked',
+          interaction.reason_code || 'suggestion_snoozed', {
+            message: `Suggestion snoozed until ${until}`,
+            fingerprint: options.confirm,
+            until,
+            interaction,
+          }),
+        exitCode: interaction.status === 'blocked' ? EXIT.mutation : EXIT.success,
+      };
+    }
+    if (subcommand === 'correct') {
+      const correction = parseJsonOption(options.proposal_json, null);
+      const interaction = store.correct(options.confirm, correction, { now });
+      return {
+        result: canonical('suggestion correct', true, 'suggestion_correction_saved', {
+          message: 'Correction proposal saved; routing unchanged',
+          fingerprint: options.confirm,
+          proposal_id: interaction.proposal_id,
+          routing_unchanged: true,
+        }),
+        exitCode: EXIT.success,
+      };
+    }
+  } catch (error) {
+    const usageError = error.message === 'invalid_arguments'
+      || /invalid|bounds|object|fields|expiry|safe epoch/u.test(error.message);
+    return {
+      result: canonical(`suggestion ${subcommand}`, false, usageError ? 'invalid_arguments' : 'suggestion_mutation_failed'),
+      exitCode: usageError ? EXIT.usage : EXIT.mutation,
+    };
+  }
+  return { result: canonical('suggestion draft', false, 'invalid_arguments'), exitCode: EXIT.usage };
+}
+
 export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, dependencies = {} } = {}) {
   let parsed;
   try { parsed = parse(argv); } catch (error) { return { result: canonical('usage', false, error.message), exitCode: EXIT.usage }; }
@@ -783,6 +911,9 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   if (options.help) return { result: canonical('help', true, 'help', { usage: usage().trim() }), exitCode: EXIT.success };
   const root = resolve(options.owned_root || defaultOwnedRoot || join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
   const command = positional[0];
+  if (command === 'suggestion') {
+    return suggestionCommand({ root, positional, options, dependencies });
+  }
   if (command === 'context') {
     if (positional.length !== 2) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
     return runContextCommand({ subcommand: positional[1], root, options });
@@ -1164,6 +1295,8 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
         ? renderInventoryText(outcome.result)
         : outcome.result.command.startsWith('contract')
           ? renderContractText(outcome.result)
+          : outcome.result.command.startsWith('suggestion')
+            ? renderSuggestionText(outcome.result)
           : textResult(outcome.result));
     process.exitCode = outcome.exitCode;
   } catch {
