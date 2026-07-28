@@ -20,7 +20,7 @@
 // disposed file is missing. None of the three mutates outcomes.jsonl (the raw
 // evidence is preserved across every admin command).
 
-import { closeSync, existsSync, fsyncSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { scoreCapability } from './score.mjs';
 
@@ -76,6 +76,11 @@ function atomicWriteState(statePath, state) {
 // true, 'reset_ok', { path }).
 export function reset({ healthRoot } = {}) {
   const statePath = join(healthRoot, 'state.json');
+  // WR-01: ensure the health/ dir exists before atomicWriteState writes the
+  // temp file inside it. Without this, `router health reset` on a fresh
+  // install (before any observation has ever created the dir) throws ENOENT
+  // out of writeFileSync, which the CLI surfaces as internal_error + exit 5.
+  mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
   atomicWriteState(statePath, {});
   return canonical('health', true, 'reset_ok', { path: statePath });
 }
@@ -121,7 +126,9 @@ export function recover({ healthRoot } = {}) {
   }
 
   // Rebuild from outcomes.jsonl. A missing/corrupt outcomes file yields an
-  // empty state (T-24-16 fail-open).
+  // empty state (T-24-16 fail-open). WR-01: ensure the health/ dir exists
+  // before atomicWriteState writes the temp file inside it (mirrors reset).
+  mkdirSync(healthRoot, { recursive: true, mode: 0o700 });
   const state = rebuildStateFromOutcomes(outcomesPath);
   atomicWriteState(statePath, state);
   return canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes', capability_count: Object.keys(state).length });
