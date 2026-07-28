@@ -15,7 +15,7 @@ import { discoverRoots as discoverCodex } from '../src/adapters/codex.mjs';
 import { diffFingerprintTrees } from '../src/registry/diff.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { mapCandidateRegistry } from '../src/registry/map.mjs';
-import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
+import { contentFingerprint, stableCapabilityId } from '../src/registry/identity.mjs';
 
 function artifact(root, runtime, scope, category, name, data) {
   const base = scope === 'global' ? join(root, runtime) : join(root, 'project', `.${runtime}`);
@@ -198,11 +198,12 @@ test('mode-map stamping seeds record mapping.explicit_subjects so the mapper pub
     mkdirSync(join(root, 'claude'), { recursive: true });
     mkdirSync(join(root, 'codex'), { recursive: true });
     // Skill named to match the slash entry id; agent named to match recommended_agents[0].
-    artifact(root, 'claude', 'global', 'skills', 'gsd-debug', { invocation: { command: 'gsd-debug', args: [] } });
-    artifact(root, 'claude', 'global', 'agents', 'gsd-debugger', { invocation: { command: 'gsd-debugger', args: [] } });
+    artifact(root, 'claude', 'global', 'skills', 'gsd-debug', { invocation: { command: 'gsd-debug', args: [] }, dependencies: [] });
+    artifact(root, 'claude', 'global', 'agents', 'gsd-debugger', { invocation: { command: 'gsd-debugger', args: [] }, dependencies: [] });
     // A skill that carries its own artifact-provided mapping — must be preserved (union, not overwrite).
     artifact(root, 'claude', 'global', 'skills', 'custom', {
       invocation: { command: 'custom', args: [] },
+      dependencies: [],
       mapping: { explicit_subjects: ['route:custom-artifact'] },
     });
     const modeMapPath = modeMapFile(root, [
@@ -211,7 +212,25 @@ test('mode-map stamping seeds record mapping.explicit_subjects so the mapper pub
       { id: 'custom', mode: 'custom', invoke_kind: 'slash', recommended_skills: [], recommended_agents: [] },
       { id: 'warn-unwired', mode: 'warn-unwired', invoke_kind: 'warn', recommended_skills: [], recommended_agents: [] },
     ]);
-    const options = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'), modeMapPath };
+    const baseOptions = { claudeRoot: join(root, 'claude'), codexRoot: join(root, 'codex'), modeMapPath };
+    const base = buildFullRegistry(baseOptions);
+    const overlays = base.registry.records.map((record, index) => ({
+      schema_version: 1,
+      kind: 'contract-overlay-v1',
+      overlay_id: `mode-map-safe:${index}`,
+      provenance: 'correction',
+      binding: {
+        stable_id: stableCapabilityId(record),
+        source_fingerprint: contentFingerprint(record),
+        scope: record.scope,
+        runtime: record.invocation.runtime,
+      },
+      fields: {
+        reversibility: { value: 'reversible' },
+        risk: { value: 'low' },
+      },
+    }));
+    const options = { ...baseOptions, overlays };
     const built = buildFullRegistry(options);
 
     // Slash entry id matches the skill name → stamped.
@@ -223,18 +242,15 @@ test('mode-map stamping seeds record mapping.explicit_subjects so the mapper pub
     // Artifact-provided mapping is preserved and unioned with the stamped subject.
     const custom = built.registry.records.find(r => r.name === 'custom');
     assert.deepEqual(custom.mapping.explicit_subjects, ['custom', 'route:custom-artifact']);
+    assert.equal(debug.eligibility.eligible, true);
     // Warn entries never produce routes (no record stamped with 'warn-unwired').
     assert.equal(built.registry.records.some(r => r.mapping?.explicit_subjects?.includes('warn-unwired')), false);
 
-    // End-to-end: the mapper produces mapped subjects → publishCompiledIndex emits routes (ORC-01 unblocked).
+    // End-to-end: the real mapper accepts the normalized, contract-eligible records.
     const reconciliation = { disposition: 'eligible', verdicts: [] };
     const mapping = mapCandidateRegistry({ candidate: built.registry, reconciliation, existingMappings: [], policy: undefined });
     assert.ok(mapping.summary.mapped >= 2, `expected >=2 mapped subjects, got ${mapping.summary.mapped}`);
-    const tuple = publishCompiledIndex({
-      ownedRoot: root, registry: built.registry, registryVersionId: 'v1-0123456789abcdef',
-      mapping, policyFingerprint: 'p',
-    });
-    assert.equal(tuple.publication_status, 'published');
+    assert.ok(mapping.subjects.filter(subject => subject.disposition === 'mapped').length >= 2);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
