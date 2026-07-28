@@ -63,6 +63,12 @@ export function createHealthStore({ root } = {}) {
         let record;
         try { record = JSON.parse(line); } catch { corrupt_line_skipped += 1; continue; }
         if (!record || typeof record !== 'object') { corrupt_line_skipped += 1; continue; }
+        // WR-02: skip compaction markers (audit-trail records with no
+        // timestamp_ms) WITHOUT counting them as corrupt — they are legitimate
+        // records explicitly preserved by compact. Counting them inflated
+        // corrupt_line_skipped by one per compaction and masked real
+        // corruption.
+        if (record.compacted_at_ms !== undefined) continue;
         if (!Number.isSafeInteger(record.timestamp_ms)) { corrupt_line_skipped += 1; continue; }
         if (retentionFloor !== null && record.timestamp_ms < retentionFloor) continue;
         if (fromMs !== undefined && record.timestamp_ms < fromMs) continue;
