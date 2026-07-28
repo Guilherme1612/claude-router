@@ -14,6 +14,7 @@ import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-inde
 import { inspect as healthInspect, reset as healthReset, dispose as healthDispose, recover as healthRecover } from '../health/admin.mjs';
 import { selectSuggestion } from '../steward/suggestion.mjs';
 import { createStewardStore } from '../steward/state.mjs';
+import { approveDraftCreation, previewDraft } from '../steward/draft.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -853,6 +854,54 @@ function suggestionCommand({ root, positional, options, dependencies }) {
   if (!selected.suggestion || options.confirm !== selected.suggestion.fingerprint) {
     return { result: canonical(`suggestion ${subcommand}`, false, 'suggestion_fingerprint_stale'), exitCode: EXIT.unsafe };
   }
+  if (subcommand === 'draft') {
+    if (options.until || options.proposal_json || (!options.execute && options.approval)
+        || (options.execute && !/^[a-f0-9]{64}$/u.test(options.approval || ''))) {
+      return { result: canonical('suggestion draft', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    }
+    const draft = typeof dependencies.stewardDraft === 'function'
+      ? dependencies.stewardDraft({ root, suggestion: selected.suggestion })
+      : dependencies.stewardDraft;
+    try {
+      const request = { root: store.stewardRoot, suggestion: selected.suggestion, draft };
+      const preview = (dependencies.previewDraft || previewDraft)(request);
+      if (preview.preview_status !== 'ready') {
+        return {
+          result: canonical('suggestion draft', false, preview.reason_code),
+          exitCode: EXIT.unsafe,
+        };
+      }
+      if (!options.execute) {
+        const { approval_binding: binding, ...proposal } = preview;
+        return {
+          result: canonical('suggestion draft', true, preview.reason_code, {
+            ...proposal,
+            approval_token: binding.token,
+          }, [preview.warning]),
+          exitCode: EXIT.success,
+        };
+      }
+      const created = (dependencies.approveDraftCreation || approveDraftCreation)({
+        ...request,
+        preview,
+        presented: { token: options.approval },
+        now,
+      });
+      const ok = ['stored', 'unchanged'].includes(created.status);
+      return {
+        result: canonical('suggestion draft', ok, created.reason_code, ok ? {
+          authority: created.authority,
+          draft_id: created.draft_id,
+          draft_preview: created.draft_preview,
+        } : {}),
+        exitCode: ok ? EXIT.success
+          : ['approval_required', 'approval_mismatch'].includes(created.reason_code)
+            ? EXIT.usage : EXIT.unsafe,
+      };
+    } catch {
+      return { result: canonical('suggestion draft', false, 'unsafe_draft_input'), exitCode: EXIT.unsafe };
+    }
+  }
   try {
     if (subcommand === 'dismiss') {
       const interaction = store.dismiss(options.confirm, { now });
@@ -901,7 +950,7 @@ function suggestionCommand({ root, positional, options, dependencies }) {
       exitCode: usageError ? EXIT.usage : EXIT.mutation,
     };
   }
-  return { result: canonical('suggestion draft', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  return { result: canonical('suggestion', false, 'invalid_arguments'), exitCode: EXIT.usage };
 }
 
 export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, dependencies = {} } = {}) {
