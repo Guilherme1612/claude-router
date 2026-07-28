@@ -100,25 +100,31 @@ export function appendStartupNotice(result, pointer) {
 
 export function routeContextPrompt({
   prompt, ownedRoot, projectRoot, forceStale = false, authoritative,
-  now = Date.now(), compiledFs, loadStartupPointerFn = loadStartupPointer,
+  now = Date.now(), compiledFs,
 } = {}) {
-  let startupPointer = null;
-  if (typeof ownedRoot === 'string') {
-    try {
-      const loaded = loadStartupPointerFn({ ownedRoot, now });
-      if (loaded.available) startupPointer = loaded;
-    } catch {
-      // The optional startup notice is fail-silent and cannot block routing.
-    }
-  }
-  const projected = result => appendStartupNotice(result, startupPointer);
   const instruction = parseInstruction(prompt);
-  if (instruction.kind === 'none') return projected({ handled: false, reason_code: 'instruction_not_contextual' });
-  if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return projected({ handled: false, reason_code: 'context_roots_missing' });
+  if (instruction.kind === 'none') {
+    if (typeof ownedRoot !== 'string') return { handled: false, reason_code: 'instruction_not_contextual' };
+    const tuple = loadCompiledIndex({
+      ownedRoot, now, projectionOnly: true, ...(compiledFs ? { fs: compiledFs } : {}),
+    });
+    const suggestion = tuple.prompt_projection === true
+      ? tuple.suggestionReference
+      : loadStartupPointer({ ownedRoot, now });
+    return appendStartupNotice({ handled: false, reason_code: 'instruction_not_contextual' }, suggestion);
+  }
+  if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return { handled: false, reason_code: 'context_roots_missing' };
   const loaded = loadCapsule({ ownedRoot });
   const capsule = loaded.capsule;
-  if (!capsule && instruction.kind === 'explicit') return projected({ handled: false, reason_code: loaded.reason_code });
-  const compiledIndex = loadCompiledIndex({ ownedRoot, now, ...(compiledFs ? { fs: compiledFs } : {}) });
+  if (!capsule && instruction.kind === 'explicit') return { handled: false, reason_code: loaded.reason_code };
+  const loadOptions = { ownedRoot, now, ...(compiledFs ? { fs: compiledFs } : {}) };
+  const compiledIndex = loadCompiledIndex({ ...loadOptions, projectionOnly: true });
+  const boundedTuple = compiledIndex.prompt_projection === true;
+  // Compatibility only: pre-v1.3 installations still expose the old pointer.
+  const suggestion = boundedTuple
+    ? compiledIndex.suggestionReference
+    : loadStartupPointer({ ownedRoot, now });
+  const projected = result => appendStartupNotice(result, suggestion);
   if (!compiledIndex.dispatch_eligible) {
     const resolution = {
       outcome: 'blocked', dispatch_eligible: false,
@@ -153,8 +159,10 @@ export function routeContextPrompt({
     return projected({ handled: true, resolution: blockedResolution, additional_context: injection(blockedResolution) });
   }
   let save = null;
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
-  if (capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
+  // Pre-v1.3 compatibility retains the old mutation contract. Published v1.3
+  // tuples are strict read-only prompt projections.
+  if (!boundedTuple && capsule && resolution.dispatch_eligible && resolution.outcome === 'refresh') save = saveCapsule({ ownedRoot, capsule: refreshedCapsule(capsule, resolution.refresh, now) });
+  if (!boundedTuple && capsule && resolution.dispatch_eligible && resolution.outcome === 'override' && resolution.action.goal_id) save = saveCapsule({ ownedRoot, capsule: overrideCapsule(capsule, resolution, now) });
   if (save?.status === 'blocked') return projected({ handled: false, reason_code: save.reason_code });
   return projected({
     handled: true,

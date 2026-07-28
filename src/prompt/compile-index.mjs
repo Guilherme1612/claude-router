@@ -129,6 +129,7 @@ function promptResult(pointer, projection, source, reasonCode) {
     status: 'ready', dispatch_eligible: true, reason_code: reasonCode,
     tuple_version_id: pointer.tuple_version_id, version_id: projection.version_id,
     registry_version_id: projection.registry_version_id, source,
+    prompt_projection: true,
     index: projection.index, closure: projection.closure, budget: projection.budget,
     summaryIndex: projection.summary_index,
     suggestionReference: validSuggestion(projection.suggestion_reference)
@@ -185,6 +186,8 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
   };
   const compiledRoot = resolve(root, 'compiled-index');
   const tupleRoot = resolve(root, 'release-tuples');
+  const tupleActivePath = resolve(tupleRoot, 'active.json');
+  const tupleActiveRead = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
   const verifyProjection = (pointer, source, reasonCode) => {
     if (pointer?.schema_version !== 3
       || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')
@@ -253,13 +256,14 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
       closure: closureRead.value, budget: budgetRead.value, summaryIndex: summaryIndexRead.value,
     };
   };
-  const tupleActivePath = resolve(tupleRoot, 'active.json');
   if (projectionOnly) {
-    const activePointer = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
-    const activeProjection = verifyProjection(activePointer, 'active', 'release_tuple_active');
-    if (activeProjection) return activeProjection;
-    const knownGoodPointer = boundedJson(resolve(tupleRoot, 'known-good.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
-    return verifyProjection(knownGoodPointer, 'known_good', 'release_tuple_known_good') || blocked();
+    const activePointer = tupleActiveRead;
+    if (activePointer?.schema_version === 3) {
+      const activeProjection = verifyProjection(activePointer, 'active', 'release_tuple_active');
+      if (activeProjection) return activeProjection;
+      const knownGoodPointer = boundedJson(resolve(tupleRoot, 'known-good.json'), COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
+      return verifyProjection(knownGoodPointer, 'known_good', 'release_tuple_known_good') || blocked();
+    }
   }
   if (releaseTuplePointer) {
     const verified = verifyTuple(releaseTuplePointer);
@@ -271,7 +275,7 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
       ...(verified.suggestionReference ? { suggestionReference: verified.suggestionReference } : {}) };
     return blocked();
   }
-  const tupleActive = boundedJson(tupleActivePath, COMPILED_INDEX_LIMITS.pointer_bytes, io)?.value;
+  const tupleActive = tupleActiveRead;
   if (tupleActive) {
     const verified = verifyTuple(tupleActive);
     if (verified) return { status: 'ready', dispatch_eligible: true, reason_code: 'release_tuple_active',
