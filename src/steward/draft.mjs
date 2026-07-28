@@ -1,10 +1,16 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import {
+  closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
+  renameSync, rmSync, writeFileSync,
+} from 'node:fs';
 import { isAbsolute, join, relative, resolve } from 'node:path';
+import { bindApproval, verifyApproval } from '../orchestrator/approval.mjs';
 import { stableStringify } from '../registry/schema.mjs';
 
 export const DRAFT_PROPOSAL_VERSION = 'steward-draft-v1';
 
 const APPROVAL_WARNING = 'Approve draft creation only; this will not install or publish anything.';
+const PREVIEW_WARNING = 'Preview only — no capability or routing files were changed.';
 const ELIGIBLE_KINDS = new Set(['missing_category', 'missing_dependency']);
 const FINGERPRINT = /^[a-f0-9]{64}$/;
 const TOKEN = /^[a-z][a-z0-9_:-]{0,127}$/;
@@ -89,10 +95,18 @@ function derive({ root, suggestion, draft }) {
     effect: 'draft_file_only',
     warning: APPROVAL_WARNING,
   };
+  const approval_binding = bindApproval({
+    capability: current,
+    args: payload,
+    targets: proposal.target_paths,
+    effects: ['draft_file_only'],
+    proposalVersion: DRAFT_PROPOSAL_VERSION,
+  });
   return {
     current,
     payload,
     proposal,
+    approval_binding,
     preview_fingerprint: hash({ proposal, semantic_payload: payload }),
   };
 }
@@ -102,9 +116,10 @@ export function previewDraft(options = {}) {
   if (!ELIGIBLE_KINDS.has(current.observation_kind)) {
     return { preview_status: 'ineligible', reason_code: 'draft_ineligible_suggestion' };
   }
-  const { proposal, preview_fingerprint } = derive(options);
+  const { proposal, approval_binding, preview_fingerprint } = derive(options);
   return {
     ...proposal,
+    approval_binding,
     preview_status: 'ready',
     reason_code: 'draft_approval_required',
     preview_fingerprint,
@@ -135,4 +150,106 @@ export function verifyDraftPreview(preview, current = null) {
   } catch {
     return { valid: false, reason_code: 'invalid_draft_preview' };
   }
+}
+
+function completePreview(targetPaths, payload) {
+  return {
+    exact_paths: targetPaths,
+    semantic_changes: payload.semantic_changes,
+    dependencies: payload.dependencies,
+    conflicts: payload.conflicts,
+    representative_routes: payload.representative_routes,
+    verification: payload.verification,
+    reversibility: payload.reversibility,
+    rollback_implications: payload.rollback_implications,
+    warning: PREVIEW_WARNING,
+  };
+}
+
+function ensurePrivateDirectory(path) {
+  mkdirSync(path, { recursive: true, mode: 0o700 });
+  const stat = lstatSync(path);
+  if (!stat.isDirectory() || stat.isSymbolicLink()) fail('draft root must be a private directory');
+}
+
+function durableWrite(path, value) {
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    writeFileSync(fd, `${stableStringify(value)}\n`);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+export function approveDraftCreation(options = {}) {
+  const { root, suggestion, draft, preview, presented } = options;
+  const fresh = previewDraft({ root, suggestion, draft });
+  if (fresh.preview_status !== 'ready') {
+    return { status: 'blocked', reason_code: fresh.reason_code };
+  }
+  if (!presented?.token) return { status: 'blocked', reason_code: 'approval_required' };
+  if (fresh.preview_fingerprint !== preview?.preview_fingerprint) {
+    return { status: 'blocked', reason_code: 'stale_draft_preview' };
+  }
+  const verified = verifyApproval({
+    bound: preview.approval_binding,
+    presented,
+    expected: fresh.approval_binding,
+  });
+  if (verified.status !== 'approved') {
+    return { status: 'blocked', reason_code: verified.reason_code };
+  }
+
+  const { payload } = derive({ root, suggestion, draft });
+  const path = fresh.target_paths[0];
+  const draftsRoot = join(resolve(root), 'drafts');
+  const draftRoot = resolve(path, '..');
+  if (!contained(draftsRoot, draftRoot) || !contained(draftRoot, path)) fail('draft path escapes draft root');
+  const draft_id = draftRoot.split(/[/\\]/).at(-1);
+  const draft_preview = completePreview(fresh.target_paths, payload);
+  const bundle = {
+    schema_version: 1,
+    proposal_version: DRAFT_PROPOSAL_VERSION,
+    suggestion_fingerprint: fresh.suggestion_fingerprint,
+    authority: 'draft_file_only',
+    draft_preview,
+  };
+
+  ensurePrivateDirectory(resolve(root));
+  ensurePrivateDirectory(draftsRoot);
+  if (existsSync(path)) {
+    const existing = readFileSync(path, 'utf8');
+    if (existing !== `${stableStringify(bundle)}\n`) fail('immutable draft bundle conflict');
+    return {
+      status: 'unchanged', reason_code: 'draft_preview_ready', authority: 'draft_file_only',
+      draft_id, path, draft_preview,
+    };
+  }
+  const staging = join(draftsRoot, `.stage-${randomUUID()}`);
+  ensurePrivateDirectory(staging);
+  try {
+    durableWrite(join(staging, 'draft.json'), bundle);
+    renameSync(staging, draftRoot);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    if (error.code !== 'EEXIST') throw error;
+    const existing = readFileSync(path, 'utf8');
+    if (existing !== `${stableStringify(bundle)}\n`) fail('immutable draft bundle conflict');
+    return {
+      status: 'unchanged', reason_code: 'draft_preview_ready', authority: 'draft_file_only',
+      draft_id, path, draft_preview,
+    };
+  }
+  let directoryFd;
+  try {
+    directoryFd = openSync(draftsRoot, 'r');
+    fsyncSync(directoryFd);
+  } finally {
+    if (directoryFd !== undefined) closeSync(directoryFd);
+  }
+  return {
+    status: 'stored', reason_code: 'draft_preview_ready', authority: 'draft_file_only',
+    draft_id, path, draft_preview,
+  };
 }
