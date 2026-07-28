@@ -259,3 +259,9 @@ test('installed Claude and Codex modules publish, load, and route every recommen
     assert.equal(typeof routed.additional_context, 'string');
   }
 });
+
+test('isolated installed routes stay within latency and context budgets', async t => {
+  const { release_metrics: metrics } = await environment();
+  assert.ok(metrics, 'PHASE26_PERFORMANCE_EVIDENCE_MISSING');
+  t.diagnostic(`RELEASE_METRICS ${JSON.stringify(metrics)}`);
+});
