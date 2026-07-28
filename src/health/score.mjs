@@ -23,35 +23,26 @@
 // It NEVER reads record.name or a framework-specific field; capability_id is
 // the stable local id (Plan 24-01 invariant).
 
-import { HALF_LIFE_MS, MINIMUM_SAMPLES, computeWeightedSamples } from '../evolution/evidence.mjs';
+import { computeWeightedSamples } from '../evolution/evidence.mjs';
+import {
+  HALF_LIFE_MS,
+  MINIMUM_SAMPLES,
+  VERSIONED_WEIGHTS,
+  TIER_BOUNDARIES,
+} from './thresholds.mjs';
 
 export { HALF_LIFE_MS, MINIMUM_SAMPLES };
 
-// Default weights — versioned in Plan 24-04's thresholds.mjs (POLICY_VERSION=
-// 'health-policy-v1'). Inlined here for Wave 2 with the explicit note that they
-// move to thresholds.mjs in Wave 4 (HLTH-11 grep guard: no inline weight
-// numbers in score.mjs once Wave 4 lands).
-const DEFAULT_WEIGHTS = Object.freeze({
-  recency: 0.30,
-  completion: 0.25,
-  opportunity: 0.20,
-  reversibility: 0.15,
-  confidence: 0.10,
-});
+// The 5 score weights + tier boundaries are versioned in thresholds.mjs
+// (POLICY_VERSION='health-policy-v1', HLTH-11). Plan 24-04 moved the inline
+// constants here; the scorer is unchanged behaviorally. Value changes flow
+// through the canary bridge (src/health/canary-bridge.mjs), not by direct edit.
+const DEFAULT_WEIGHTS = VERSIONED_WEIGHTS;
 
 const REVERSIBILITY_FACTOR = Object.freeze({
   reversible: 1.0,
   unknown: 0.7,
   irreversible: 0.4,
-});
-
-// Tier boundaries (versioned, canary-guarded in Wave 4). usefulness_basis_points
-// is bounded 0..10000 (mirrors confidence_basis_points convention from
-// src/registry/relationships.mjs).
-const TIER_BOUNDARIES = Object.freeze({
-  high: 7500,
-  medium: 5000,
-  low: 2500,
 });
 
 const DEFAULT_CONFIDENCE_BASIS_POINTS = 5000;
