@@ -22,10 +22,13 @@ test('v1.3 matrix owns exact fresh REL-01 through REL-09 release evidence', () =
   assert.equal(matrix.milestone, 'v1.3');
   assert.deepEqual(matrix.requirements.map(row => row.id), IDS);
   assert.deepEqual(matrix.stages.map(stage => stage.id), [
-    'focused', 'lifecycle', 'compatibility', 'authority', 'regression', 'latency',
+    'focused', 'lifecycle', 'compatibility', 'authority', 'regression', 'latency', 'live-install',
   ]);
   assert.equal(matrix.stages.at(-1).isolated, true);
   assert.deepEqual(matrix.stages.at(-1).gate_ids, [
+    'LIVE-INSTALL',
+  ]);
+  assert.deepEqual(matrix.stages.find(stage => stage.id === 'latency').gate_ids, [
     'warm-p95', 'hard-route-ceiling', 'context-budget', 'REL-07',
   ]);
   assert.equal(validateReleaseMatrix(matrix).status, 'valid');
@@ -69,7 +72,7 @@ test('v1.3 runner executes every matrix stage and publishes a verifiable report'
   try {
     const result = await runRelease({ matrixPath: MATRIX_PATH, execute, outputPath });
     assert.equal(result.status, 'passed');
-    assert.equal(requests.length, 6);
+    assert.equal(requests.length, 7);
     assert.ok(requests.at(-1).isolated);
     assert.equal(verifyReleaseReport({ reportPath: outputPath, matrixPath: MATRIX_PATH }).status, 'verified');
     assert.equal(JSON.parse(readFileSync(outputPath, 'utf8')).milestone, 'v1.3');

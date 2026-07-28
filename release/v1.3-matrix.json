@@ -17,7 +17,7 @@
     {"id":"REL-02","primary":{"phase":26,"owner":"background-tuple-build","commands":["node --test tests/router.phase26-tuple.test.mjs"],"gate_ids":["REL-02"]}},
     {"id":"REL-03","primary":{"phase":26,"owner":"immutable-complete-tuple","commands":["node --test tests/router.phase26-tuple.test.mjs"],"gate_ids":["REL-03"]}},
     {"id":"REL-04","primary":{"phase":26,"owner":"atomic-invalidation","commands":["node --test tests/router.phase26-invalidation.test.mjs"],"gate_ids":["REL-04"]}},
-    {"id":"REL-05","primary":{"phase":26,"owner":"guarded-lifecycle","commands":["node --test tests/router.phase26-lifecycle.test.mjs"],"gate_ids":["REL-05"]}},
+    {"id":"REL-05","primary":{"phase":26,"owner":"guarded-lifecycle","commands":["node --test tests/router.phase26-lifecycle.test.mjs"],"gate_ids":["REL-05","LIVE-INSTALL"]}},
     {"id":"REL-06","primary":{"phase":26,"owner":"dual-runtime-compatibility","commands":["node --test tests/router.phase26-dual-runtime.test.mjs"],"gate_ids":["REL-06"]}},
     {"id":"REL-07","primary":{"phase":26,"owner":"isolated-performance","commands":["node --test tests/router.phase26-performance.test.mjs"],"gate_ids":["REL-07"]}},
     {"id":"REL-08","primary":{"phase":26,"owner":"equivalence-and-recovery","commands":["node --test tests/router.phase26-equivalence.test.mjs"],"gate_ids":["REL-08"]}},
@@ -76,6 +76,12 @@
       "id": "latency",
       "files": ["tests/router.phase26-performance.test.mjs"],
       "gate_ids": ["warm-p95", "hard-route-ceiling", "context-budget", "REL-07"],
+      "isolated": true
+    },
+    {
+      "id": "live-install",
+      "files": ["tests/router.release-live-install.test.mjs"],
+      "gate_ids": ["LIVE-INSTALL"],
       "isolated": true
     }
   ]
