@@ -256,17 +256,38 @@ export function promoteThresholdCandidate({
     return { status: 'rejected', reason_code: proposed.reason_code || 'invalid_candidate' };
   }
 
-  // Construct the 6-gate object (mirror router-control.mjs:986-993).
+  // Derive the 6 gates from the validated evidence window. Threshold canaries
+  // fail closed when the window lacks a measurement class.
   const compatOk = compatibleThresholds(candidate);
+  const signals = Array.isArray(evidence_window?.observations)
+    ? evidence_window.observations.map((record) => record?.signal).filter(Boolean)
+    : [];
+  const candidateSignals = signals.filter((signal) => signal.policy_version === candidate.policy_version);
+  const hasCandidateEvidence = candidateSignals.length > 0;
+  const privacyCodes = new Set(['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected']);
+  const privacyPass = hasCandidateEvidence && candidateSignals.every((signal) => (
+    signal.confidence_band !== 'deny_filtered'
+      && !signal.guard_codes?.some((code) => privacyCodes.has(code))
+  ));
+  const safetyPass = hasCandidateEvidence
+    && candidateSignals.every((signal) => signal.verdict === 'success');
+  const qualityPass = hasCandidateEvidence
+    && candidateSignals.every((signal) => signal.verdict === 'success');
+  const contextSignals = candidateSignals.filter((signal) => signal.fixture_class === 'context-budget');
+  const contextPass = contextSignals.length > 0
+    && contextSignals.every((signal) => signal.verdict === 'success');
+  const latencyPass = hasCandidateEvidence
+    && candidateSignals.every((signal) => Number.isSafeInteger(signal.latency_us)
+      && signal.latency_us < 100_000);
   const gates = {
-    safety: { pass: true, reason_code: 'safety_passed' },
-    privacy: { pass: true, reason_code: 'privacy_passed' },
+    safety: { pass: safetyPass, reason_code: safetyPass ? 'safety_passed' : 'safety_measurement_missing_or_failed' },
+    privacy: { pass: privacyPass, reason_code: privacyPass ? 'privacy_passed' : 'privacy_measurement_missing_or_failed' },
     quality: {
-      pass: evidence_window?.sufficient === true,
-      reason_code: evidence_window?.sufficient ? 'quality_passed' : 'quality_insufficient_evidence',
+      pass: qualityPass,
+      reason_code: qualityPass ? 'quality_passed' : 'quality_measurement_missing_or_failed',
     },
-    context_budget: { pass: true, reason_code: 'context_budget_passed' },
-    latency: { pass: true, reason_code: 'latency_passed' },
+    context_budget: { pass: contextPass, reason_code: contextPass ? 'context_budget_passed' : 'context_budget_measurement_missing_or_failed' },
+    latency: { pass: latencyPass, reason_code: latencyPass ? 'latency_passed' : 'latency_measurement_missing_or_failed' },
     compatibility: {
       pass: compatOk,
       reason_code: compatOk ? 'compatibility_passed' : 'compatibility_uncertain',

@@ -218,10 +218,10 @@ function makeSufficientWindow() {
       confidence_band: 'high',
       guard_codes: [],
       reason_code: 'ok',
-      fixture_class: 'minimal-prompt',
+      fixture_class: i === 0 ? 'context-budget' : 'minimal-prompt',
       latency_us: 100,
       candidate_version: 'v1-abcdef0123456789',
-      policy_version: 'health-policy-v1',
+      policy_version: 'health-policy-v2',
       verdict: 'success',
       prompt_signature: 'a'.repeat(64),
     }, { project_id: 'proj-test' });
@@ -316,6 +316,34 @@ test('HLTH-11 D-canary: all 6 gates passing + sufficient evidence → promoted, 
   // active.json pointer updated.
   const pointer = JSON.parse(readFileSync(join(vroot, 'active.json'), 'utf8'));
   assert.equal(pointer.policy_version, 'health-policy-v2');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: missing context-budget measurement rejects the candidate', () => {
+  const root = tempOwnedRoot();
+  const store = createEvidenceStore({ now: () => 1_700_000_000_000 });
+  for (let i = 0; i < 35; i++) {
+    store.append({
+      timestamp_ms: 1_700_000_000_000 - i * 3600_000,
+      route_id: 'route-001',
+      confidence_band: 'high',
+      guard_codes: [],
+      reason_code: 'ok',
+      fixture_class: 'minimal-prompt',
+      latency_us: 100,
+      candidate_version: 'v1-abcdef0123456789',
+      policy_version: 'health-policy-v2',
+      verdict: 'success',
+      prompt_signature: 'c'.repeat(64),
+    }, { project_id: 'proj-test' });
+  }
+  const result = promoteThresholdCandidate({
+    candidate: makeValidCandidate(),
+    evidence_window: store.window({ project_id: 'proj-test' }),
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'context_budget_measurement_missing_or_failed');
   rmSync(root, { recursive: true, force: true });
 });
 
