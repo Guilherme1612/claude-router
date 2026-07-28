@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   loadReleaseMatrix,
+  parseChildEvidence,
   runRelease,
   validateReleaseMatrix,
   verifyReleaseReport,
@@ -102,4 +103,18 @@ test('v1.3 runner blocks skipped, incomplete, failing, and over-budget stage res
       defect,
     );
   }
+});
+
+test('v1.3 isolated evidence normalizes the benchmark max_ms measurement', () => {
+  const matrix = loadReleaseMatrix({ matrixPath: MATRIX_PATH });
+  const result = parseChildEvidence({
+    stdout: '# pass 3\n# fail 0\n# RELEASE_METRICS {"warm_p95_ms":2,"max_ms":8,"context_max_bytes":512}\n',
+    stage: 'latency',
+    gate_ids: matrix.stages.at(-1).gate_ids,
+    thresholds: matrix.thresholds,
+    error: null,
+    skipped: false,
+  });
+  assert.equal(result.measurements.max_route_ms, 8);
+  assert.ok(result.gate_results.every(gate => gate.pass));
 });

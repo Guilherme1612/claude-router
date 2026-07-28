@@ -190,7 +190,10 @@ export function parseChildEvidence({ stdout, stage, gate_ids, error, skipped, th
   if (stage === 'latency') {
     if (!measurements) return { gate_results: [], reason_code: 'metrics-missing' };
     const warm = measurements.warm_p95_ms;
-    const max = measurements.max_route_ms;
+    const max = measurements.max_route_ms ?? measurements.max_ms;
+    if (measurements.max_route_ms === undefined && Number.isFinite(max)) {
+      measurements = { ...measurements, max_route_ms: max };
+    }
     const warmPass = Number.isFinite(warm) && warm < thresholds.warm_p95_ms_lt;
     const maxPass = Number.isFinite(max) && max < thresholds.max_route_ms_lt;
     gate_results.push({ id: 'warm-p95', pass: warmPass, reason_code: warmPass ? 'warm-p95_pass' : 'threshold' });
