@@ -1,0 +1,147 @@
+import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import test from 'node:test';
+
+import { runRouterControl } from '../src/cli/router-control.mjs';
+
+const NOW = 1_800_000_000_000;
+const OBSERVATION = {
+  observation_kind: 'missing_dependency',
+  reason_code: 'missing_dependency',
+  remedy: 'review_contract',
+  freshness: 'fresh',
+  evidence_window_ms: 86_400_000,
+  sample_size: 7,
+  confidence_basis_points: 9200,
+  affected_capability_ids: ['skill:z', 'skill:a'],
+};
+
+function fixture(observations = [OBSERVATION]) {
+  const root = mkdtempSync(join(tmpdir(), 'router-steward-cli-'));
+  const protectedPath = join(root, 'active.json');
+  writeFileSync(protectedPath, '{"protected":true}\n');
+  const dependencies = { stewardObservations: observations, now: () => NOW };
+  return {
+    root,
+    protectedPath,
+    dependencies,
+    run(...argv) {
+      return runRouterControl({ argv: [...argv, '--owned-root', root], dependencies });
+    },
+  };
+}
+
+function selected(f) {
+  const outcome = f.run('suggestion');
+  assert.equal(outcome.exitCode, 0);
+  return outcome.result.data.suggestion;
+}
+
+test('suggestion empty and detail expose one bounded private canonical projection', () => {
+  for (const observations of [[], [OBSERVATION, {
+    ...OBSERVATION,
+    reason_code: 'lower_ranked',
+    confidence_basis_points: 8800,
+    affected_capability_ids: ['private:rejected'],
+  }]]) {
+    const f = fixture(observations);
+    try {
+      const before = readFileSync(f.protectedPath);
+      const outcome = f.run('suggestion');
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.command, 'suggestion');
+      assert.deepEqual(Object.keys(outcome.result), [
+        'schema_version', 'command', 'ok', 'reason_code', 'data', 'warnings',
+      ]);
+      if (observations.length === 0) {
+        assert.equal(outcome.result.reason_code, 'suggestion_none');
+        assert.deepEqual(outcome.result.data, {
+          heading: 'No actionable suggestion',
+          body: 'Router found no novel, high-confidence action that passes the current policy.',
+          overview: { actionable_count: 0 },
+          suggestion: null,
+        });
+      } else {
+        assert.equal(outcome.result.reason_code, 'suggestion_selected');
+        assert.equal(outcome.result.data.heading, 'Top suggestion');
+        assert.deepEqual(Object.keys(outcome.result.data.suggestion).sort(), [
+          'affected_capability_ids', 'confidence_basis_points', 'evidence',
+          'expected_benefit', 'fingerprint', 'observation_kind', 'reason_code',
+          'risk', 'safe_next_action',
+        ]);
+        assert.doesNotMatch(JSON.stringify(outcome.result), /private:rejected/);
+      }
+      assert.deepEqual(readFileSync(f.protectedPath), before);
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('dismiss, snooze, and correct require the current exact fingerprint', () => {
+  const f = fixture();
+  try {
+    const fingerprint = selected(f).fingerprint;
+    const before = readFileSync(f.protectedPath);
+    for (const argv of [
+      ['suggestion', 'dismiss', '--confirm', 'a'.repeat(64)],
+      ['suggestion', 'snooze', '--confirm', 'a'.repeat(64), '--until', String(NOW + 1000)],
+      ['suggestion', 'correct', '--confirm', 'a'.repeat(64), '--proposal-json', '{"reason_code":"wrong"}'],
+    ]) {
+      const outcome = f.run(...argv);
+      assert.equal(outcome.exitCode, 4);
+      assert.equal(outcome.result.reason_code, 'suggestion_fingerprint_stale');
+    }
+
+    const dismissed = f.run('suggestion', 'dismiss', '--confirm', fingerprint);
+    assert.equal(dismissed.result.data.message, 'Suggestion dismissed');
+
+    const snoozeFixture = fixture();
+    try {
+      const snoozeFingerprint = selected(snoozeFixture).fingerprint;
+      const until = NOW + 1000;
+      const snoozed = snoozeFixture.run(
+        'suggestion', 'snooze', '--confirm', snoozeFingerprint, '--until', String(until),
+      );
+      assert.equal(snoozed.result.data.message, `Suggestion snoozed until ${until}`);
+    } finally {
+      rmSync(snoozeFixture.root, { recursive: true, force: true });
+    }
+
+    const correctionFixture = fixture();
+    try {
+      const correctionFingerprint = selected(correctionFixture).fingerprint;
+      const corrected = correctionFixture.run(
+        'suggestion', 'correct', '--confirm', correctionFingerprint,
+        '--proposal-json', '{"reason_code":"dependency_restored"}',
+      );
+      assert.equal(corrected.result.data.message, 'Correction proposal saved; routing unchanged');
+      assert.equal(corrected.result.data.routing_unchanged, true);
+    } finally {
+      rmSync(correctionFixture.root, { recursive: true, force: true });
+    }
+    assert.deepEqual(readFileSync(f.protectedPath), before);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('suggestion grammar rejects malformed, unsafe, oversized, and forbidden actions', () => {
+  const f = fixture();
+  try {
+    for (const argv of [
+      ['suggestion', 'list'],
+      ['suggestion', 'dashboard'],
+      ['suggestion', 'dismiss', '--confirm', 'bad'],
+      ['suggestion', 'snooze', '--confirm', 'a'.repeat(64), '--until', '1.5'],
+      ['suggestion', 'correct', '--confirm', 'a'.repeat(64), '--proposal-json', `{"reason_code":"${'x'.repeat(4096)}"}`],
+      ['suggestion', '--unknown'],
+    ]) {
+      assert.equal(f.run(...argv).exitCode, 2);
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
