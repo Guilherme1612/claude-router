@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 import * as routerControl from '../src/cli/router-control.mjs';
 import { inspect, reset, dispose, recover } from '../src/health/admin.mjs';
 import { createHealthStore } from '../src/health/store.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const { runRouterControl } = routerControl;
 
@@ -71,7 +72,7 @@ function writeState(tmp, state) {
 
 function appendOutcome(tmp, partial) {
   const store = createHealthStore({ root: join(tmp, 'health') });
-  const record = {
+  const canonicalRecord = {
     timestamp_ms: partial.timestamp_ms ?? Date.now(),
     capability_id: partial.capability_id,
     outcome_kind: partial.outcome_kind ?? 'completed',
@@ -85,8 +86,13 @@ function appendOutcome(tmp, partial) {
     opportunity_count: 1,
     freshness: 'fresh',
     policy_version: 'health-policy-v1',
-    fingerprint: createHash('sha256').update(`${partial.capability_id}:${partial.timestamp_ms ?? Date.now()}`).digest('hex'),
   };
+  // Compute the fingerprint over the canonical record (fingerprint field
+  // stripped) using stableStringify — matches validateOutcomeEnvelope's
+  // recomputation (CR-01: fingerprint is now a content integrity anchor, not
+  // just a format field).
+  const fingerprint = createHash('sha256').update(stableStringify(canonicalRecord), 'utf8').digest('hex');
+  const record = { ...canonicalRecord, fingerprint };
   const result = store.append(record);
   assert.equal(result.status, 'stored', `appendOutcome failed: ${JSON.stringify(result)}`);
 }

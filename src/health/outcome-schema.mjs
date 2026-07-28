@@ -12,7 +12,9 @@
 // validateEvidenceEnvelope, privacy_signature_forbidden). boundedToken is
 // re-imported so path-escape defense stays shared, not redefined.
 
+import { createHash } from 'node:crypto';
 import { boundedToken, MAX_RETENTION_MS } from '../evolution/evidence.mjs';
+import { stableStringify } from '../registry/schema.mjs';
 
 // PRIVACY_GUARDS is not exported by evidence.mjs; mirror the set verbatim so
 // the privacy_signature_forbidden rule stays in lockstep with the evidence
@@ -112,8 +114,16 @@ export function validateOutcomeEnvelope(input) {
   if (!boundedInteger(input.sample_size, MAX_COUNT)) return deny('invalid_sample_size');
   if (!boundedInteger(input.opportunity_count, MAX_COUNT)) return deny('invalid_opportunity_count');
 
-  // Task 2 hardening — fingerprint integrity anchor (64-hex sha256).
+  // Task 2 hardening — fingerprint integrity anchor (64-hex sha256). The
+  // format check is necessary but not sufficient: recompute the fingerprint
+  // over the canonical record (fingerprint field stripped) and compare so a
+  // tampered record carrying any valid-format fingerprint is rejected. This
+  // closes the defense-in-depth gap where store.append's re-validation could
+  // not detect a mutated field value (CR-01).
   if (typeof input.fingerprint !== 'string' || !/^[a-f0-9]{64}$/.test(input.fingerprint)) return deny('invalid_fingerprint');
+  const { fingerprint: _stripped, ...canonicalWithoutFingerprint } = input;
+  const recomputedFingerprint = createHash('sha256').update(stableStringify(canonicalWithoutFingerprint), 'utf8').digest('hex');
+  if (recomputedFingerprint !== input.fingerprint) return deny('fingerprint_mismatch');
 
   const privacyDenied = input.guard_codes.some((code) => PRIVACY_GUARDS.has(code));
   if (privacyDenied && input.prompt_signature !== null) return deny('privacy_signature_forbidden');

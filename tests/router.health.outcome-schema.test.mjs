@@ -14,6 +14,7 @@ import {
   OUTCOME_KIND,
 } from '../src/health/outcome-schema.mjs';
 import { MAX_RETENTION_MS } from '../src/evolution/evidence.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const VALID_SIG = createHash('sha256').update('schema-fixture').digest('hex');
 
@@ -36,9 +37,11 @@ function baseRecord(overrides = {}) {
   };
   // Recompute fingerprint over the canonical record (minus fingerprint) so the
   // record is internally consistent when no fingerprint override is supplied.
+  // Must use stableStringify (sorted keys) to match validateOutcomeEnvelope's
+  // recomputation (CR-01: fingerprint is now a content integrity anchor).
   if (overrides.fingerprint === undefined) {
     const { fingerprint, ...rest } = { ...canonical, ...overrides };
-    const recomputed = createHash('sha256').update(JSON.stringify(rest)).digest('hex');
+    const recomputed = createHash('sha256').update(stableStringify(rest), 'utf8').digest('hex');
     return { ...rest, fingerprint: recomputed };
   }
   return { ...canonical, ...overrides };
@@ -109,6 +112,22 @@ test('HLTH-04: fingerprint must be a 64-hex sha256', () => {
   assert.equal(validateOutcomeEnvelope(baseRecord({ fingerprint: 'not-a-hash' })).reason_code, 'invalid_fingerprint');
   assert.equal(validateOutcomeEnvelope(baseRecord({ fingerprint: 'abcd'.repeat(8) + 'x' })).reason_code, 'invalid_fingerprint');
   assert.equal(validateOutcomeEnvelope(baseRecord({ fingerprint: 123 })).reason_code, 'invalid_fingerprint');
+});
+
+test('CR-01: a valid-format but content-mismatched fingerprint is rejected with fingerprint_mismatch', () => {
+  // Build a canonical record with a correctly-computed fingerprint, then
+  // tamper with a field after the fingerprint is set. The validator must
+  // recompute the fingerprint over the canonical record (fingerprint stripped)
+  // and reject the mismatch.
+  const valid = baseRecord();
+  // Tamper: bump timestamp_ms but keep the (now-stale) valid fingerprint.
+  const tampered = { ...valid, timestamp_ms: valid.timestamp_ms + 1000 };
+  const verdict = validateOutcomeEnvelope(tampered);
+  assert.equal(verdict.status, 'denied', 'content-mismatched fingerprint was accepted');
+  assert.equal(verdict.reason_code, 'fingerprint_mismatch');
+  // Sanity: an unrelated 64-hex string also fails the content check.
+  const arbitrary = { ...valid, fingerprint: '0'.repeat(64) };
+  assert.equal(validateOutcomeEnvelope(arbitrary).reason_code, 'fingerprint_mismatch');
 });
 
 test('HLTH-04 / Pitfall 5: a string field longer than 128 chars is rejected with field_too_long', () => {
