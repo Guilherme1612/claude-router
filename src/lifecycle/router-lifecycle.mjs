@@ -243,15 +243,25 @@ function launchOwnedController(p, options) {
 
 async function stopController(p, configurationFingerprint, options = {}) {
   const status = controllerStatus(p);
-  if (!status || status.configuration_fingerprint !== configurationFingerprint || !processAlive(status.pid)) return;
+  if (!status || !processAlive(status.pid)) return;
+  // A null fingerprint means "reap any live controller" (used by installRouter
+  // when the config fingerprint changed). Otherwise only stop a matching controller.
+  if (configurationFingerprint !== null && status.configuration_fingerprint !== configurationFingerprint) return;
   atomicWrite(p.controllerControlPath, JSON.stringify({
     schema_version: 1, action: 'shutdown', instance_id: status.instance_id,
-    configuration_fingerprint: configurationFingerprint,
+    configuration_fingerprint: status.configuration_fingerprint,
   }) + '\n');
   const deadline = Date.now() + (options.shutdownTimeoutMs ?? 2_000);
-  while (Date.now() <= deadline && processAlive(status.pid)) await sleep(20);
+  while (Date.now() <= deadline && processAlive(status.pid)) {
+    const updated = controllerStatus(p);
+    if (updated && (updated.state === 'stopped' || updated.instance_id !== status.instance_id)) break;
+    await sleep(20);
+  }
   if (processAlive(status.pid)) {
-    try { process.kill(status.pid, 'SIGTERM'); } catch { /* process exited */ }
+    const updated = controllerStatus(p);
+    if (!(updated && (updated.state === 'stopped' || updated.instance_id !== status.instance_id))) {
+      try { process.kill(status.pid, 'SIGTERM'); } catch { /* process exited */ }
+    }
   }
 }
 
@@ -609,6 +619,17 @@ export async function installRouter(options) {
     let status = readyController(p, configurationFingerprint, options.controllerStaleMs ?? 5_000);
     let child = null;
     if (!status) {
+      // Reap any live controller with a different fingerprint before launching a new one.
+      // readyController is fingerprint-scoped, so a config change returns null even though
+      // an old controller is still running. Without this reap, the new controller launches
+      // alongside the old one (production single-flight gap → false stale_pointer_sequence).
+      const existing = controllerStatus(p);
+      if (existing && processAlive(existing.pid)
+          && Number.isFinite(existing.heartbeat)
+          && Date.now() - existing.heartbeat <= (options.controllerStaleMs ?? 5_000)
+          && existing.configuration_fingerprint !== configurationFingerprint) {
+        await stopController(p, null, options);
+      }
       child = launchOwnedController(p, options);
       try { status = await waitForController(p, configurationFingerprint, { ...options, child }); }
       catch (error) { child.kill?.('SIGTERM'); throw error; }

@@ -41,7 +41,7 @@ async function waitUntil(predicate, timeoutMs = 2_000) {
 // Install the router with the opt-in test_mode seam into a temporary home and return the
 // runtime handles. The in-process controller launcher is used so function-valued verification
 // runners are available (see tests/helpers/test-mode-seam.mjs for why we cannot spawn a child).
-async function installSeam(root, holder, { claudeSkills = ['alpha'] } = {}) {
+async function installSeam(root, holder, { claudeSkills = ['alpha'], heartbeatMs, controlPollMs } = {}) {
   const claudeRoot = join(root, '.claude');
   const codexRoot = join(root, '.codex');
   const sourceRouter = join(root, 'router.mjs');
@@ -57,6 +57,8 @@ async function installSeam(root, holder, { claudeSkills = ['alpha'] } = {}) {
     debounceMs: 10, repairMs: 60_000,
     testMode: true, verificationRunners: stubVerificationRunners,
     launchController: inProcessControllerLauncher(stubVerificationRunners, holder),
+    ...(heartbeatMs !== undefined ? { heartbeatMs } : {}),
+    ...(controlPollMs !== undefined ? { controlPollMs } : {}),
   };
   options.contractOverlays = safeFixtureContractOverlays({
     claudeRoot, codexRoot,
@@ -254,7 +256,7 @@ test('D-04 controller interruption recovery through installed controller reconci
     // Write a file and immediately stop the controller before debounce fires. The event is
     // missed by the stopped controller.
     writeFileSync(join(claudeRoot, 'skills', 'beta.json'), artifact('beta'));
-    holder.child?.kill();
+    await holder.child?.kill();
     // Confirm the missed event did not advance the tuple while the controller was stopped.
     await new Promise(resolve => setTimeout(resolve, 50));
     assert.equal(tupleId(ownedRoot), initialTuple);
@@ -422,6 +424,67 @@ test('D-06 steady-state failure recovery through installed controller repairs on
     assert.equal(routed.resolution.dispatch_eligible, false);
   } finally {
     try { await holder.child?.kill(); } catch {}
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// v1.3.1 Item 5: SIGTERM/SIGINT handler leak (Path B)
+// ===========================================================================
+
+test('SIGTERM/SIGINT handlers do not accumulate across in-process launches', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-sig-leak-'));
+  const holder = {};
+  try {
+    const before = process.listeners('SIGTERM').length + process.listeners('SIGINT').length;
+    const { options } = await installSeam(root, holder, { heartbeatMs: 50, controlPollMs: 20 });
+    await holder.child?.kill();
+    const afterFirst = process.listeners('SIGTERM').length + process.listeners('SIGINT').length;
+    assert.equal(afterFirst, before, 'SIGTERM/SIGINT handlers removed after first close');
+
+    await restartController({ ...options, launchController: inProcessControllerLauncher(stubVerificationRunners, holder) });
+    await holder.child?.kill();
+    const afterSecond = process.listeners('SIGTERM').length + process.listeners('SIGINT').length;
+    assert.equal(afterSecond, before, 'SIGTERM/SIGINT handlers do not accumulate across two launches');
+  } finally {
+    try { await holder.child?.kill(); } catch {}
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ===========================================================================
+// v1.3.1 Item 5: production single-flight gap (Path C)
+// ===========================================================================
+
+test('production single-flight: relaunch with different config fingerprint reaps the old controller', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-single-flight-'));
+  const holderA = {};
+  const holderB = {};
+  try {
+    const { installed, options } = await installSeam(root, holderA, { heartbeatMs: 30, controlPollMs: 20 });
+    const statusA = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
+    assert.equal(statusA.state, 'ready');
+
+    // Relaunch with a different config fingerprint (different debounceMs).
+    const optionsB = { ...options, debounceMs: 20, launchController: inProcessControllerLauncher(stubVerificationRunners, holderB) };
+    await installRouter(optionsB);
+
+    // Sample the status over time. With the fix, only the new controller writes
+    // (old one is reaped). Without the fix, both controllers' heartbeats oscillate.
+    const fingerprints = new Set();
+    const instanceIds = new Set();
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
+      fingerprints.add(status.configuration_fingerprint);
+      instanceIds.add(status.instance_id);
+    }
+    assert.equal(fingerprints.size, 1, 'only one controller fingerprint observed (old controller reaped)');
+    assert.equal(instanceIds.size, 1, 'only one controller instance observed');
+    assert.ok(!fingerprints.has(statusA.configuration_fingerprint), 'old controller fingerprint not present after reap');
+  } finally {
+    try { await holderA.child?.kill(); } catch {}
+    try { await holderB.child?.kill(); } catch {}
     rmSync(root, { recursive: true, force: true });
   }
 });

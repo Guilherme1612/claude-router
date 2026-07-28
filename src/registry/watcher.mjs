@@ -326,6 +326,7 @@ export function createRegistryWatcher(options) {
     scheduleRepair();
     await reconcileDirty(rootNames, 'startup');
   })().catch(error => {
+    for (const w of watchers.splice(0)) { try { w.close(); } catch { /* already closed */ } }
     report(error);
     throw error;
   });
@@ -414,13 +415,20 @@ export async function runRegistryWatcher(options) {
   // interval/handler registration so nothing leaks past the close. stopping is set by close().
   if (stopping) return { controller, instanceId, configurationFingerprint, close: async () => {} };
   const heartbeat = setInterval(() => { publish('ready').catch(() => {}); }, heartbeatMs);
+  const close = async () => {
+    if (stopping) return;
+    stopping = true; clearInterval(control); clearInterval(heartbeat);
+    process.removeListener('SIGTERM', onSig); process.removeListener('SIGINT', onSig);
+    await controller.close(); await publish('stopped');
+  };
+  const onSig = () => close();
+  process.once('SIGTERM', onSig); process.once('SIGINT', onSig);
   const control = setInterval(async () => {
     const request = await readJson(config.control_path);
     if (!request || request.instance_id !== instanceId || request.configuration_fingerprint !== configurationFingerprint) return;
     if (request.action === 'shutdown' || request.action === 'restart') {
-      clearInterval(control); clearInterval(heartbeat); stopping = true;
-      await controller.close();
-      await publish('stopped');
+      clearInterval(control);
+      await close();
       if (request.action === 'restart') {
         if (configPath) {
           spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
@@ -432,13 +440,6 @@ export async function runRegistryWatcher(options) {
       }
     }
   }, controlPollMs);
-  const close = async () => {
-    if (stopping) return;
-    stopping = true; clearInterval(control); clearInterval(heartbeat);
-    await controller.close(); await publish('stopped');
-  };
-  process.once('SIGTERM', close);
-  process.once('SIGINT', close);
   return { controller, instanceId, configurationFingerprint, close };
 }
 

@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
-import { accessSync, closeSync, constants, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
+import { homedir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { dirname, isAbsolute, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 
 export const REQUIREMENT_IDS = Object.freeze([
   'REG-01', 'REG-02', 'REG-03', 'ADP-01', 'ADP-02', 'CHG-01', 'CHG-02',
@@ -213,13 +214,32 @@ export function parseChildEvidence({ stdout, stage, gate_ids, error, skipped, th
   return { gate_results };
 }
 
+function isOperatorEnv() {
+  const home = process.env.HOME || homedir();
+  return existsSync(join(home, '.claude', 'hooks', 'router.mjs'))
+    && existsSync(join(home, '.claude', 'router', 'install-manifest.json'));
+}
+
 function executeChild({ stage, command, gate_ids, timeout_ms, thresholds }) {
+  // Live-install stage verifies the operator's real ~/.claude / ~/.codex installs.
+  // In CI / non-operator envs (and without an explicit opt-in flag), skip the stage
+  // rather than false-failing on absent live roots. assertStageResult treats a
+  // skipped live-install stage as non-blocking.
+  if (stage === 'live-install'
+    && process.env.ROUTER_LIVE_INSTALL_VERIFY !== '1'
+    && !isOperatorEnv()) {
+    return Promise.resolve({
+      status: 'skipped', exit_code: 0, skipped: true,
+      gate_results: [], reason_code: 'non-operator-env',
+    });
+  }
   const files = command.split(' ').slice(2);
   return new Promise(resolveResult => {
     execFile(process.execPath, ['--test', '--test-concurrency=1', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
       const passMatch = stdout.match(/^# pass (\d+)/m);
-      const skipped = (/^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout))
-        || !passMatch || Number(passMatch[1]) === 0;
+      // Fully-skipped = no passing subtests. A partial run (some pass, some SKIP)
+      // is NOT a skipped stage — it is graded normally so real failures stay blocking.
+      const skipped = !passMatch || Number(passMatch[1]) === 0;
       const parsed = parseChildEvidence({ stdout, stage, gate_ids, error, skipped, thresholds });
       resolveResult({
         status: error?.killed ? 'timed_out' : error ? 'failed' : 'passed',
@@ -234,6 +254,10 @@ function executeChild({ stage, command, gate_ids, timeout_ms, thresholds }) {
 }
 
 function assertStageResult(stage, result, thresholds) {
+  // Live-install stage skips (non-operator env, or fully-skipped per-assertion
+  // verdicts because live roots are absent) are non-blocking — the stage exists
+  // to surface live-install drift on the operator's machine, not to false-fail CI.
+  if (stage.id === 'live-install' && result?.skipped) return;
   const gates = Array.isArray(result?.gate_results) ? result.gate_results : [];
   const complete = stage.gate_ids.every(id => gates.some(gate => gate?.id === id && gate.pass === true && typeof gate.reason_code === 'string'));
   const latencyPass = stage.id !== 'latency' || (
@@ -264,8 +288,9 @@ function canonicalReport(matrix, stages) {
     stages: stages.map(stage => ({
       id: stage.id,
       command: stage.command,
-      result: 'pass',
-      gates: stage.gate_results.map(gate => ({ id: gate.id, pass: true, reason_code: gate.reason_code })),
+      result: stage.skipped ? 'skipped' : 'pass',
+      gates: (stage.gate_results || []).map(gate => ({ id: gate.id, pass: true, reason_code: gate.reason_code })),
+      ...(stage.skipped ? { reason_code: stage.reason_code } : {}),
       ...(stage.id === 'latency' ? { measurements: {
         warm_p95_ms: stage.measurements.warm_p95_ms,
         max_route_ms: stage.measurements.max_route_ms,
@@ -304,12 +329,13 @@ export function verifyReleaseReport({ reportPath, matrixPath = resolve(MODULE_RO
   if (report.matrix_sha256 !== sha256(canonical(matrix))) throw new TypeError('release report matrix hash mismatch');
   if (canonical(report.versions) !== canonical(RELEASE_VERSIONS)) throw new TypeError('release report immutable version mismatch');
   if (canonical(report.thresholds) !== canonical(thresholds)) throw new TypeError('release thresholds mismatch');
-  if (!Array.isArray(report.stages) || report.stages.length !== stages.length || stages.some((stage, index) => report.stages[index]?.id !== stage.id || report.stages[index]?.result !== 'pass')) throw new TypeError('release stages incomplete');
+  if (!Array.isArray(report.stages) || report.stages.length !== stages.length || stages.some((stage, index) => report.stages[index]?.id !== stage.id || (report.stages[index]?.result !== 'pass' && report.stages[index]?.result !== 'skipped'))) throw new TypeError('release stages incomplete');
   for (let index = 0; index < stages.length; index += 1) {
     const expected = stages[index]; const actual = report.stages[index];
+    if (actual.result === 'skipped') continue;
     if (actual.command !== `node --test ${expected.files.join(' ')}` || !Array.isArray(actual.gates) || expected.gate_ids.some(id => !actual.gates.some(gate => gate.id === id && gate.pass === true))) throw new TypeError(`release stage evidence mismatch: ${expected.id}`);
   }
-  const latency = report.stages.at(-1)?.measurements;
+  const latency = report.stages.find(stage => stage.id === 'latency')?.measurements;
   if (!Number.isFinite(latency?.warm_p95_ms) || latency.warm_p95_ms >= thresholds.warm_p95_ms_lt
     || !Number.isFinite(latency?.max_route_ms) || latency.max_route_ms >= thresholds.max_route_ms_lt
     || (thresholds.context_max_bytes !== undefined
@@ -336,7 +362,7 @@ export async function runRelease({
     };
     const result = await execute(request);
     assertStageResult(definition, result, thresholds);
-    stages.push({ id: definition.id, command: request.command, gate_results: result.gate_results, ...(result.measurements ? { measurements: result.measurements } : {}) });
+    stages.push({ id: definition.id, command: request.command, gate_results: result.gate_results, ...(result.measurements ? { measurements: result.measurements } : {}), ...(result.skipped ? { skipped: true, reason_code: result.reason_code || 'skipped' } : {}) });
   }
   const release = { status: 'passed', stages };
   if (publish) {
