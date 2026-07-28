@@ -130,6 +130,8 @@ async function buildInstalledEnvironment() {
     const { routeContextPrompt } = await imported('context/prompt-route.mjs');
     const { saveCapsule } = await imported('context/capsule.mjs');
     const { selectCapabilities } = await imported('orchestrator/select.mjs');
+    const { assessCalibration, measureRoutes } = await imported('evolution/perf-measure.mjs');
+    const { estimateRoutingTokens } = await imported('orchestrator/budget.mjs');
     const command = publishedRegistry.records.find(record => record.native_type.endsWith(':command'));
     const publication = publishCompiledIndex({
       ownedRoot,
@@ -167,9 +169,107 @@ async function buildInstalledEnvironment() {
       loaded: loadCompiledIndex({ ownedRoot, now: NOW + 1 }),
       routeContextPrompt,
       selectCapabilities,
+      assessCalibration,
+      measureRoutes,
+      estimateRoutingTokens,
     });
   }
-  return { root, records, built, publishedRegistry, runtimes };
+  const performanceCases = [];
+  for (const installed of runtimes) {
+    for (const kind of KINDS) {
+      const contexts = [];
+      const source = publishedRegistry.records.find(record => record.native_type.endsWith(`:${kind}`));
+      const fixture = { id: `${installed.runtime}:${kind}` };
+      const route = () => {
+        if (kind !== 'workflow') {
+          const record = {
+            ...source,
+            type: kind,
+            available: true,
+            safe: true,
+            dispatchable: true,
+            permissions: { required: [], grants: [], denied: [] },
+          };
+          const selected = installed.selectCapabilities({
+            workflow: {
+              status: 'selected',
+              dispatch_eligible: true,
+              selection: {
+                transition_id: 'continue',
+                workflow_id: 'phase26',
+                family: 'release',
+                from: 'published',
+                to: 'active',
+              },
+            },
+            workflowDeclarations: [{
+              workflow_id: 'phase26',
+              owners: [],
+              requirements: [],
+              compatible: [record.id],
+            }],
+            explicitCapability: record.id,
+            registry: { schema_version: 1, records: [record] },
+          });
+          assert.equal(selected.dispatch_eligible, true);
+        }
+        const routed = installed.routeContextPrompt({
+          prompt: 'continue',
+          ownedRoot: installed.ownedRoot,
+          projectRoot: installed.ownedRoot,
+          now: NOW + 1,
+        });
+        contexts.push(installed.estimateRoutingTokens(routed.additional_context));
+        return routed;
+      };
+      const measured = installed.measureRoutes({
+        fixtures: [fixture],
+        route,
+        versions: {
+          candidate: installed.publication.tuple_version_id,
+          compiled_index: installed.loaded.version_id,
+          policy: 'workflow-transitions-v1',
+          corpus: 'phase26-large-registry-v1',
+        },
+        warmup_runs: 5,
+        measured_runs: 20,
+      });
+      const assessment = installed.assessCalibration({
+        evaluation: {
+          quality: { pass: true, reason_code: 'installed_route_pass' },
+          context_budget: { pass: true, reason_code: 'context_budget_pass' },
+        },
+        performance: measured,
+      });
+      performanceCases.push({ fixture, measured, assessment, contexts });
+    }
+  }
+  const contextMaxBytes = Math.max(...performanceCases.flatMap(value => (
+    value.contexts.map(context => context.canonical_bytes)
+  )));
+  const contextMaxTokens = Math.max(...performanceCases.flatMap(value => (
+    value.contexts.map(context => context.estimated_tokens)
+  )));
+  const release_metrics = {
+    registry_size: publishedRegistry.records.length,
+    case_count: performanceCases.length,
+    sample_count: performanceCases.reduce((total, value) => total + value.measured.samples.length, 0),
+    warm_p95_ms: Math.max(...performanceCases.map(value => value.measured.warm.p95_ms)),
+    max_ms: Math.max(...performanceCases.map(value => value.measured.warm.max_ms)),
+    context_max_bytes: contextMaxBytes,
+    context_byte_budget: 2048,
+    context_max_tokens: contextMaxTokens,
+    context_token_budget: Math.ceil(2048 / 3),
+  };
+  return {
+    root,
+    records,
+    built,
+    publishedRegistry,
+    runtimes,
+    performanceCases,
+    release_metrics,
+  };
 }
 
 async function environment() {
@@ -261,7 +361,19 @@ test('installed Claude and Codex modules publish, load, and route every recommen
 });
 
 test('isolated installed routes stay within latency and context budgets', async t => {
-  const { release_metrics: metrics } = await environment();
+  const { performanceCases, release_metrics: metrics } = await environment();
   assert.ok(metrics, 'PHASE26_PERFORMANCE_EVIDENCE_MISSING');
+  for (const result of performanceCases) {
+    assert.equal(result.measured.samples.length, 20, result.fixture.id);
+    assert.equal(result.assessment.pass, true, result.fixture.id);
+    assert.ok(result.measured.warm.p95_ms < 25, result.fixture.id);
+    assert.ok(result.measured.warm.max_ms < 100, result.fixture.id);
+    assert.ok(result.contexts.every(value => value.canonical_bytes <= 2048), result.fixture.id);
+    assert.ok(result.contexts.every(value => value.estimated_tokens <= Math.ceil(2048 / 3)),
+      result.fixture.id);
+  }
+  assert.equal(metrics.registry_size, 312);
+  assert.equal(metrics.case_count, 12);
+  assert.equal(metrics.sample_count, 240);
   t.diagnostic(`RELEASE_METRICS ${JSON.stringify(metrics)}`);
 });
