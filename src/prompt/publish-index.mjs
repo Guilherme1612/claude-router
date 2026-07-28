@@ -6,6 +6,11 @@ import { stableStringify } from '../registry/schema.mjs';
 import { selectCapabilities } from '../orchestrator/select.mjs';
 import { selectWorkflow, nextValidTransitions, WORKFLOW_TRANSITIONS } from '../orchestrator/transitions.mjs';
 import { planContextLoad, DEFAULT_CONTEXT_CONTRACT } from '../orchestrator/budget.mjs';
+import {
+  CALIBRATION_CORPUS_VERSION, COOLDOWN_MS, POLICY_VERSION as HEALTH_POLICY_VERSION,
+  TIER_BOUNDARIES, VERSIONED_WEIGHTS, loadThresholds, readActivePointer,
+} from '../health/thresholds.mjs';
+import { loadStartupPointer } from '../steward/startup-pointer.mjs';
 import { COMPILED_INDEX_COMPATIBILITY, COMPILED_INDEX_SCHEMA_VERSION, loadCompiledIndex } from './compile-index.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -55,7 +60,10 @@ export function recoverReleaseTuple({ ownedRoot, now = Date.now() } = {}) {
   return { status: 'recovered', tuple_version_id: repaired.tuple_version_id };
 }
 
-export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, mapping, policyFingerprint, now = Date.now(), crashAt } = {}) {
+export function publishCompiledIndex({
+  ownedRoot, registry, registryVersionId, mapping, policyFingerprint, now = Date.now(), crashAt,
+  contracts, relationships, intentPolicy, workflows, healthPolicy, suggestionReference,
+} = {}) {
   const root = resolve(ownedRoot);
   if (!registry || !Array.isArray(registry.records) || !/^v1-[a-f0-9]{16}$/.test(registryVersionId || '')) throw new TypeError('verified registry version required');
   const records = new Map(registry.records.flatMap(record => [record.id, record.canonical_identity, record.name].filter(Boolean).map(key => [key, record])));
@@ -203,30 +211,71 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
     capsule_contract_version: COMPILED_INDEX_COMPATIBILITY.capsule_schema_version, routes };
   const compiledBytes = json(index);
   const compiledHash = sha256(compiledBytes);
-  const tupleVersionId = `t1-${sha256(`${registryHash}:${compiledHash}`).slice(0, 16)}`;
+  const contractProjection = contracts || {
+    schema_version: 1,
+    by_capability: Object.fromEntries(registry.records.map(record => [record.id, record.contract || null])),
+  };
+  const relationshipProjection = relationships || registry.relationships || {
+    schema_version: 1, policy_version: 'relationship-policy-v1', edges: [], candidates: [],
+  };
+  const intentProjection = intentPolicy || {
+    schema_version: 1,
+    policy_version: COMPILED_INDEX_COMPATIBILITY.policy_version,
+    policy_fingerprint: policyFingerprint || sha256('{}'),
+  };
+  const workflowProjection = workflows || { schema_version: 1, routes };
+  const activeHealthVersion = readActivePointer(join(root, 'health')) || HEALTH_POLICY_VERSION;
+  const healthProjection = healthPolicy || loadThresholds(activeHealthVersion, { ownedRoot: join(root, 'health') }) || {
+    policy_version: HEALTH_POLICY_VERSION,
+    cooldown_ms: COOLDOWN_MS,
+    calibration_corpus_version: CALIBRATION_CORPUS_VERSION,
+    weights: VERSIONED_WEIGHTS,
+    tier_boundaries: TIER_BOUNDARIES,
+  };
+  const suggestionProjection = suggestionReference || loadStartupPointer({ ownedRoot: root, now });
+  const closureProjection = { schema_version: 1, by_workflow: closureByWorkflow };
+  const budgetProjection = { schema_version: 1, by_workflow: budgetByWorkflow };
+  const summaryIndexProjection = { schema_version: 1, by_workflow: summaryIndexByWorkflow };
+  const tupleMembers = {
+    'registry.json': registryBytes,
+    'index.json': compiledBytes,
+    'contracts.json': json(contractProjection),
+    'relationships.json': json(relationshipProjection),
+    'intent-policy.json': json(intentProjection),
+    'workflows.json': json(workflowProjection),
+    'health-policy.json': json({ schema_version: 1, ...healthProjection }),
+    'suggestion-reference.json': json(suggestionProjection),
+    'closure.json': json(closureProjection),
+    'budget.json': json(budgetProjection),
+    'summary-index.json': json(summaryIndexProjection),
+  };
+  const memberHashes = Object.fromEntries(Object.entries(tupleMembers).map(([name, bytes]) => [name, sha256(bytes)]));
+  const tupleVersionId = `t1-${sha256(json(memberHashes)).slice(0, 16)}`;
+  const promptProjection = {
+    schema_version: 1,
+    tuple_version_id: tupleVersionId,
+    version_id: compiledVersionId,
+    registry_version_id: registryVersionId,
+    index,
+    closure: closureProjection,
+    budget: budgetProjection,
+    summary_index: summaryIndexProjection,
+    suggestion_reference: suggestionProjection,
+  };
+  const promptProjectionBytes = json(promptProjection);
   const tupleRoot = join(root, 'release-tuples', 'versions', tupleVersionId);
   if (!existsSync(tupleRoot)) {
     mkdirSync(tupleRoot, { recursive: true });
-    durableWrite(join(tupleRoot, 'registry.json'), registryBytes);
-    durableWrite(join(tupleRoot, 'index.json'), compiledBytes);
-    // Phase 19 D-05: sibling tuple files — per-workflow keyed maps mirroring
-    // routes?.[workflowId]. routes[] stays the compact dispatch contract (D-05).
-    const closureBytes = json({ schema_version: 1, by_workflow: closureByWorkflow });
-    const budgetBytes = json({ schema_version: 1, by_workflow: budgetByWorkflow });
-    const summaryIndexBytes = json({ schema_version: 1, by_workflow: summaryIndexByWorkflow });
-    durableWrite(join(tupleRoot, 'closure.json'), closureBytes);
-    durableWrite(join(tupleRoot, 'budget.json'), budgetBytes);
-    durableWrite(join(tupleRoot, 'summary-index.json'), summaryIndexBytes);
-    // Phase 19 V6 / T-19-01: manifest extended with closure/budget/summary_index
-    // payload_sha256 so verifyTuple can hash-check each sibling (fail-closed on
-    // tamper). Manifest schema_version stays 1 (this is the manifest's own schema,
-    // NOT the compiled-index schema — do NOT bump it).
-    const manifest = { schema_version: 1, state: 'verified', tuple_version_id: tupleVersionId,
+    for (const [name, bytes] of Object.entries(tupleMembers)) durableWrite(join(tupleRoot, name), bytes);
+    durableWrite(join(tupleRoot, 'prompt-projection.json'), promptProjectionBytes);
+    const manifest = { schema_version: 2, state: 'verified', tuple_version_id: tupleVersionId,
+      members: memberHashes,
       registry: { version_id: registryVersionId, payload_sha256: registryHash },
       compiled: { version_id: compiledVersionId, payload_sha256: compiledHash },
-      closure: { payload_sha256: sha256(closureBytes) },
-      budget: { payload_sha256: sha256(budgetBytes) },
-      summary_index: { payload_sha256: sha256(summaryIndexBytes) },
+      closure: { payload_sha256: memberHashes['closure.json'] },
+      budget: { payload_sha256: memberHashes['budget.json'] },
+      summary_index: { payload_sha256: memberHashes['summary-index.json'] },
+      prompt_projection: { payload_sha256: sha256(promptProjectionBytes) },
       policy_fingerprint: policyFingerprint || sha256('{}'), mapping_fingerprint: mappingFingerprint,
       compatibility: COMPILED_INDEX_COMPATIBILITY, verification: { disposition: 'passing', complete: true },
       created_at: now, expires_at: now + 30 * 24 * 60 * 60 * 1000 };
@@ -234,7 +283,11 @@ export function publishCompiledIndex({ ownedRoot, registry, registryVersionId, m
   }
   // Phase 19 Decision 8: pointer schema_version bumped 1→2 alongside the tuple
   // schema bump (compile-index.mjs verifyTuple rejects schema-1 pointers).
-  const pointer = { schema_version: 2, tuple_version_id: tupleVersionId };
+  const pointer = {
+    schema_version: 3,
+    tuple_version_id: tupleVersionId,
+    prompt_projection_sha256: sha256(promptProjectionBytes),
+  };
   if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
   if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');

@@ -356,11 +356,42 @@ export function assembleRegistry(acquisition, options = {}) {
     runtimes: { claude: claude.observations.length, codex: codex.observations.length },
     registry_fingerprint: fingerprint(registry), diagnostics_fingerprint: fingerprint(diagnostics),
   };
+  const contracts = {
+    schema_version: 1,
+    by_capability: Object.fromEntries(enrichedRecords.map(record => [record.id, record.contract])),
+  };
+  const intentPolicy = {
+    schema_version: 1,
+    policy_version: 'workflow-transitions-v1',
+  };
+  const workflows = {
+    schema_version: 1,
+    routes: enrichedRecords.flatMap(record => (
+      record.mapping?.explicit_subjects || []
+    ).map(workflow_id => ({ workflow_id, capability_id: record.id })))
+      .sort((a, b) => key(a).localeCompare(key(b))),
+  };
+  const healthPolicy = {
+    schema_version: 1,
+    policy_version: 'health-policy-v1',
+  };
+  const suggestionReference = {
+    schema_version: 1,
+    policy_version: 'steward-policy-v1',
+    fingerprint: null,
+    available: false,
+    cooldown_until_ms: null,
+  };
   return {
     registry,
+    contracts,
     diagnostics,
     summary,
     relationships,
+    intent_policy: intentPolicy,
+    workflows,
+    health_policy: healthPolicy,
+    suggestion_reference: suggestionReference,
     ...(overlayResolution ? { overlays: overlayResolution } : {}),
   };
 }
