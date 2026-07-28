@@ -82,6 +82,9 @@ export function buildLargeMixedProfile(size = 312) {
       semantic_type: semanticType,
       invocation: { availability: 'available', runtime, command: kind, args: [name] },
       dependencies: { state: 'declared', items: [] },
+      ...(index < recommendationKinds.length
+        ? { mapping: { explicit_subjects: [`phase26-${kind}`] } }
+        : {}),
     });
   });
 }
