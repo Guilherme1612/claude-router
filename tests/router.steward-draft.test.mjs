@@ -57,7 +57,9 @@ test('preview is deterministic, bounded, contained, and read-only', async () => 
     assert.deepEqual(first.semantic_effects, ['add_dependency_contract']);
     assert.equal(Object.hasOwn(first, 'dependencies'), false);
     assert.equal(Object.hasOwn(first, 'representative_routes'), false);
-    assert.equal(verifyDraftPreview(first).valid, true);
+    assert.equal(verifyDraftPreview(first, {
+      root: f.root, suggestion: suggestion(), draft: draft(),
+    }).valid, true);
     assert.equal(existsSync(f.root), false);
   } finally { rmSync(f.owned, { recursive: true, force: true }); }
 });
@@ -78,7 +80,9 @@ test('preview rejects escapes, malformed records, and unbounded collections', as
       draft: draft({ semantic_changes: ['free form text'] }),
     }), TypeError);
     const valid = previewDraft({ root: f.root, suggestion: suggestion(), draft: draft() });
-    assert.equal(verifyDraftPreview({ ...valid, target_paths: ['/tmp/escape.json'] }).valid, false);
+    assert.equal(verifyDraftPreview({ ...valid, target_paths: ['/tmp/escape.json'] }, {
+      root: f.root, suggestion: suggestion(), draft: draft(),
+    }).valid, false);
     assert.equal(existsSync(f.root), false);
   } finally { rmSync(f.owned, { recursive: true, force: true }); }
 });
