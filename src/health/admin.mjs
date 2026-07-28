@@ -122,7 +122,26 @@ export function recover({ healthRoot } = {}) {
       return canonical('health', true, 'recover_restored', { recovered_from: 'state_json_authoritative', capability_count: countCapabilities(statePath) });
     }
     renameSync(disposedPath, statePath);
-    return canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: countCapabilities(statePath) });
+    const capCount = countCapabilities(statePath);
+    // WR-05: countCapabilities swallows read/parse errors and returns 0, so a
+    // corrupt disposed snapshot is silently reported as
+    // recover_restored capability_count: 0 (ok: true) — misleading the
+    // operator into believing recovery succeeded. Disambiguate the two 0
+    // cases: a genuinely empty state (`{}`) parses cleanly; a corrupt file
+    // throws. On a corrupt disposed snapshot, fall through to the
+    // rebuild-from-outcomes path so the original evidence in outcomes.jsonl
+    // is the fallback, and surface recover_rebuilt so the operator sees what
+    // happened.
+    if (capCount === 0 && existsSync(statePath)) {
+      try {
+        JSON.parse(readFileSync(statePath, 'utf8'));
+      } catch {
+        const state = rebuildStateFromOutcomes(outcomesPath);
+        atomicWriteState(statePath, state);
+        return canonical('health', true, 'recover_rebuilt', { recovered_from: 'outcomes_after_corrupt_disposed', capability_count: Object.keys(state).length });
+      }
+    }
+    return canonical('health', true, 'recover_restored', { recovered_from: 'disposed', capability_count: capCount });
   }
 
   // Rebuild from outcomes.jsonl. A missing/corrupt outcomes file yields an
