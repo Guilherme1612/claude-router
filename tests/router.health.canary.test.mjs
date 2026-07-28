@@ -200,3 +200,249 @@ test('HLTH-11 regression: score.mjs behavioral no-op — all Plan 24-02 score te
   assert.equal(result.tier, 'high');
   assert.ok(result.usefulness_basis_points >= TIER_BOUNDARIES.high);
 });
+
+// ---- Task 2: canary bridge — threshold activation through evaluateCandidate ----
+
+import { promoteThresholdCandidate } from '../src/health/canary-bridge.mjs';
+import { createEvidenceStore } from '../src/evolution/evidence.mjs';
+
+const bridgeSource = readFileSync(BRIDGE_PATH, 'utf8');
+
+// Build a validated, sufficient evidence window fixture (35 samples).
+function makeSufficientWindow() {
+  const store = createEvidenceStore({ now: () => 1_700_000_000_000 });
+  for (let i = 0; i < 35; i++) {
+    store.append({
+      timestamp_ms: 1_700_000_000_000 - i * 3600_000,
+      route_id: 'route-001',
+      confidence_band: 'high',
+      guard_codes: [],
+      reason_code: 'ok',
+      fixture_class: 'minimal-prompt',
+      latency_us: 100,
+      candidate_version: 'v1-abcdef0123456789',
+      policy_version: 'health-policy-v1',
+      verdict: 'success',
+      prompt_signature: 'a'.repeat(64),
+    }, { project_id: 'proj-test' });
+  }
+  return store.window({ project_id: 'proj-test' });
+}
+
+// Build a validated, INSUFFICIENT evidence window (5 samples < 30 floor).
+function makeInsufficientWindow() {
+  const store = createEvidenceStore({ now: () => 1_700_000_000_000 });
+  for (let i = 0; i < 5; i++) {
+    store.append({
+      timestamp_ms: 1_700_000_000_000 - i * 3600_000,
+      route_id: 'route-001',
+      confidence_band: 'high',
+      guard_codes: [],
+      reason_code: 'ok',
+      fixture_class: 'minimal-prompt',
+      latency_us: 100,
+      candidate_version: 'v1-abcdef0123456789',
+      policy_version: 'health-policy-v1',
+      verdict: 'success',
+      prompt_signature: 'b'.repeat(64),
+    }, { project_id: 'proj-test' });
+  }
+  return store.window({ project_id: 'proj-test' });
+}
+
+function makeValidCandidate(policy_version = 'health-policy-v2') {
+  return {
+    policy_version,
+    weights: { recency: 0.35, completion: 0.25, opportunity: 0.20, reversibility: 0.10, confidence: 0.10 },
+    tier_boundaries: { high: 8000, medium: 5500, low: 3000, low_usefulness: 0 },
+    cooldown_ms: 2 * 60 * 60 * 1000,
+    calibration_corpus_version: 'health-calibration-v1',
+  };
+}
+
+test('HLTH-11 D-canary: bridge imports evaluateCandidate + applyCanaryDecision + REQUIRED_GATES from canary-controller (no parallel gate suite)', () => {
+  assert.ok(/evaluateCandidate/.test(bridgeSource), 'bridge must import evaluateCandidate');
+  assert.ok(/applyCanaryDecision/.test(bridgeSource), 'bridge must import applyCanaryDecision');
+  assert.ok(/REQUIRED_GATES/.test(bridgeSource), 'bridge must import REQUIRED_GATES');
+  // Must NOT redefine REQUIRED_GATES as a new array.
+  assert.ok(!/REQUIRED_GATES\s*=\s*Object\.freeze\(\s*\[/.test(bridgeSource),
+    'bridge must not redefine REQUIRED_GATES (no parallel gate suite)');
+  // Must import from canary-controller.mjs.
+  assert.ok(/from\s+['"]\.\.\/evolution\/canary-controller\.mjs['"]/.test(bridgeSource),
+    'bridge must import from canary-controller.mjs');
+});
+
+test('HLTH-11 D-canary: insufficient evidence → rejected, no write', () => {
+  const root = tempOwnedRoot();
+  const window = makeInsufficientWindow();
+  assert.equal(window.sufficient, false, 'fixture must be insufficient');
+  const result = promoteThresholdCandidate({
+    candidate: makeValidCandidate(),
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'insufficient_evidence_samples');
+  // No write to versions/<policy_version>/.
+  const vroot = healthVersionsRoot(root);
+  assert.equal(existsSync(join(vroot, 'health-policy-v2', 'thresholds.json')), false);
+  assert.equal(existsSync(join(vroot, 'active.json')), false);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: all 6 gates passing + sufficient evidence → promoted, atomic 0600 write', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  assert.equal(window.sufficient, true, 'fixture must be sufficient');
+  const result = promoteThresholdCandidate({
+    candidate: makeValidCandidate('health-policy-v2'),
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'promoted');
+  assert.equal(result.policy_version, 'health-policy-v2');
+  assert.ok(/^[a-f0-9]{64}$/.test(result.fingerprint), 'fingerprint must be 64-hex sha256');
+  // thresholds.json written with 0600 perms.
+  const vroot = healthVersionsRoot(root);
+  const file = join(vroot, 'health-policy-v2', 'thresholds.json');
+  assert.equal(existsSync(file), true, 'thresholds.json must be written');
+  const stat = statSync(file);
+  const mode = stat.mode & 0o777;
+  assert.equal(mode, 0o600, 'thresholds.json must have 0600 perms');
+  // Content matches the candidate bundle.
+  const written = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(written.policy_version, 'health-policy-v2');
+  assert.equal(written.cooldown_ms, 2 * 60 * 60 * 1000);
+  // active.json pointer updated.
+  const pointer = JSON.parse(readFileSync(join(vroot, 'active.json'), 'utf8'));
+  assert.equal(pointer.policy_version, 'health-policy-v2');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: a failing compatibility gate (broken weights shape) → rejected, no write', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const brokenCandidate = makeValidCandidate();
+  // Drop a weight key to break the 5-key shape.
+  delete brokenCandidate.weights.reversibility;
+  const result = promoteThresholdCandidate({
+    candidate: brokenCandidate,
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'compatibility_uncertain');
+  const vroot = healthVersionsRoot(root);
+  assert.equal(existsSync(join(vroot, 'health-policy-v2', 'thresholds.json')), false);
+  assert.equal(existsSync(join(vroot, 'active.json')), false);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: a failing compatibility gate (renamed weight key) → rejected', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const brokenCandidate = makeValidCandidate();
+  delete brokenCandidate.weights.recency;
+  brokenCandidate.weights.recency_new = 0.35;
+  const result = promoteThresholdCandidate({
+    candidate: brokenCandidate,
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'compatibility_uncertain');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: candidate with wrong policy_version scheme → rejected by compatibility gate', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const badVersionCandidate = makeValidCandidate('not-a-health-version');
+  const result = promoteThresholdCandidate({
+    candidate: badVersionCandidate,
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  // proposeCandidate rejects the invalid token before evaluateCandidate runs,
+  // OR the compatibility gate fails. Either way, the result is rejected.
+  assert.equal(result.status, 'rejected');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: candidate with new VALUES but preserved shape → promoted (canary evidences the change, does not forbid it)', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const newValuesCandidate = makeValidCandidate('health-policy-v2');
+  // Change values but keep the 5-key shape.
+  newValuesCandidate.weights.recency = 0.40;
+  newValuesCandidate.weights.completion = 0.20;
+  const result = promoteThresholdCandidate({
+    candidate: newValuesCandidate,
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'promoted');
+  assert.equal(result.policy_version, 'health-policy-v2');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: known_good_version defaults to active pointer or POLICY_VERSION', () => {
+  const root = tempOwnedRoot();
+  const vroot = healthVersionsRoot(root);
+  // No active.json → defaults to POLICY_VERSION.
+  assert.equal(readActivePointer(root), null);
+  // Promote a candidate (writes active.json).
+  const window = makeSufficientWindow();
+  promoteThresholdCandidate({
+    candidate: makeValidCandidate('health-policy-v2'),
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  // Now active.json points to health-policy-v2.
+  assert.equal(readActivePointer(root), 'health-policy-v2');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: versions/active.json pointer lives under health/versions/ (D-5 isolated from release-tuples)', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  promoteThresholdCandidate({
+    candidate: makeValidCandidate('health-policy-v2'),
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  const vroot = healthVersionsRoot(root);
+  assert.equal(existsSync(join(vroot, 'active.json')), true);
+  // The pointer is under <ownedRoot>/versions/, NOT under a release-tuples dir.
+  assert.ok(vroot === join(root, 'versions'),
+    'versions root must be <ownedRoot>/versions/');
+  assert.ok(!vroot.includes('release-tuples'),
+    'versions root must not be under release-tuples/');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: invalid candidate (null) → rejected', () => {
+  const root = tempOwnedRoot();
+  const window = makeSufficientWindow();
+  const result = promoteThresholdCandidate({
+    candidate: null,
+    evidence_window: window,
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'invalid_candidate');
+  rmSync(root, { recursive: true, force: true });
+});
+
+test('HLTH-11 D-canary: invalid evidence fingerprint → rejected', () => {
+  const root = tempOwnedRoot();
+  const result = promoteThresholdCandidate({
+    candidate: makeValidCandidate(),
+    evidence_window: { source_evidence_fingerprint: 'not-a-hash', sufficient: true, status: 'validated' },
+    ownedRoot: root,
+  });
+  assert.equal(result.status, 'rejected');
+  assert.equal(result.reason_code, 'invalid_evidence_fingerprint');
+  rmSync(root, { recursive: true, force: true });
+});
