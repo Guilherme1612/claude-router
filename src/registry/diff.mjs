@@ -19,6 +19,7 @@ function lifecycleRecord(record) {
   if (Array.isArray(record?.provenance)) return record;
   if (!record?.logical_root || !record?.relative_path || !record?.entry_type) return record;
   const project = record.logical_root.startsWith('project:');
+  const projectId = project ? record.logical_root.split(':').slice(1, -1).join(':') : null;
   const runtime = record.logical_root === 'codex_home' || record.logical_root.endsWith(':codex') ? 'codex' : 'claude';
   return {
     schema_version: 1,
@@ -26,7 +27,9 @@ function lifecycleRecord(record) {
     name: record.relative_path,
     canonical_identity: `fingerprint:${record.logical_root}:${record.relative_path}`,
     lifecycle: 'ready',
-    scope: project ? { kind: 'project' } : { kind: 'global' },
+    scope: project
+      ? { kind: 'project', repository: `repo:${projectId}`, worktree: `worktree:${projectId}` }
+      : { kind: 'global' },
     dispatchable: true,
     invocation: { runtime, command: record.relative_path, args: [] },
     dependencies: { state: 'unknown', items: [] },

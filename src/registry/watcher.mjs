@@ -418,6 +418,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     // workflow (e.g. gsd-execute-phase). Without this the calibration quality gate
     // fails (the corpus routes through gsd-execute-phase) and the canary rolls back.
     ...(config.workflow_declarations_path ? { workflowDeclarationsPath: config.workflow_declarations_path } : {}),
+    ...(config.contract_overlays ? { overlays: config.contract_overlays } : {}),
   };
   const acquire = dependencies.acquireRegistry || acquireRegistry;
   const refresh = dependencies.refreshIncrementalAcquisition || refreshIncrementalAcquisition;

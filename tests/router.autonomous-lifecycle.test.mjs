@@ -8,13 +8,15 @@ import { buildFullRegistry } from '../src/registry/build.mjs';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
-import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
+import {
+  inProcessControllerLauncher, safeFixtureContractOverlays, stubVerificationRunners,
+} from './helpers/test-mode-seam.mjs';
 
 const OPERATIONS = ['add', 'edit', 'rename', 'move', 'disable', 'dependency-change', 'delete'];
 const observedCells = [];
 
-function artifact(name, command = name, dependencies) {
-  return `${JSON.stringify({ schema_version: 1, name, command, mapping: { explicit_subjects: [name] }, ...(dependencies ? { dependencies } : {}) })}\n`;
+function artifact(name, command = name, dependencies = []) {
+  return `${JSON.stringify({ schema_version: 1, name, canonical_identity: `router/${name}`, command, mapping: { explicit_subjects: [name] }, dependencies })}\n`;
 }
 
 async function waitUntil(predicate, timeoutMs = 2_000) {
@@ -58,6 +60,18 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
     writeFileSync(sourceRouter, 'export const router = true;\n');
     const alpha = join(runtimeRoot, 'skills', 'alpha.json');
     writeFileSync(alpha, artifact('alpha'));
+    const contractOverlays = safeFixtureContractOverlays({
+      claudeRoot, codexRoot,
+      artifacts: [
+        { runtime, relativePath: 'skills/alpha.json', bytes: artifact('alpha') },
+        { runtime, relativePath: 'skills/beta.json', bytes: artifact('beta') },
+        { runtime, relativePath: 'skills/beta.json', bytes: artifact('beta', 'beta-v2') },
+        { runtime, relativePath: 'skills/renamed.json', bytes: artifact('beta', 'beta-v2') },
+        { runtime, relativePath: 'agents/renamed.json', bytes: artifact('beta', 'beta-v2') },
+        { runtime, relativePath: 'agents/renamed.json', bytes: artifact('beta', 'beta-v2', [{ id: 'missing', available: false }]) },
+      ],
+    });
+    options.contractOverlays = contractOverlays;
 
     const installed = await installRouter(options);
     // Wait for the installed controller to publish the initial tuple (alpha seeded above).
@@ -107,8 +121,9 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
         return current && current !== previousTuple ? current : null;
       });
       // The active canonical registry bytes match buildFullRegistry output (REG-03).
-      const full = buildFullRegistry({ claudeRoot, codexRoot });
-      assert.deepEqual({ schema_version: candidate.schema_version, records: candidate.records }, full.registry);
+      const full = buildFullRegistry({ claudeRoot, codexRoot, overlays: contractOverlays });
+      assert.equal(candidate.schema_version, full.registry.schema_version);
+      assert.deepEqual(candidate.records, full.registry.records);
       // routeContextPrompt reads the controller-published tuple and projects the route.
       const compiled = loadCompiledIndex({ ownedRoot });
       assert.equal(compiled.dispatch_eligible, true);
@@ -136,7 +151,7 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
     const renamed = join(runtimeRoot, 'skills', 'renamed.json'); renameSync(beta, renamed); await verify('rename');
     const moved = join(runtimeRoot, 'agents', 'renamed.json'); mkdirSync(dirname(moved), { recursive: true }); renameSync(renamed, moved); await verify('move');
     writeFileSync(moved, artifact('beta', 'beta-v2', [{ id: 'missing', available: false }])); await verify('disable');
-    writeFileSync(moved, artifact('beta', 'beta-v2', [{ id: 'present', available: true }])); await verify('dependency-change');
+    writeFileSync(moved, artifact('beta', 'beta-v2')); await verify('dependency-change');
     rmSync(moved); await verify('delete');
   } finally {
     // Close the in-process controller directly so its intervals clear and the event loop
@@ -171,6 +186,10 @@ test('Phase 19 D-09: orchestrator siblings baked, ORC-01 no-fallback, TOK-02 req
     writeFileSync(settingsPath, '{"hooks":{}}\n');
     writeFileSync(sourceRouter, 'export const router = true;\n');
     writeFileSync(join(claudeRoot, 'skills', 'alpha.json'), artifact('alpha'));
+    options.contractOverlays = safeFixtureContractOverlays({
+      claudeRoot, codexRoot,
+      artifacts: [{ runtime: 'claude', relativePath: 'skills/alpha.json', bytes: artifact('alpha') }],
+    });
 
     const installed = await installRouter(options);
     const initialTuple = await waitUntil(() => tupleId(ownedRoot));

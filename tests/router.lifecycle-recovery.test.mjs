@@ -8,7 +8,9 @@ import { publishCompiledIndex, recoverReleaseTuple } from '../src/prompt/publish
 import { installRouter, restartController } from '../src/lifecycle/router-lifecycle.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
-import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
+import {
+  inProcessControllerLauncher, safeFixtureContractOverlays, stubVerificationRunners,
+} from './helpers/test-mode-seam.mjs';
 
 const NOW = 1_800_000_000_000;
 const registry = suffix => ({ schema_version: 1, records: [{ id: `cap-${suffix}`, name: `execute-${suffix}`,
@@ -17,8 +19,8 @@ const registry = suffix => ({ schema_version: 1, records: [{ id: `cap-${suffix}`
 const mapping = suffix => ({ schema_version: 1, policy_fingerprint: 'a'.repeat(64), subjects: [{
   subject_id: 'gsd-execute-phase', disposition: 'mapped', target_id: `cap-${suffix}`, reason_code: 'explicit_subject' }] });
 
-function artifact(name, command = name, dependencies) {
-  return `${JSON.stringify({ schema_version: 1, name, command, mapping: { explicit_subjects: [name] }, ...(dependencies ? { dependencies } : {}) })}\n`;
+function artifact(name, command = name, dependencies = []) {
+  return `${JSON.stringify({ schema_version: 1, name, canonical_identity: `router/${name}`, command, mapping: { explicit_subjects: [name] }, dependencies })}\n`;
 }
 
 function tupleId(root) {
@@ -56,6 +58,15 @@ async function installSeam(root, holder, { claudeSkills = ['alpha'] } = {}) {
     testMode: true, verificationRunners: stubVerificationRunners,
     launchController: inProcessControllerLauncher(stubVerificationRunners, holder),
   };
+  options.contractOverlays = safeFixtureContractOverlays({
+    claudeRoot, codexRoot,
+    artifacts: [
+      ...['alpha', 'beta', 'gamma', 'delta', 'epsilon'].map(name => ({
+        runtime: 'claude', relativePath: `skills/${name}.json`, bytes: artifact(name),
+      })),
+      { runtime: 'claude', relativePath: 'skills/beta.json', bytes: artifact('beta', 'beta', [{ id: 'missing', available: false }]) },
+    ],
+  });
   const installed = await installRouter(options);
   // Wait for the installed controller to publish the initial verified tuple.
   const initialTuple = await waitUntil(() => tupleId(ownedRoot));
@@ -158,7 +169,7 @@ test('D-04 unsafe candidate recovery through installed controller preserves the 
     assert.equal(tupleId(ownedRoot), previousTuple);
     assert.equal(loadCompiledIndex({ ownedRoot }).tuple_version_id, previousTuple);
     // A later valid change advances to a strictly newer verified tuple.
-    writeFileSync(join(claudeRoot, 'skills', 'beta.json'), artifact('beta', 'beta', [{ id: 'present', available: true }]));
+    writeFileSync(join(claudeRoot, 'skills', 'beta.json'), artifact('beta'));
     const advanced = await waitUntil(() => {
       const current = tupleId(ownedRoot);
       return current && current !== previousTuple ? current : null;

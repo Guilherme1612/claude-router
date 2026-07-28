@@ -328,7 +328,8 @@ export async function installRouter(options) {
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
   const built = (options.buildRegistry || buildFullRegistry)({ claudeRoot: p.claudeRoot, codexRoot: p.codexRoot,
-    ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}) });
+    ...(options.projectRoot ? { projectRoot: options.projectRoot, scopeId: options.scopeId } : {}),
+    ...(options.contractOverlays ? { overlays: options.contractOverlays } : {}) });
   const emptyActiveRegistry = { schema_version: 1, records: [] };
   const activeBytes = stableStringify(emptyActiveRegistry) + '\n';
   const reconciliation = reconcileCandidate({
@@ -441,6 +442,7 @@ export async function installRouter(options) {
     // orchestrator-declared workflow (e.g. gsd-execute-phase), which the calibration
     // quality gate requires.
     workflow_declarations_path: join(p.ownedRoot, 'modules', 'orchestrator', 'workflow-declarations.json'),
+    ...(options.contractOverlays ? { contract_overlays: options.contractOverlays } : {}),
     // EVO-05: the watcher ingests routing telemetry into the canary evidence
     // store. The hook appends to ~/.claude/router/telemetry.jsonl which equals
     // join(ownedRoot, 'telemetry.jsonl') for a global install.
