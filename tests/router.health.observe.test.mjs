@@ -310,6 +310,63 @@ test('HLTH-03 cursor idempotent: second call with no new telemetry lines returns
   assert.equal(second.skipped, 'unchanged');
 });
 
+test('HLTH-03 workflow-only advancement reconciles the pending selected route', () => {
+  const initial = {
+    status: 'active', position: { family: 'gsd', state: 'discussed' },
+    last_transition_id: 'gsd.discuss', history: [{ state: 'discussed', ts: 1_000 }],
+  };
+  const { store, telemetryPath, workflowStatePath, cursorPath } = setup({
+    records: [makeRecord({ route_id: 'route-pending', ts: 1_000 })],
+    workflowState: initial,
+    now: 2_000,
+  });
+  ingestTelemetryEvidence({ store, telemetryPath, workflowStatePath, cursorPath, now: 2_000 });
+  writeFileSync(workflowStatePath, JSON.stringify({
+    ...initial,
+    position: { family: 'gsd', state: 'plan' },
+    last_transition_id: 'gsd.plan',
+    history: [...initial.history, { state: 'plan', ts: 3_000 }],
+  }) + '\n', { mode: 0o600 });
+
+  const result = ingestTelemetryEvidence({
+    store, telemetryPath, workflowStatePath, cursorPath, now: 3_000,
+  });
+  assert.equal(result.kind_counts.completed, 1);
+  const outcomes = readOutcomes(store);
+  assert.equal(outcomes.at(-1).route_id, 'route-pending');
+  assert.equal(outcomes.at(-1).outcome_kind, 'completed');
+});
+
+test('HLTH-03 one workflow transition applies only to the latest record in a batch', () => {
+  const priorWorkflowState = {
+    position: { family: 'gsd', state: 'discussed' },
+    last_transition_id: 'gsd.discuss', history: [{ state: 'discussed', ts: 1_000 }],
+  };
+  const cursor = {
+    size: 0, mtimeMs: 0, recordCount: 0, workflowStateMtimeMs: 0,
+    priorWorkflowState, pendingSelections: [],
+  };
+  const { store, telemetryPath, workflowStatePath, cursorPath } = setup({
+    records: [
+      makeRecord({ route_id: 'route-unrelated', ts: 1_500 }),
+      makeRecord({ route_id: 'route-relevant', ts: 2_500 }),
+    ],
+    workflowState: {
+      position: { family: 'gsd', state: 'plan' },
+      last_transition_id: 'gsd.plan',
+      history: [...priorWorkflowState.history, { state: 'plan', ts: 2_000 }],
+    },
+    cursor,
+    now: 3_000,
+  });
+  const result = ingestTelemetryEvidence({
+    store, telemetryPath, workflowStatePath, cursorPath, now: 3_000,
+  });
+  assert.equal(result.kind_counts.completed, 1);
+  const outcomes = readOutcomes(store);
+  assert.equal(outcomes.find((o) => o.outcome_kind === 'completed').route_id, 'route-relevant');
+});
+
 test('HLTH-03 cursor rotation: telemetry.jsonl shrank resets cursor and re-ingests from line 0', () => {
   const root = mkdtempSync(join(tmpdir(), 'router-health-observe-rot-'));
   const telemetryPath = join(root, 'telemetry.jsonl');

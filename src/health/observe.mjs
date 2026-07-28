@@ -241,8 +241,8 @@ function buildOutcomeRecord({ telemetryRecord, capabilityId, outcome_kind, reaso
 // outcome_kind for each new telemetry record by correlating it with the
 // workflow-state diff + downstream_invocations of later records.
 //
-// Cursor shape: { size, mtimeMs, lineCount, workflowStateMtimeMs,
-//   priorWorkflowState }. The priorWorkflowState field is the workflow-state
+// Cursor shape: { size, mtimeMs, recordCount, workflowStateMtimeMs,
+//   priorWorkflowState, pendingSelections }. The priorWorkflowState field is the workflow-state
 //   snapshot at the last successful ingest — it is the diff baseline. (The
 //   plan's listed cursor fields were size/mtimeMs/lineCount/workflowStateMtimeMs;
 //   priorWorkflowState is added so the diff in step 5-7 of deriveOutcomeKind
@@ -312,12 +312,56 @@ export function ingestTelemetryEvidence({
   if (cursor && cursor.size < size && typeof cursor.recordCount === 'number'
       && cursor.recordCount <= allRecords.length) {
     startLine = cursor.recordCount;
+  } else if (cursor && cursor.size === size && cursor.mtimeMs === mtimeMs
+      && typeof cursor.recordCount === 'number' && cursor.recordCount <= allRecords.length) {
+    startLine = cursor.recordCount;
   }
 
   const priorWorkflowState = (cursor && cursor.priorWorkflowState) || null;
+  const priorPending = Array.isArray(cursor?.pendingSelections) ? cursor.pendingSelections : [];
+  const pendingSelections = [];
   const kind_counts = {};
   let ingested = 0;
   let denied = 0;
+
+  function appendDerived(telemetryRecord, capabilityId, outcome_kind, reason_code) {
+    const built = buildOutcomeRecord({
+      telemetryRecord, capabilityId, outcome_kind, reason_code, evidenceWindowMs,
+    });
+    if (built.status !== 'accepted') { denied += 1; return false; }
+    const appended = store.append(built.signal);
+    if (appended.status !== 'stored') { denied += 1; return false; }
+    ingested += 1;
+    kind_counts[outcome_kind] = (kind_counts[outcome_kind] || 0) + 1;
+    return true;
+  }
+
+  // Reconcile selections saved by the prior ingest. A workflow transition is
+  // associated only with the most recent pending route; downstream telemetry
+  // remains correlated by record position.
+  for (let i = 0; i < priorPending.length; i += 1) {
+    const pending = priorPending[i];
+    if (!pending?.record || typeof pending.capabilityId !== 'string'
+        || !Number.isSafeInteger(pending.recordIndex)) continue;
+    const nextRecord = pending.recordIndex + 1 < allRecords.length
+      ? allRecords[pending.recordIndex + 1] : null;
+    const laterRecords = pending.recordIndex + 2 < allRecords.length
+      ? allRecords.slice(pending.recordIndex + 2) : [];
+    const workflowChanged = cursor?.workflowStateMtimeMs !== workflowStateMtimeMs;
+    const useWorkflow = workflowChanged && i === priorPending.length - 1;
+    const derived = deriveOutcomeKind({
+      record: pending.record, nextRecord, laterRecords,
+      capabilityId: pending.capabilityId,
+      priorWorkflowState: useWorkflow ? priorWorkflowState : null,
+      currentWorkflowState: useWorkflow ? workflowState : null,
+      now, evidenceWindowMs,
+    });
+    if (derived.outcome_kind === 'selected') {
+      pendingSelections.push(pending);
+    } else {
+      appendDerived(pending.record, pending.capabilityId, derived.outcome_kind, derived.reason_code);
+    }
+  }
 
   for (let i = startLine; i < allRecords.length; i += 1) {
     const record = allRecords[i];
@@ -331,23 +375,27 @@ export function ingestTelemetryEvidence({
     const nextRecord = i + 1 < allRecords.length ? allRecords[i + 1] : null;
     const laterRecords = i + 2 < allRecords.length ? allRecords.slice(i + 2) : [];
 
+    const useWorkflow = priorPending.length === 0 && i === allRecords.length - 1;
     const { outcome_kind, reason_code } = deriveOutcomeKind({
       record, nextRecord, laterRecords, capabilityId,
-      priorWorkflowState, currentWorkflowState: workflowState,
+      priorWorkflowState: useWorkflow ? priorWorkflowState : null,
+      currentWorkflowState: useWorkflow ? workflowState : null,
       now, evidenceWindowMs,
     });
 
-    const built = buildOutcomeRecord({
-      telemetryRecord: record, capabilityId, outcome_kind, reason_code, evidenceWindowMs,
-    });
-    if (built.status !== 'accepted') { denied += 1; continue; }
-
-    const appended = store.append(built.signal);
-    if (appended.status === 'stored') {
-      ingested += 1;
-      kind_counts[outcome_kind] = (kind_counts[outcome_kind] || 0) + 1;
-    } else {
-      denied += 1;
+    if (appendDerived(record, capabilityId, outcome_kind, reason_code)
+        && outcome_kind === 'selected') {
+      pendingSelections.push({
+        record: {
+          ts: record.ts,
+          prompt_signature: record.prompt_signature,
+          route_id: record.route_id,
+          confidence_tier: record.confidence_tier,
+          guards_fired: Array.isArray(record.guards_fired) ? record.guards_fired : [],
+        },
+        capabilityId,
+        recordIndex: i,
+      });
     }
   }
 
@@ -358,6 +406,7 @@ export function ingestTelemetryEvidence({
       size, mtimeMs, recordCount: allRecords.length,
       workflowStateMtimeMs,
       priorWorkflowState: workflowState,
+      pendingSelections,
     }), { mode: 0o600 });
   } catch {
     // Cursor persistence is best-effort — a failed write only risks re-ingesting
