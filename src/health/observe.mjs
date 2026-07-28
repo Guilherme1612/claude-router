@@ -202,6 +202,14 @@ function deriveOutcomeKind({
 function buildOutcomeRecord({ telemetryRecord, capabilityId, outcome_kind, reason_code, evidenceWindowMs }) {
   const guard_codes = Array.isArray(telemetryRecord.guards_fired) ? [...telemetryRecord.guards_fired] : [];
   const prompt_signature = telemetryRecord.prompt_signature === undefined ? null : telemetryRecord.prompt_signature;
+  // WR-01: align evidence_window_ms with the tracer path for 'selected'
+  // outcomes. 'selected' means "no completion signal observed yet", so the
+  // evidence window is genuinely 0 — there is no window over which to look
+  // for a completion signal. The tracer minimal (deriveSelectedOutcome) already
+  // hardcodes 0; the full observer previously used the configured window
+  // (defaulting to 24h), making the same outcome_kind persist with two
+  // different contracts depending on which path produced it.
+  const effectiveWindowMs = outcome_kind === 'selected' ? 0 : Math.min(evidenceWindowMs, MAX_RETENTION_MS);
   const canonicalRecord = {
     timestamp_ms: telemetryRecord.ts,
     capability_id: capabilityId,
@@ -211,7 +219,7 @@ function buildOutcomeRecord({ telemetryRecord, capabilityId, outcome_kind, reaso
     confidence_band: telemetryRecord.confidence_tier,
     guard_codes,
     reason_code,
-    evidence_window_ms: Math.min(evidenceWindowMs, MAX_RETENTION_MS),
+    evidence_window_ms: effectiveWindowMs,
     sample_size: 1,
     opportunity_count: 1,
     freshness: 'fresh',
