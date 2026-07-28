@@ -757,6 +757,13 @@ export async function uninstallRouter(options) {
   for (const lifecycleRoot of [join(p.ownedRoot, 'install-state'), join(p.ownedRoot, 'versions')]) {
     if (existsSync(lifecycleRoot)) rmSync(lifecycleRoot, { recursive: true, force: true });
   }
+  // Fresh-account onboarding: the inventory manifest builder writes a runtime asset
+  // (claude-inventory-manifest.json) at install time. It is intentionally outside the
+  // ownership manifest (rebuilt, not installed), so prune it here so uninstall removes
+  // the owned root completely instead of leaving the runtime manifest as an orphan.
+  for (const inventoryManifest of [join(p.ownedRoot, 'claude-inventory-manifest.json'), join(p.codexOwnedRoot, 'claude-inventory-manifest.json')]) {
+    if (existsSync(inventoryManifest)) rmSync(inventoryManifest, { force: true });
+  }
   // Re-prune the owned roots now that lifecycle state is gone so they are removed when empty.
   for (const directory of [p.ownedRoot, p.codexOwnedRoot]) {
     removeEmptyDirectory(directory);
