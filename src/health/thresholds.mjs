@@ -32,6 +32,7 @@ export { HALF_LIFE_MS, MAX_RETENTION_MS, MINIMUM_SAMPLES };
 
 // D-6: version field is `policy_version`, never bare `version`.
 export const POLICY_VERSION = 'health-policy-v1';
+const POLICY_ID = /^health-policy-v\d+$/;
 
 // Cooldown — canary-guarded via the bridge (Task 2). Default 1h.
 export const COOLDOWN_MS = 60 * 60 * 1000;
@@ -74,7 +75,7 @@ export function readActivePointer(ownedRoot) {
   if (!existsSync(pointerPath)) return null;
   try {
     const parsed = JSON.parse(readFileSync(pointerPath, 'utf8'));
-    if (parsed && typeof parsed.policy_version === 'string') return parsed.policy_version;
+    if (parsed && POLICY_ID.test(parsed.policy_version)) return parsed.policy_version;
     return null;
   } catch {
     return null;
@@ -99,6 +100,7 @@ export function readActivePointer(ownedRoot) {
 // (only tests) — this is a known gap, NOT a bug. See score.mjs
 // `DEFAULT_WEIGHTS = VERSIONED_WEIGHTS` for the symmetric half of this note.
 export function loadThresholds(policy_version, { ownedRoot } = {}) {
+  if (!POLICY_ID.test(policy_version)) return null;
   const root = healthVersionsRoot(ownedRoot);
   const dir = join(root, policy_version);
   const file = join(dir, 'thresholds.json');
@@ -128,6 +130,7 @@ export function loadThresholds(policy_version, { ownedRoot } = {}) {
 // phase (D-calibration per Deferred Items). Returns the English-only default
 // on missing/corrupt (never throws).
 export function loadCalibrationCorpus(policy_version, { ownedRoot } = {}) {
+  if (!POLICY_ID.test(policy_version)) return null;
   const root = healthVersionsRoot(ownedRoot);
   const dir = join(root, policy_version, 'calibration');
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {

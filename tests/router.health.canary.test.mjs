@@ -169,6 +169,21 @@ test('HLTH-11 loadCalibrationCorpus returns English-only default on corrupt mani
   rmSync(root, { recursive: true, force: true });
 });
 
+test('HLTH-11 policy loaders and active pointer reject path-traversal identifiers', () => {
+  const root = tempOwnedRoot();
+  const outside = join(root, 'outside');
+  mkdirSync(outside, { recursive: true });
+  writeFileSync(join(outside, 'thresholds.json'), JSON.stringify({ escaped: true }));
+  mkdirSync(healthVersionsRoot(root), { recursive: true });
+  writeFileSync(join(healthVersionsRoot(root), 'active.json'), JSON.stringify({
+    policy_version: '../../outside',
+  }));
+  assert.equal(readActivePointer(root), null);
+  assert.equal(loadThresholds('../../outside', { ownedRoot: root }), null);
+  assert.equal(loadCalibrationCorpus('../../outside', { ownedRoot: root }), null);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test('HLTH-11 score.mjs imports VERSIONED_WEIGHTS from thresholds.mjs (no inline weight numbers)', () => {
   // The grep guard from the plan's verification section.
   assert.ok(!/0\.30|0\.25|0\.20/.test(scoreSource),
