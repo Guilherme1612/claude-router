@@ -197,9 +197,17 @@ export function activateCandidate(options) {
 // orphan version prevents recoverActiveVersion from re-adopting it on the next
 // reconcile. Best-effort: a failed removal is ignored (next reconcile's recovery
 // will reconcile any residual state).
-export function rollbackActivation({ ownedRoot, versionId }) {
+export function rollbackActivation({ ownedRoot, versionId, previousVersionId = null, now = Date.now(), test_mode = false }) {
   const p = paths(ownedRoot);
-  try { rmSync(p.active, { force: true }); } catch { /* best-effort */ }
+  if (validId(previousVersionId)) {
+    const preview = previewRollback({ ownedRoot, destination: previousVersionId, now, test_mode });
+    const restored = preview.preview_status === 'ready'
+      ? executeRollback({ ownedRoot, preview, confirmation: previousVersionId, reason: 'publication_failed', now, test_mode })
+      : { rollback_status: 'recovery_required', reason_code: preview.reason_code };
+    if (restored.rollback_status !== 'rolled_back') return restored;
+  } else {
+    try { rmSync(p.active, { force: true }); } catch { /* best-effort */ }
+  }
   if (validId(versionId)) {
     try { rmSync(join(p.versions, versionId), { recursive: true, force: true }); } catch { /* best-effort */ }
   }

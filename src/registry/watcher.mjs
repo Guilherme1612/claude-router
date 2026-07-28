@@ -666,16 +666,30 @@ export function createRegistryReconciler(config, dependencies = {}) {
                   if (decision.status === 'promoted') {
                     activation = { activation_status: 'activated', version_id: decision.active_version, ...decision };
                     if (decision.active_version) {
-                      const publication = await publishIndex({
-                        ownedRoot: config.activation_root, registry: built.registry,
-                        registryVersionId: decision.active_version, mapping,
-                        policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
-                        contracts: built.contracts, relationships: built.relationships,
-                        intentPolicy: built.intent_policy, workflows: built.workflows,
-                        healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
-                      });
-                      if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
-                      activation = { ...activation, ...publication };
+                      try {
+                        const publication = await publishIndex({
+                          ownedRoot: config.activation_root, registry: built.registry,
+                          registryVersionId: decision.active_version, mapping,
+                          policyFingerprint: verification.policy_fingerprint, now: verification.generated_at || Date.now(),
+                          contracts: built.contracts, relationships: built.relationships,
+                          intentPolicy: built.intent_policy, workflows: built.workflows,
+                          healthPolicy: built.health_policy, suggestionReference: built.suggestion_reference,
+                        });
+                        if (publication.publication_status !== 'published') throw new Error('compiled_tuple_not_published');
+                        activation = { ...activation, ...publication };
+                      } catch (error) {
+                        const restored = await rollbackActivation({
+                          ownedRoot: config.activation_root,
+                          versionId: decision.active_version,
+                          previousVersionId: knownGood,
+                          test_mode: config.test_mode === true,
+                        });
+                        activation = {
+                          activation_status: restored.rollback_status === 'rolled_back' ? 'preserved' : 'recovery_required',
+                          reason_code: restored.rollback_status === 'rolled_back' ? 'canary_publish_failed' : restored.reason_code,
+                          ...(error?.message ? { publish_error: error.message } : {}),
+                        };
+                      }
                     }
                   } else if (decision.status === 'rolled_back') {
                     activation = { activation_status: 'rolled_back', reason_code: decision.reason_code };

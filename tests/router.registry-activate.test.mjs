@@ -11,7 +11,7 @@ import {
 } from '../src/registry/validate.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import {
-  activateCandidate, executeRollback, previewRollback, recoverActiveVersion,
+  activateCandidate, executeRollback, previewRollback, recoverActiveVersion, rollbackActivation,
   recoverRollbackJournal, replaceActivePointer, verifyVersion, writeImmutableVersion,
 } from '../src/registry/activate.mjs';
 
@@ -91,6 +91,31 @@ test('immutable activation, recovery and pointer-only rollback preserve history'
     assert.equal(readFileSync(join(root, 'versions', first.version_id, 'manifest.json'), 'utf8'), firstManifest);
     assert.equal(recoverActiveVersion({ ownedRoot: root, now: 301 }).recovery_status, 'healthy');
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('failed post-activation publication restores the exact prior authority', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-activation-publish-'));
+  try {
+    const firstInputs = inputs();
+    const first = activateCandidate({
+      ownedRoot: root, ...firstInputs,
+      verification: productionVerification(firstInputs, 100), now: 100, reason: 'bootstrap',
+    });
+    const secondInputs = { ...inputs(), candidate: { schema_version: 1, records: [], generation: 2 } };
+    const second = activateCandidate({
+      ownedRoot: root, ...secondInputs,
+      verification: productionVerification(secondInputs, 200), now: 200, reason: 'canary',
+    });
+    assert.equal(second.activation_status, 'activated');
+    const restored = rollbackActivation({
+      ownedRoot: root, versionId: second.version_id, previousVersionId: first.version_id, now: 201,
+    });
+    assert.equal(restored.rollback_status, 'rolled_back');
+    assert.equal(JSON.parse(readFileSync(join(root, 'active.json'), 'utf8')).version_id, first.version_id);
+    assert.equal(existsSync(join(root, 'versions', second.version_id)), false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test('activation independently rejects substituted or unauthenticated production evidence before version creation', async () => {
