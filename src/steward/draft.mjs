@@ -68,6 +68,11 @@ function normalizeRoutes(value) {
 
 function normalizeDraft(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail('draft must be an object');
+  const allowed = new Set([
+    'conflicts', 'dependencies', 'representative_routes', 'reversibility',
+    'rollback_implications', 'semantic_changes', 'verification',
+  ]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) fail('invalid draft fields');
   return {
     semantic_changes: tokenList(value.semantic_changes, 'semantic_changes'),
     dependencies: tokenList(value.dependencies, 'dependencies', { empty: true }),
