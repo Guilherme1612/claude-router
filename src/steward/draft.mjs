@@ -16,6 +16,21 @@ const FINGERPRINT = /^[a-f0-9]{64}$/;
 const TOKEN = /^[a-z][a-z0-9_:-]{0,127}$/;
 const MAX_ITEMS = 32;
 
+export function deriveStewardDraft({ suggestion } = {}) {
+  const current = normalizeSuggestion(suggestion);
+  return {
+    semantic_changes: [`review_${current.observation_kind}`],
+    dependencies: current.observation_kind === 'missing_dependency'
+      ? current.affected_capability_ids
+      : [],
+    conflicts: [],
+    representative_routes: [{ before: 'current_contract', after: 'draft_contract' }],
+    verification: ['verify_contract'],
+    reversibility: 'delete_draft_file',
+    rollback_implications: 'none_until_install',
+  };
+}
+
 function fail(message) {
   throw new TypeError(message);
 }
@@ -238,7 +253,7 @@ export function approveDraftCreation(options = {}) {
     renameSync(staging, draftRoot);
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
-    if (error.code !== 'EEXIST') throw error;
+    if (!['EEXIST', 'ENOTEMPTY'].includes(error.code)) throw error;
     const existing = readFileSync(path, 'utf8');
     if (existing !== `${stableStringify(bundle)}\n`) fail('immutable draft bundle conflict');
     return {

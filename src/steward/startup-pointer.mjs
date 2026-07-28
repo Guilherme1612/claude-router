@@ -98,11 +98,13 @@ export function loadStartupPointer({ ownedRoot, now = Date.now(), fs = {} } = {}
       offset += count;
     }
     const record = valid(JSON.parse(bytes.toString('utf8')));
-    if (!record || !record.available
-        || (record.cooldown_until_ms !== null && record.cooldown_until_ms <= now)) {
+    if (!record || (!record.available
+        && (record.cooldown_until_ms === null || record.cooldown_until_ms > now))) {
       return unavailable();
     }
-    return record;
+    return record.cooldown_until_ms !== null && record.cooldown_until_ms <= now
+      ? { ...record, available: true, cooldown_until_ms: null }
+      : record;
   } catch {
     return unavailable();
   } finally {

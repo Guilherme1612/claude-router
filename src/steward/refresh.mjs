@@ -30,7 +30,7 @@ function authoritativeRegistry(ownedRoot) {
   return existsSync(legacy) ? json(legacy) : null;
 }
 
-function loadInputs(ownedRoot, now) {
+export function loadStewardInputs(ownedRoot, now = Date.now()) {
   const source = authoritativeRegistry(ownedRoot) || {};
   const registry = Array.isArray(source.records) ? source.records : [];
   const contracts = new Map();
@@ -53,13 +53,27 @@ function loadInputs(ownedRoot, now) {
   };
 }
 
+export function loadStewardObservations({ ownedRoot, now = Date.now() } = {}) {
+  const inputs = loadStewardInputs(ownedRoot, now);
+  return {
+    ...inputs,
+    observations: inputs.healthDisposed ? [] : deriveObservations({
+      registry: inputs.registry,
+      relationships: inputs.relationships,
+      contracts: inputs.contracts,
+      outcomes: inputs.outcomes,
+      now,
+    }).observations,
+  };
+}
+
 export function refreshSuggestionPointer({
   ownedRoot,
   now = Date.now(),
   dependencies = {},
 } = {}) {
   if (typeof ownedRoot !== 'string') throw new TypeError('ownedRoot is required');
-  const inputs = (dependencies.loadInputs || loadInputs)(ownedRoot, now);
+  const inputs = (dependencies.loadInputs || loadStewardInputs)(ownedRoot, now);
   const selected = inputs.healthDisposed
     ? { reason_code: 'suggestion_none', suggestion: null }
     : (dependencies.selectSuggestion || selectSuggestion)({

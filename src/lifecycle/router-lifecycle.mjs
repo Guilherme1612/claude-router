@@ -353,6 +353,8 @@ export async function installRouter(options) {
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
+    'steward/startup-pointer.mjs', 'steward/startup-ack.mjs', 'steward/state.mjs',
+    'health/thresholds.mjs',
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
     'orchestrator/workflow-declarations.json',
     // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)

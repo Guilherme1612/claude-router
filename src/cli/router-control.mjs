@@ -14,8 +14,8 @@ import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-inde
 import { inspect as healthInspect, reset as healthReset, dispose as healthDispose, recover as healthRecover } from '../health/admin.mjs';
 import { selectSuggestion } from '../steward/suggestion.mjs';
 import { createStewardStore } from '../steward/state.mjs';
-import { approveDraftCreation, previewDraft } from '../steward/draft.mjs';
-import { refreshSuggestionPointer } from '../steward/refresh.mjs';
+import { approveDraftCreation, deriveStewardDraft, previewDraft } from '../steward/draft.mjs';
+import { loadStewardObservations, refreshSuggestionPointer } from '../steward/refresh.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -550,13 +550,30 @@ export function renderContractText(result) {
 
 export function renderSuggestionText(result) {
   const data = result.data || {};
+  if (!result.ok) return `${safeToken(result.reason_code)}; inspect local health state and retry.\n`;
   const lines = [data.heading || `REASON ${safeToken(result.reason_code)}`];
   if (data.body) lines.push(data.body);
+  if (data.overview) lines.push('', `OVERVIEW ${stableStringify(data.overview)}`);
+  const suggestion = data.suggestion;
+  if (suggestion) {
+    lines.push('', 'EVIDENCE',
+      `KIND ${suggestion.observation_kind}`,
+      `REASON ${suggestion.reason_code}`,
+      `CONFIDENCE ${suggestion.confidence_basis_points}`,
+      `CAPABILITIES ${suggestion.affected_capability_ids.join(', ')}`,
+      `WINDOW_MS ${suggestion.evidence.evidence_window_ms}`,
+      '', 'ACTION',
+      `BENEFIT ${suggestion.expected_benefit}`,
+      `RISK ${suggestion.risk}`,
+      `NEXT ${suggestion.safe_next_action}`,
+      `FINGERPRINT ${suggestion.fingerprint}`);
+  }
   for (const [key, value] of Object.entries(data).sort(([left], [right]) => left.localeCompare(right))) {
-    if (key === 'heading' || key === 'body') continue;
+    if (['heading', 'body', 'overview', 'suggestion', 'warning'].includes(key)) continue;
     lines.push(`${safeToken(key).toUpperCase()} ${value !== null && typeof value === 'object' ? stableStringify(value) : String(value)}`);
   }
-  for (const warning of result.warnings || []) lines.push(`WARNING ${warning}`);
+  const warnings = new Set([data.warning, ...(result.warnings || [])].filter(Boolean));
+  for (const warning of warnings) lines.push(`WARNING ${warning}`);
   return `${lines.join('\n')}\n`;
 }
 
@@ -814,7 +831,8 @@ function suggestionCommand({ root, positional, options, dependencies }) {
     : createStewardStore({ root: join(root, 'steward') });
   const observations = typeof dependencies.stewardObservations === 'function'
     ? dependencies.stewardObservations({ root })
-    : dependencies.stewardObservations || [];
+    : dependencies.stewardObservations
+      || loadStewardObservations({ ownedRoot: root, now }).observations;
   let selected;
   try {
     selected = (dependencies.selectSuggestion || selectSuggestion)({
@@ -876,7 +894,8 @@ function suggestionCommand({ root, positional, options, dependencies }) {
     }
     const draft = typeof dependencies.stewardDraft === 'function'
       ? dependencies.stewardDraft({ root, suggestion: selected.suggestion })
-      : dependencies.stewardDraft;
+      : dependencies.stewardDraft
+        || deriveStewardDraft({ ownedRoot: root, suggestion: selected.suggestion, now });
     try {
       const request = { root: store.stewardRoot, suggestion: selected.suggestion, draft };
       const preview = (dependencies.previewDraft || previewDraft)(request);

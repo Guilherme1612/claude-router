@@ -55,7 +55,8 @@ let _registryMod = null;
 // in a test would attach stdin listeners that never close and hang the runner.
 const isMain = () => {
   try {
-    return import.meta.url === pathToFileURL(process.argv[1]).href;
+    return import.meta.url === pathToFileURL(process.argv[1]).href
+      || process.argv[1]?.endsWith('/router.mjs');
   } catch {
     return false;
   }
@@ -2878,7 +2879,7 @@ if (isMain()) {
   if (cliResult) {
     process.exit(cliResult === 1 ? 1 : 0);
   }
-  readStdin((input) => {
+  readStdin(async (input) => {
     let payload;
     try {
       payload = JSON.parse(input);
@@ -2887,7 +2888,28 @@ if (isMain()) {
       return;
     }
     try {
-      main(payload);
+      const prompt = payload?.prompt ?? payload?.message;
+      const ownedRoot = process.env.ROUTER_CONTEXT_OWNED_ROOT || ROUTER_DIR;
+      const projectRoot = process.env.ROUTER_CONTEXT_PROJECT_ROOT || process.cwd();
+      const modulePath = process.env.ROUTER_CONTEXT_MODULE_PATH
+        || join(ROUTER_DIR, 'modules', 'context', 'prompt-route.mjs');
+      const { routeContextPrompt } = await import(modulePath);
+      const routed = routeContextPrompt({ prompt, ownedRoot, projectRoot });
+      if (routed.additional_context) {
+        emit(routed.additional_context);
+        try {
+          const ackPath = process.env.ROUTER_STARTUP_ACK_MODULE_PATH
+            || join(ROUTER_DIR, 'modules', 'steward', 'startup-ack.mjs');
+          const { acknowledgeStartupNotice } = await import(ackPath);
+          const { loadStartupPointer } = await import(
+            process.env.ROUTER_STARTUP_POINTER_MODULE_PATH
+              || join(ROUTER_DIR, 'modules', 'steward', 'startup-pointer.mjs')
+          );
+          acknowledgeStartupNotice({ ownedRoot, pointer: loadStartupPointer({ ownedRoot }) });
+        } catch {}
+      } else {
+        main(payload);
+      }
     } catch {
       // fail-open: emit nothing, never exit code 2, never a block decision
     }

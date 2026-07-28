@@ -178,11 +178,12 @@ export function startupPointer(selected, state, now = Date.now()) {
   const snoozedUntil = timestampFor(interaction, 'snoozed_until', suggestion.fingerprint);
   const cooldownUntil = Math.max(cooldownAt === null ? 0 : cooldownAt + COOLDOWN_MS, snoozedUntil ?? 0);
   const available = !isSuppressed(interaction, suggestion.fingerprint, now);
+  const activeUntil = cooldownUntil > now ? cooldownUntil : null;
   return {
     schema_version: 1,
     policy_version: STEWARD_POLICY_VERSION,
     fingerprint: suggestion.fingerprint,
     available,
-    cooldown_until_ms: cooldownUntil || null,
+    cooldown_until_ms: activeUntil,
   };
 }

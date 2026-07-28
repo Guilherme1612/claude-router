@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -9,8 +9,10 @@ import { spawnSync } from 'node:child_process';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
+import { compileStartupPointer } from '../src/steward/startup-pointer.mjs';
 
 const LIVE_HOOK = '/Users/guilherme/.claude/hooks/router.mjs';
+const SOURCE_HOOK = resolve('tests/router.mjs.snapshot');
 const MODULE = resolve('src/context/prompt-route.mjs');
 const CANARY = 'PRIVATE-CANARY-raw-prompt-secret';
 const VERSION = 'v1-0123456789abcdef';
@@ -52,10 +54,25 @@ function saveCompiledCapsule(root, value) {
 }
 
 function runHook(prompt, env = {}) {
-  return spawnSync(process.execPath, [LIVE_HOOK], {
-    input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt }), encoding: 'utf8',
-    env: { ...process.env, ROUTER_CONTEXT_MODULE_PATH: MODULE, ROUTER_TEST_FRESHNESS: 'fresh', ...env },
-  });
+  const runtime = mkdtempSync(join(tmpdir(), 'router-hook-source-'));
+  try {
+    const hook = join(runtime, 'router.mjs');
+    writeFileSync(hook, readFileSync(SOURCE_HOOK));
+    writeFileSync(join(runtime, 'router.evolve.mjs'), readFileSync(resolve('tests/router.evolve.mjs.snapshot')));
+    return spawnSync(process.execPath, [hook], {
+      input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt }), encoding: 'utf8',
+      env: {
+        ...process.env,
+        ROUTER_CONTEXT_MODULE_PATH: MODULE,
+        ROUTER_STARTUP_ACK_MODULE_PATH: resolve('src/steward/startup-ack.mjs'),
+        ROUTER_STARTUP_POINTER_MODULE_PATH: resolve('src/steward/startup-pointer.mjs'),
+        ROUTER_TEST_FRESHNESS: 'fresh',
+        ...env,
+      },
+    });
+  } finally {
+    rmSync(runtime, { recursive: true, force: true });
+  }
 }
 
 test('prompt adapter owns all three referential outcomes and never returns prompt bytes', async () => {
@@ -92,19 +109,13 @@ test('prompt adapter refreshes uniquely, clarifies ambiguity, and rejects termin
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('real UserPromptSubmit hook resolves before normal routing and failures remain fail-open', async (t) => {
-  // The deployed hook snapshot (tests/router.mjs.snapshot) does not yet wire the
-  // context-recovery module (src/context/prompt-route.mjs) into main(). The
-  // prompt-route unit tests above cover the module directly. This integration
-  // test requires the hook to emit context-recovery additionalContext, which is
-  // a not-yet-implemented feature in the snapshot. Skip until the snapshot wires
-  // ROUTER_CONTEXT_MODULE_PATH into main().
-  t.skip('snapshot does not wire context-recovery into the hook yet (pre-existing feature gap)');
+test('real UserPromptSubmit hook resolves before normal routing and failures remain fail-open', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-live-context-'));
   try {
     assert.equal(saveCompiledCapsule(root, capsule()).status, 'saved');
     const resumed = runHook('continue', { ROUTER_CONTEXT_OWNED_ROOT: root, ROUTER_CONTEXT_PROJECT_ROOT: root });
     assert.equal(resumed.status, 0, resumed.stderr);
+    assert.notEqual(resumed.stdout, '', resumed.stderr);
     const output = JSON.parse(resumed.stdout);
     assert.match(output.hookSpecificOutput.additionalContext, /context-recovery/);
     assert.equal((output.hookSpecificOutput.additionalContext.match(/router-inject/g) || []).length, 1);
@@ -114,6 +125,31 @@ test('real UserPromptSubmit hook resolves before normal routing and failures rem
     assert.equal(forced.stdout, '');
     assert.doesNotMatch(forced.stderr, /PRIVATE|CANARY|missing\.mjs/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('UserPromptSubmit emits the startup pointer once then acknowledges cooldown', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-hook-startup-'));
+  try {
+    compileStartupPointer({
+      ownedRoot: root,
+      pointer: {
+        schema_version: 1,
+        policy_version: 'steward-policy-v1',
+        fingerprint: 'a'.repeat(64),
+        available: true,
+        cooldown_until_ms: null,
+      },
+    });
+    const env = { ROUTER_CONTEXT_OWNED_ROOT: root, ROUTER_CONTEXT_PROJECT_ROOT: root };
+    const first = runHook('ordinary prompt', env);
+    assert.match(first.stdout, /Router suggestion available/);
+    const second = runHook('ordinary prompt', env);
+    assert.doesNotMatch(second.stdout, /Router suggestion available/);
+    const state = JSON.parse(readFileSync(join(root, 'steward', 'state.json'), 'utf8'));
+    assert.ok(Number.isSafeInteger(state.cooldown_at['a'.repeat(64)]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('explicit-looking prompts pass through when there is no active capsule', async () => {

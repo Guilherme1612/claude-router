@@ -184,4 +184,5 @@ test('fresh exact approval creates one immutable private bundle then returns com
 test('draft module has no install, activation, publication, or routing mutation imports', () => {
   const source = readFileSync(new URL('../src/steward/draft.mjs', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /from\s+['"][^'"]*(?:activate|publish|installer|lifecycle|adapter|settings)[^'"]*['"]/);
+  assert.match(source, /\['EEXIST', 'ENOTEMPTY'\]/);
 });

@@ -9,6 +9,8 @@ import { dispose, recover, reset } from '../src/health/admin.mjs';
 import { runRouterControl } from '../src/cli/router-control.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { refreshSuggestionPointer } from '../src/steward/refresh.mjs';
+import { startupPointer } from '../src/steward/suggestion.mjs';
+import { acknowledgeStartupNotice } from '../src/steward/startup-ack.mjs';
 import { compileStartupPointer, loadStartupPointer } from '../src/steward/startup-pointer.mjs';
 
 const NOW = 1_800_000_000_000;
@@ -240,7 +242,7 @@ test('load performs one fixed bounded read and fails silent on missing corrupt o
       ownedRoot,
       pointer: { ...AVAILABLE, cooldown_until_ms: NOW - 1 },
     });
-    assert.equal(loadStartupPointer({ ownedRoot, now: NOW }).available, false);
+    assert.equal(loadStartupPointer({ ownedRoot, now: NOW }).available, true);
 
     compileStartupPointer({ ownedRoot, pointer: AVAILABLE });
     const opened = [];
@@ -259,6 +261,30 @@ test('load performs one fixed bounded read and fails silent on missing corrupt o
     };
     assert.equal(loadStartupPointer({ ownedRoot, now: NOW, fs }).available, true);
     assert.deepEqual(opened, [pointerPath]);
+  } finally {
+    rmSync(ownedRoot, { recursive: true, force: true });
+  }
+});
+
+test('expired snooze refreshes to an available pointer with cleared suppression metadata', () => {
+  const pointer = startupPointer(
+    { reason_code: 'suggestion_selected', suggestion: { fingerprint: FINGERPRINT } },
+    { schema_version: 1, dismissed: {}, snoozed_until: { [FINGERPRINT]: NOW - 1 }, cooldown_at: {} },
+    NOW,
+  );
+  assert.equal(pointer.available, true);
+  assert.equal(pointer.cooldown_until_ms, null);
+});
+
+test('startup acknowledgement records cooldown and the pointer becomes available after expiry', () => {
+  const ownedRoot = root('router-steward-ack-');
+  try {
+    compileStartupPointer({ ownedRoot, pointer: AVAILABLE });
+    assert.equal(acknowledgeStartupNotice({ ownedRoot, pointer: AVAILABLE, now: NOW }).status, 'stored');
+    assert.equal(loadStartupPointer({ ownedRoot, now: NOW + 1 }).available, false);
+    assert.equal(loadStartupPointer({ ownedRoot, now: NOW + 86_400_001 }).available, true);
+    const state = JSON.parse(readFileSync(join(ownedRoot, 'steward', 'state.json'), 'utf8'));
+    assert.equal(state.cooldown_at[FINGERPRINT], NOW);
   } finally {
     rmSync(ownedRoot, { recursive: true, force: true });
   }

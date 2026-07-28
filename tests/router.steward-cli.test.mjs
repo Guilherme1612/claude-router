@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 
-import { runRouterControl } from '../src/cli/router-control.mjs';
+import { renderSuggestionText, runRouterControl } from '../src/cli/router-control.mjs';
 
 const NOW = 1_800_000_000_000;
 const OBSERVATION = {
@@ -89,6 +89,51 @@ test('suggestion empty and detail expose one bounded private canonical projectio
     } finally {
       rmSync(f.root, { recursive: true, force: true });
     }
+  }
+});
+
+test('production suggestion and draft derive authoritative local inputs without injected steward data', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-steward-live-cli-'));
+  try {
+    mkdirSync(join(root, 'registry'), { recursive: true });
+    writeFileSync(join(root, 'registry', 'registry.json'), JSON.stringify({
+      records: [{
+        canonical_identity: 'skill:debug',
+        semantic_type: 'skill',
+        contract: { dependencies: ['skill:ghost'] },
+      }],
+      relationships: {},
+    }));
+    const inspect = runRouterControl({
+      argv: ['suggestion', '--owned-root', root],
+      dependencies: { now: () => NOW },
+    });
+    assert.equal(inspect.result.reason_code, 'suggestion_selected');
+    const proposal = runRouterControl({
+      argv: ['suggestion', 'draft', '--confirm', inspect.result.data.suggestion.fingerprint, '--owned-root', root],
+      dependencies: { now: () => NOW },
+    });
+    assert.equal(proposal.result.reason_code, 'draft_approval_required');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('human suggestion renderer groups fields, bounds lines, and gives recovery copy once', () => {
+  const f = fixture();
+  try {
+    const detail = renderSuggestionText(f.run('suggestion').result);
+    assert.match(detail, /^Top suggestion\n\nOVERVIEW /);
+    assert.match(detail, /\n\nEVIDENCE\n/);
+    assert.match(detail, /\n\nACTION\n/);
+    assert.ok(Math.max(...detail.trimEnd().split('\n').map(line => line.length)) < 160);
+    const proposal = f.run('suggestion', 'draft', '--confirm', selected(f).fingerprint);
+    assert.equal((renderSuggestionText(proposal.result).match(/Approve draft creation only/g) || []).length, 1);
+    assert.equal(renderSuggestionText({
+      command: 'suggestion', ok: false, reason_code: 'unsafe_suggestion_input', data: {}, warnings: [],
+    }), 'unsafe_suggestion_input; inspect local health state and retry.\n');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
   }
 });
 
