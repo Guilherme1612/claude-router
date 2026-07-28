@@ -84,6 +84,12 @@ test('HLTH-06 signal_breakdown: reports recency/reversibility/confidence/opportu
   assert.equal(sb.outcome_kind_counts.abandoned, 15);
 });
 
+test('HLTH-06 opportunity exposure is zero when every outcome was abandoned', () => {
+  const outcomes = Array.from({ length: 30 }, () => makeOutcome({ outcome_kind: 'abandoned' }));
+  const result = scoreCapability({ outcomes, contract: null, now: NOW });
+  assert.equal(result.signal_breakdown.opportunity_exposure, 0);
+});
+
 // ---- HLTH-06: usefulness_basis_points bounded 0..10000 ----
 
 test('HLTH-06 bounded: usefulness_basis_points is in [0, 10000]', () => {

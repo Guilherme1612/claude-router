@@ -153,7 +153,8 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
   // dispatched), so they do not appear in the denominator's "missed" bucket.
   const abandoned_count = outcome_kind_counts.abandoned || 0;
   const overridden_count = outcome_kind_counts.overridden || 0;
-  const opportunity_exposure = sample_count / (sample_count + abandoned_count + overridden_count);
+  const addressed = sample_count - abandoned_count - overridden_count;
+  const opportunity_exposure = sample_count === 0 ? 0 : addressed / sample_count;
 
   const reversibility_value = readReversibility(contract);
   const reversibility_factor = REVERSIBILITY_FACTOR[reversibility_value];
