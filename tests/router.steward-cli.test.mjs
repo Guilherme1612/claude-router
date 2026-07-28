@@ -22,7 +22,19 @@ function fixture(observations = [OBSERVATION]) {
   const root = mkdtempSync(join(tmpdir(), 'router-steward-cli-'));
   const protectedPath = join(root, 'active.json');
   writeFileSync(protectedPath, '{"protected":true}\n');
-  const dependencies = { stewardObservations: observations, now: () => NOW };
+  const dependencies = {
+    stewardObservations: observations,
+    stewardDraft: {
+      semantic_changes: ['add_dependency_contract'],
+      dependencies: ['skill:a'],
+      conflicts: [],
+      representative_routes: [{ before: 'route_unavailable', after: 'route_candidate_available' }],
+      verification: ['verify_contract'],
+      reversibility: 'delete_draft_file',
+      rollback_implications: 'none_until_install',
+    },
+    now: () => NOW,
+  };
   return {
     root,
     protectedPath,
@@ -140,6 +152,74 @@ test('suggestion grammar rejects malformed, unsafe, oversized, and forbidden act
       ['suggestion', '--unknown'],
     ]) {
       assert.equal(f.run(...argv).exitCode, 2);
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('suggestion draft is proposal-first and exposes no complete preview before approval', () => {
+  const f = fixture();
+  try {
+    const fingerprint = selected(f).fingerprint;
+    const before = readFileSync(f.protectedPath);
+    const proposed = f.run('suggestion', 'draft', '--confirm', fingerprint);
+    assert.equal(proposed.exitCode, 0);
+    assert.equal(proposed.result.reason_code, 'draft_approval_required');
+    assert.equal(proposed.result.data.effect, 'draft_file_only');
+    assert.equal(
+      proposed.result.data.warning,
+      'Approve draft creation only; this will not install or publish anything.',
+    );
+    assert.match(proposed.result.data.approval_token, /^[a-f0-9]{64}$/);
+    assert.equal(Object.hasOwn(proposed.result.data, 'draft_preview'), false);
+    assert.equal(Object.hasOwn(proposed.result.data, 'dependencies'), false);
+    assert.deepEqual(readFileSync(f.protectedPath), before);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('suggestion draft requires exact fresh approval then returns complete preview only', () => {
+  for (const mode of ['missing', 'mismatch', 'approved']) {
+    const f = fixture();
+    try {
+      const fingerprint = selected(f).fingerprint;
+      const proposal = f.run('suggestion', 'draft', '--confirm', fingerprint);
+      const token = proposal.result.data.approval_token;
+      const argv = ['suggestion', 'draft', '--confirm', fingerprint, '--execute'];
+      if (mode !== 'missing') argv.push('--approval', mode === 'approved' ? token : '0'.repeat(64));
+      const outcome = f.run(...argv);
+      if (mode !== 'approved') {
+        assert.ok([2, 4].includes(outcome.exitCode));
+        assert.equal(Object.hasOwn(outcome.result.data, 'draft_preview'), false);
+        continue;
+      }
+      assert.equal(outcome.exitCode, 0);
+      assert.equal(outcome.result.reason_code, 'draft_preview_ready');
+      assert.equal(outcome.result.data.authority, 'draft_file_only');
+      assert.deepEqual(Object.keys(outcome.result.data.draft_preview).sort(), [
+        'conflicts', 'dependencies', 'exact_paths', 'representative_routes',
+        'reversibility', 'rollback_implications', 'semantic_changes', 'verification', 'warning',
+      ]);
+      assert.equal(
+        outcome.result.data.draft_preview.warning,
+        'Preview only — no capability or routing files were changed.',
+      );
+      assert.deepEqual(readFileSync(f.protectedPath), Buffer.from('{"protected":true}\n'));
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test('suggestion family exposes no list install publish or maintenance action', () => {
+  const f = fixture();
+  try {
+    for (const action of ['list', 'install', 'publish', 'reset', 'dispose', 'recover']) {
+      const outcome = f.run('suggestion', action);
+      assert.equal(outcome.exitCode, 2);
+      assert.equal(outcome.result.reason_code, 'invalid_arguments');
     }
   } finally {
     rmSync(f.root, { recursive: true, force: true });
