@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import {
+  existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -104,4 +106,77 @@ test('preview returns stable ineligible result for non-missing suggestions', asy
     );
     assert.deepEqual(readdirSync(f.owned), []);
   } finally { rmSync(f.owned, { recursive: true, force: true }); }
+});
+
+test('missing, mismatched, and stale approval write nothing and expose no complete preview', async () => {
+  const { approveDraftCreation, previewDraft } = await import('../src/steward/draft.mjs');
+  for (const mode of ['missing', 'mismatch', 'stale']) {
+    const f = fixture();
+    try {
+      const initial = suggestion();
+      const preview = previewDraft({ root: f.root, suggestion: initial, draft: draft() });
+      const current = mode === 'stale' ? suggestion({ fingerprint: 'b'.repeat(64) }) : initial;
+      const presented = mode === 'missing'
+        ? undefined
+        : { token: mode === 'mismatch' ? '0'.repeat(64) : preview.approval_binding.token };
+      const result = approveDraftCreation({
+        root: f.root, suggestion: current, draft: draft(), preview, presented, now: NOW,
+      });
+      assert.equal(result.status, 'blocked');
+      assert.ok(['approval_required', 'approval_mismatch', 'stale_draft_preview'].includes(result.reason_code));
+      assert.equal(Object.hasOwn(result, 'draft_preview'), false);
+      assert.equal(existsSync(f.root), false);
+    } finally { rmSync(f.owned, { recursive: true, force: true }); }
+  }
+});
+
+test('fresh exact approval creates one immutable private bundle then returns complete preview', async () => {
+  const { approveDraftCreation, previewDraft } = await import('../src/steward/draft.mjs');
+  const f = fixture();
+  try {
+    const protectedPath = join(f.owned, 'active.json');
+    writeFileSync(protectedPath, '{"version":"unchanged"}');
+    const before = readFileSync(protectedPath);
+    const request = { root: f.root, suggestion: suggestion(), draft: draft() };
+    const preview = previewDraft(request);
+    const approved = approveDraftCreation({
+      ...request,
+      preview,
+      presented: { token: preview.approval_binding.token },
+      now: NOW,
+    });
+    assert.equal(approved.status, 'stored');
+    assert.equal(approved.reason_code, 'draft_preview_ready');
+    assert.equal(approved.authority, 'draft_file_only');
+    assert.equal(statSync(approved.path).mode & 0o777, 0o600);
+    assert.deepEqual(readFileSync(protectedPath), before);
+    assert.deepEqual(Object.keys(approved.draft_preview).sort(), [
+      'conflicts',
+      'dependencies',
+      'exact_paths',
+      'representative_routes',
+      'reversibility',
+      'rollback_implications',
+      'semantic_changes',
+      'verification',
+      'warning',
+    ]);
+    assert.equal(approved.draft_preview.warning, 'Preview only — no capability or routing files were changed.');
+    assert.deepEqual(approved.draft_preview.exact_paths, preview.target_paths);
+
+    const repeated = approveDraftCreation({
+      ...request,
+      preview,
+      presented: { token: preview.approval_binding.token },
+      now: NOW + 1,
+    });
+    assert.equal(repeated.status, 'unchanged');
+    assert.equal(repeated.path, approved.path);
+    assert.deepEqual(readdirSync(join(f.root, 'drafts')), [approved.draft_id]);
+  } finally { rmSync(f.owned, { recursive: true, force: true }); }
+});
+
+test('draft module has no install, activation, publication, or routing mutation imports', () => {
+  const source = readFileSync(new URL('../src/steward/draft.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(source, /from\s+['"][^'"]*(?:activate|publish|installer|lifecycle|adapter|settings)[^'"]*['"]/);
 });
