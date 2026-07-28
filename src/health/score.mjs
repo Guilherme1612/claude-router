@@ -37,6 +37,20 @@ export { HALF_LIFE_MS, MINIMUM_SAMPLES };
 // (POLICY_VERSION='health-policy-v1', HLTH-11). Plan 24-04 moved the inline
 // constants here; the scorer is unchanged behaviorally. Value changes flow
 // through the canary bridge (src/health/canary-bridge.mjs), not by direct edit.
+//
+// WR-03 (deferred consumption): the canary bridge writes activated weights /
+// tier_boundaries to versions/<policy_version>/thresholds.json and updates
+// versions/active.json on promotion, but this scorer does NOT yet call
+// loadThresholds(readActivePointer(ownedRoot)) to consume them — it uses
+// the hardcoded VERSIONED_WEIGHTS / TIER_BOUNDARIES constants directly.
+// Production consumption of activated thresholds is intentionally deferred
+// to a later phase: the bridge writes are validated for shape and atomicity
+// now (the gate evidences the value change), and wiring the scorer to the
+// activated bundle is a separate behavioral change that would require a new
+// ownedRoot parameter on scoreCapability and updated call sites. Until that
+// wiring lands, a canary-gated activation has no effect on scoring — this is
+// a known gap, NOT a bug. See thresholds.mjs `loadThresholds` for the
+// symmetric half of this note.
 const DEFAULT_WEIGHTS = VERSIONED_WEIGHTS;
 
 const REVERSIBILITY_FACTOR = Object.freeze({

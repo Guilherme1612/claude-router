@@ -85,6 +85,19 @@ export function readActivePointer(ownedRoot) {
 // ~/.claude/router/health/versions/<policy_version>/thresholds.json (atomic,
 // 0600). Returns the versioned bundle for that policy_version, or the defaults
 // above if the file is absent. Returns null on corrupt (never throws).
+//
+// WR-03 (deferred consumption): the canary bridge (src/health/canary-bridge.mjs
+// promoteThresholdCandidate) writes activated weights / tier_boundaries to
+// versions/<policy_version>/thresholds.json and updates versions/active.json
+// on promotion, but the scorer (src/health/score.mjs scoreCapability) does NOT
+// yet call loadThresholds to consume them — it uses the hardcoded
+// VERSIONED_WEIGHTS / TIER_BOUNDARIES constants directly. Production
+// consumption of activated thresholds is intentionally deferred to a later
+// phase; the bridge writes are validated for shape and atomicity now, and
+// wiring the scorer to the activated bundle is a separate behavioral change.
+// Until that wiring lands, loadThresholds has zero production call sites
+// (only tests) — this is a known gap, NOT a bug. See score.mjs
+// `DEFAULT_WEIGHTS = VERSIONED_WEIGHTS` for the symmetric half of this note.
 export function loadThresholds(policy_version, { ownedRoot } = {}) {
   const root = healthVersionsRoot(ownedRoot);
   const dir = join(root, policy_version);
