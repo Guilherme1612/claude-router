@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stableStringify } from '../registry/schema.mjs';
@@ -271,16 +271,25 @@ export function publishCompiledIndex({
   };
   const promptProjectionBytes = json(promptProjection);
   const tupleRoot = join(root, 'release-tuples', 'versions', tupleVersionId);
+  const pointer = {
+    schema_version: 2,
+    tuple_version_id: tupleVersionId,
+    prompt_projection_sha256: sha256(promptProjectionBytes),
+  };
   if (['member', 'before-member-write'].includes(crashAt)) throw new Error('injected crash before tuple member write');
   if (['manifest', 'before-manifest-write'].includes(crashAt)) throw new Error('injected crash before tuple manifest write');
-  if (!existsSync(tupleRoot)) {
-    mkdirSync(tupleRoot, { recursive: true });
+  const existing = existsSync(tupleRoot)
+    ? loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer })
+    : null;
+  if (!existing?.dispatch_eligible || existing.tuple_version_id !== tupleVersionId) {
+    const stagingRoot = join(root, 'release-tuples', 'staging', `${tupleVersionId}.${randomUUID()}`);
+    mkdirSync(stagingRoot, { recursive: true });
     for (const [name, bytes] of Object.entries(tupleMembers)) {
       if (crashAt === `before-member:${name}`) throw new Error(`injected crash before tuple member ${name}`);
-      durableWrite(join(tupleRoot, name), bytes);
+      durableWrite(join(stagingRoot, name), bytes);
       if (crashAt === `after-member:${name}`) throw new Error(`injected crash after tuple member ${name}`);
     }
-    durableWrite(join(tupleRoot, 'prompt-projection.json'), promptProjectionBytes);
+    durableWrite(join(stagingRoot, 'prompt-projection.json'), promptProjectionBytes);
     const manifest = { schema_version: 2, state: 'verified', tuple_version_id: tupleVersionId,
       members: memberHashes,
       registry: { version_id: registryVersionId, payload_sha256: registryHash },
@@ -292,33 +301,55 @@ export function publishCompiledIndex({
       policy_fingerprint: policyFingerprint || sha256('{}'), mapping_fingerprint: mappingFingerprint,
       compatibility: COMPILED_INDEX_COMPATIBILITY, verification: { disposition: 'passing', complete: true },
       created_at: now, expires_at: now + 30 * 24 * 60 * 60 * 1000 };
-    durableWrite(join(tupleRoot, 'manifest.json'), json(manifest));
+    durableWrite(join(stagingRoot, 'manifest.json'), json(manifest));
+    mkdirSync(dirname(tupleRoot), { recursive: true });
+    if (existsSync(tupleRoot)) {
+      const quarantineRoot = join(root, 'release-tuples', 'quarantine', `${tupleVersionId}.${randomUUID()}`);
+      mkdirSync(dirname(quarantineRoot), { recursive: true });
+      renameSync(tupleRoot, quarantineRoot);
+    }
+    renameSync(stagingRoot, tupleRoot);
   }
   if (crashAt === 'after-manifest-write') throw new Error('injected crash after tuple manifest write');
   // Phase 19 Decision 8: pointer schema_version bumped 1→2 alongside the tuple
   // schema bump (compile-index.mjs verifyTuple rejects schema-1 pointers).
-  const pointer = {
-    schema_version: 2,
-    tuple_version_id: tupleVersionId,
-    prompt_projection_sha256: sha256(promptProjectionBytes),
-  };
   if (['verification', 'before-verification'].includes(crashAt)) throw new Error('injected crash before tuple verification');
   const candidate = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer });
   if (!candidate.dispatch_eligible || candidate.tuple_version_id !== tupleVersionId) throw new Error('tuple_validation_failed');
   if (crashAt === 'after-verification') throw new Error('injected crash after tuple verification');
   if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
-  replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
+  const activePath = join(root, 'release-tuples', 'active.json');
+  let previousActive;
+  try { previousActive = readFileSync(activePath); } catch { previousActive = null; }
+  replacePointer(activePath, pointer);
   if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
   try {
     if (crashAt === 'reload') throw new Error('injected reload failure');
     const active = loadCompiledIndex({ ownedRoot: root, now });
     if (!active.dispatch_eligible || active.tuple_version_id !== tupleVersionId) throw new Error('tuple_reload_failed');
   } catch (error) {
+    // CR-03: a failed build must never change the active tuple. Restore the
+    // prior pointer in preference order: verified known-good, then the exact
+    // previous active bytes, then remove the pointer entirely on first
+    // publication. The fallback verifier is only consulted when a known-good
+    // pointer exists — with `releaseTuplePointer: null` the loader falls
+    // through to the active.json path and would re-bless the failed tuple.
     let knownGood;
     try { knownGood = JSON.parse(readFileSync(join(root, 'release-tuples', 'known-good.json'), 'utf8')); } catch { knownGood = null; }
-    const fallback = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: knownGood });
-    if (fallback.dispatch_eligible && fallback.tuple_version_id) {
-      replacePointer(join(root, 'release-tuples', 'active.json'), knownGood);
+    let restored = false;
+    if (knownGood) {
+      const fallback = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: knownGood });
+      if (fallback.dispatch_eligible && fallback.tuple_version_id) {
+        replacePointer(activePath, knownGood);
+        restored = true;
+      }
+    }
+    if (!restored) {
+      if (previousActive) {
+        replacePointer(activePath, JSON.parse(previousActive));
+      } else {
+        try { unlinkSync(activePath); } catch {}
+      }
     }
     throw error;
   }

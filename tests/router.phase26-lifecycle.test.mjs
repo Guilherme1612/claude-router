@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
@@ -77,6 +77,30 @@ test('post-activation reload failure restores the complete known-good tuple', ()
     const before = snapshot(root);
     assert.throws(() => publish(root, 'new', { crashAt: 'reload' }), /injected reload failure/);
     assert.deepEqual(snapshot(root), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('first publication reload failure removes the unverified active pointer', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-phase26-first-reload-'));
+  try {
+    assert.throws(() => publish(root, 'old', { crashAt: 'reload' }), /injected reload failure/);
+    assert.equal(existsSync(join(root, 'release-tuples', 'active.json')), false);
+    assert.equal(loadCompiledIndex({ ownedRoot: root, now: NOW }).dispatch_eligible, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('partial tuple staging is quarantined and the same publication retries safely', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-phase26-retry-'));
+  try {
+    assert.throws(() => publish(root, 'old', { crashAt: 'after-member:index.json' }), /injected crash/);
+    const published = publish(root, 'old');
+    const loaded = loadCompiledIndex({ ownedRoot: root, now: NOW });
+    assert.equal(loaded.dispatch_eligible, true);
+    assert.equal(loaded.tuple_version_id, published.tuple_version_id);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

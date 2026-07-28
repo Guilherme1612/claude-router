@@ -30,6 +30,45 @@ function defaultScheduler() {
   return { now: Date.now, setTimeout, clearTimeout };
 }
 
+const INVALIDATION_TUPLE_MEMBER = Object.freeze({
+  node: 'registry',
+  edge: 'relationships',
+  dependency: 'registry',
+  adapter: 'contracts',
+  'inference-rule': 'intent_policy',
+  manifest: 'workflows',
+  correction: 'contracts',
+  'negative-evidence': 'health_policy',
+});
+
+export function deriveInvalidationInput(built, lifecycle = {}) {
+  const events = (lifecycle.events || []).map(event => ({
+    ...event,
+    ...(event.change_class && !event.affected_tuple_member
+      ? { affected_tuple_member: INVALIDATION_TUPLE_MEMBER[event.change_class] }
+      : {}),
+  }));
+  const edges = [];
+  for (const record of built.registry?.records || []) {
+    for (const dependency of record.dependencies?.items || []) {
+      edges.push({
+        id: `dependency:${record.id}:${dependency.id}`,
+        type: 'dependency',
+        from_id: record.id,
+        to_id: dependency.id,
+      });
+    }
+  }
+  for (const event of events) edges.push(...(event.references || []));
+  edges.sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  return {
+    lifecycle: { ...lifecycle, events },
+    references: { schema_version: 1, edges },
+    relationships: built.relationships,
+    overlays: built.overlays,
+  };
+}
+
 // EVO-05: ingest telemetry.jsonl into the persistent evidence store before
 // reading the canary window. Cursor-based incremental append avoids duplicate
 // evidence on every reconcile (the watcher reconciles every few seconds; the
@@ -498,10 +537,11 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
     const built = assemble(next, acquisitionOptions);
     const active = await readActive();
+    const invalidation = deriveInvalidationInput(built, diff);
     const report = evaluate({
       candidate: built.registry,
       active,
-      lifecycle: diff,
+      ...invalidation,
       aliases: config.aliases || [],
       mappings: config.mappings || [],
       runtimeRoots: { claude: config.claude_root, codex: config.codex_root },

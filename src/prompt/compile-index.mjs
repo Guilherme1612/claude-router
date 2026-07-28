@@ -195,7 +195,25 @@ export function loadCompiledIndex({ ownedRoot, now = Date.now(), fs = {}, releas
     const read = boundedJson(resolve(tupleRoot, 'versions', pointer.tuple_version_id, 'prompt-projection.json'),
       COMPILED_INDEX_LIMITS.prompt_projection_bytes, io);
     if (!read || sha256(read.bytes) !== pointer.prompt_projection_sha256) return null;
-    return promptResult(pointer, read.value, source, reasonCode);
+    const manifest = boundedJson(
+      resolve(tupleRoot, 'versions', pointer.tuple_version_id, 'manifest.json'),
+      COMPILED_INDEX_LIMITS.metadata_bytes,
+      io,
+    )?.value;
+    const projection = read.value;
+    const projectionHash = value => sha256(`${JSON.stringify(value)}\n`);
+    if (manifest?.schema_version !== 2
+      || manifest.state !== 'verified'
+      || manifest.tuple_version_id !== pointer.tuple_version_id
+      || manifest.prompt_projection?.payload_sha256 !== pointer.prompt_projection_sha256
+      || manifest.compiled?.version_id !== projection.version_id
+      || manifest.registry?.version_id !== projection.registry_version_id
+      || manifest.members?.['index.json'] !== projectionHash(projection.index)
+      || manifest.members?.['closure.json'] !== projectionHash(projection.closure)
+      || manifest.members?.['budget.json'] !== projectionHash(projection.budget)
+      || manifest.members?.['summary-index.json'] !== projectionHash(projection.summary_index)
+      || manifest.members?.['suggestion-reference.json'] !== projectionHash(projection.suggestion_reference)) return null;
+    return promptResult(pointer, projection, source, reasonCode);
   };
   const verifyTuple = pointer => {
     if (pointer?.schema_version !== 2 || !/^t1-[a-f0-9]{16}$/.test(pointer.tuple_version_id || '')) return null;

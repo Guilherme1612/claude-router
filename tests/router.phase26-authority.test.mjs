@@ -10,6 +10,7 @@ import { createTestRegistryReconciler } from '../src/registry/watcher.mjs';
 import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
+import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 
 const NOW = 1_800_000_000_000;
 
@@ -159,6 +160,23 @@ function capsule() {
   };
 }
 
+// CR-02: the projection-only verifier hashes every projection member against
+// the tuple manifest, so any legitimate in-place projection mutation must also
+// re-link the manifest. Tests that deliberately tamper (corrupt projection,
+// index route edit) skip this and rely on the verifier rejecting the bytes.
+function relinkProjectionManifest(root, tupleVersionId, projection, projectionBytes) {
+  const manifestPath = join(root, 'release-tuples', 'versions', tupleVersionId, 'manifest.json');
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  const pHash = value => createHash('sha256').update(`${JSON.stringify(value)}\n`).digest('hex');
+  manifest.members['index.json'] = pHash(projection.index);
+  manifest.members['closure.json'] = pHash(projection.closure);
+  manifest.members['budget.json'] = pHash(projection.budget);
+  manifest.members['summary-index.json'] = pHash(projection.summary_index);
+  manifest.members['suggestion-reference.json'] = pHash(projection.suggestion_reference);
+  manifest.prompt_projection.payload_sha256 = createHash('sha256').update(projectionBytes).digest('hex');
+  writeFileSync(manifestPath, `${JSON.stringify(manifest)}\n`);
+}
+
 function makeActiveProjectionRoutable(root, tupleVersionId) {
   const projectionPath = join(
     root, 'release-tuples', 'versions', tupleVersionId, 'prompt-projection.json',
@@ -171,6 +189,7 @@ function makeActiveProjectionRoutable(root, tupleVersionId) {
   };
   const bytes = `${JSON.stringify(projection)}\n`;
   writeFileSync(projectionPath, bytes);
+  relinkProjectionManifest(root, tupleVersionId, projection, bytes);
   const digest = createHash('sha256').update(bytes).digest('hex');
   for (const name of ['active.json', 'known-good.json']) {
     const path = join(root, 'release-tuples', name);
@@ -201,6 +220,7 @@ test('invalid recommendation data suppresses advice without changing verified ro
     projection.suggestion_reference = { available: true, fingerprint: 'not-a-fingerprint' };
     const bytes = `${JSON.stringify(projection)}\n`;
     writeFileSync(projectionPath, bytes);
+    relinkProjectionManifest(root, publication.tuple_version_id, projection, bytes);
     pointer.prompt_projection_sha256 = createHash('sha256').update(bytes).digest('hex');
     writeFileSync(pointerPath, `${JSON.stringify(pointer)}\n`);
     const before = snapshot(root);
@@ -260,6 +280,36 @@ test('corrupt active prompt projection falls back only to verified known-good ro
     assert.equal(routed.compiled.tuple_version_id, oldPublication.tuple_version_id);
     assert.equal(routed.startup_notice_emitted, undefined);
     assert.deepEqual(snapshot(root), before);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('projection pointer hash cannot bless bytes that are not linked by the tuple manifest', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-phase26-projection-link-'));
+  try {
+    const oldPublication = publish(root, 'a', {
+      schema_version: 1, policy_version: 'steward-policy-v1',
+      fingerprint: null, available: false, cooldown_until_ms: null,
+    });
+    const oldPointer = readFileSync(join(root, 'release-tuples', 'known-good.json'));
+    const active = publish(root, 'b', {
+      schema_version: 1, policy_version: 'steward-policy-v1',
+      fingerprint: null, available: false, cooldown_until_ms: null,
+    });
+    writeFileSync(join(root, 'release-tuples', 'known-good.json'), oldPointer);
+    const projectionPath = join(root, 'release-tuples', 'versions', active.tuple_version_id, 'prompt-projection.json');
+    const projection = JSON.parse(readFileSync(projectionPath, 'utf8'));
+    projection.index.routes['gsd-execute-phase'].transition_id = 'tampered';
+    const bytes = `${JSON.stringify(projection)}\n`;
+    writeFileSync(projectionPath, bytes);
+    const pointerPath = join(root, 'release-tuples', 'active.json');
+    const pointer = JSON.parse(readFileSync(pointerPath, 'utf8'));
+    pointer.prompt_projection_sha256 = createHash('sha256').update(bytes).digest('hex');
+    writeFileSync(pointerPath, `${JSON.stringify(pointer)}\n`);
+    const loaded = loadCompiledIndex({ ownedRoot: root, now: NOW, projectionOnly: true });
+    assert.equal(loaded.source, 'known_good');
+    assert.equal(loaded.tuple_version_id, oldPublication.tuple_version_id);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
