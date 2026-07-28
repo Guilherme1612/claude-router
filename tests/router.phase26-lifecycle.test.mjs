@@ -1,10 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadCompiledIndex } from '../src/prompt/compile-index.mjs';
 import { publishCompiledIndex, recoverReleaseTuple } from '../src/prompt/publish-index.mjs';
+import { fingerprint, restartController } from '../src/lifecycle/router-lifecycle.mjs';
+import { stableStringify } from '../src/registry/schema.mjs';
 
 const NOW = 1_800_000_000_000;
 const registry = suffix => ({
@@ -88,4 +90,41 @@ test('recovery reports complete-tuple last-known-good restoration', () => {
     result = { reason_code: error.message, tuple_scope: error.tuple_scope };
   }
   assert.equal(result.tuple_scope, 'complete', 'PHASE26_LIFECYCLE_INCOMPLETE');
+});
+
+test('restart recovery restores the verified complete tuple after an interrupted pointer transition', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-phase26-restart-'));
+  const claudeRoot = join(root, '.claude');
+  const codexRoot = join(root, '.codex');
+  const ownedRoot = join(claudeRoot, 'router');
+  const config = { schema_version: 1, activation_root: ownedRoot };
+  try {
+    const old = publish(ownedRoot, 'old');
+    assert.throws(() => publish(ownedRoot, 'new', { crashAt: 'after-active-pointer' }), /injected crash/);
+    assert.notEqual(loadCompiledIndex({ ownedRoot, now: NOW + 1 }).tuple_version_id, old.tuple_version_id);
+    mkdirSync(join(ownedRoot, 'controller'), { recursive: true });
+    writeFileSync(join(ownedRoot, 'controller', 'config.json'), `${stableStringify(config)}\n`);
+    await restartController({
+      claudeRoot,
+      codexRoot,
+      ownedRoot,
+      sourceRouter: join(root, 'router.mjs'),
+      readinessTimeoutMs: 100,
+      launchController: () => {
+        writeFileSync(join(ownedRoot, 'controller', 'status.json'), `${JSON.stringify({
+          state: 'ready',
+          configuration_fingerprint: fingerprint(stableStringify(config)),
+          heartbeat: Date.now(),
+          pid: process.pid,
+          instance_id: 'phase26-restart',
+        })}\n`);
+        return { exitCode: null, unref() {} };
+      },
+    });
+    const recovered = loadCompiledIndex({ ownedRoot, now: NOW + 1 });
+    assert.equal(recovered.tuple_version_id, old.tuple_version_id);
+    assert.equal(recovered.source, 'active');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
