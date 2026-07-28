@@ -4,7 +4,7 @@ import {
   existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { fingerprint, installRouter, restartController, uninstallRouter } from '../src/lifecycle/router-lifecycle.mjs';
@@ -48,6 +48,21 @@ function snapshot(root) {
   return walk(root);
 }
 
+function assertRelativeImportClosure(root) {
+  for (const entry of snapshot(root) || []) {
+    if (entry.type !== 'file' || !entry.path.endsWith('.mjs')) continue;
+    const source = readFileSync(join(root, entry.path), 'utf8');
+    const imports = source.matchAll(/(?:from\s+|import\s*(?:\(\s*)?)['"](\.[^'"]+)['"]/g);
+    for (const [, specifier] of imports) {
+      assert.equal(
+        existsSync(resolve(root, dirname(entry.path), specifier)),
+        true,
+        `${entry.path} imports missing deployed module ${specifier}`,
+      );
+    }
+  }
+}
+
 async function waitUntil(predicate, timeoutMs = 2_000) {
   const deadline = Date.now() + timeoutMs;
   do {
@@ -85,15 +100,16 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 8 = 4 evolution modules (Phase 20-01: canary-controller, evidence, perf-measure, telemetry-bridge) × 2 roots
     // + 2 = 1 evolution module (Phase 20-02: candidate-calibration-route) × 2 roots
     // + 1 = codex router.mjs (Task 260723-l9s: codex UserPromptSubmit binding)
-    // = 67 (modules-only deploy)
-    // + 66 = 33 moduleNames mirrored to src/ × 2 roots (including the pointer-only
-    //   startup acknowledgement dependency closure)
+    // + 24 = 12 Phase 22-25 dependency-closure modules × 2 roots
+    // = 91 (modules-only deploy)
+    // + 90 = 45 moduleNames mirrored to src/ × 2 roots (including the complete
+    //   registry, health, steward, and approval dependency closure)
     //   gate fixtures + router.calibrate.mjs `../src/...` imports resolve in production)
     // + 4 = 2 gate entrypoints (router.calibrate.mjs, calibration-tasks.json) × 2 roots
     // + 20 = 10 gate fixtures (tests/*.test.mjs) × 2 roots (Blocker-2b: production
     //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality)
-    // = 165
-    assert.equal(manifest.files.length, 165);
+    // = 213
+    assert.equal(manifest.files.length, 213);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -103,6 +119,7 @@ test('one command installs router, binding, Codex marker, and complete ownership
     for (const runtimeRoot of [join(f.options.claudeRoot, 'router'), join(f.options.codexRoot, 'router')]) {
       const control = join(runtimeRoot, 'modules', 'cli', 'router-control.mjs');
       assert.equal(existsSync(control), true);
+      assertRelativeImportClosure(join(runtimeRoot, 'modules'));
       const imported = await import(`${new URL(`file://${control}`).href}?fixture=${Date.now()}`);
       assert.equal(typeof imported.runRouterControl, 'function');
       for (const module of ['map.mjs', 'validate.mjs', 'activate.mjs', 'watcher.mjs']) {

@@ -349,13 +349,17 @@ export async function installRouter(options) {
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
+    'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
     'steward/startup-pointer.mjs', 'steward/startup-ack.mjs', 'steward/state.mjs',
-    'health/thresholds.mjs',
+    'steward/draft.mjs', 'steward/refresh.mjs', 'steward/suggestion.mjs',
+    'health/thresholds.mjs', 'health/admin.mjs', 'health/catalog.mjs',
+    'health/outcome-schema.mjs', 'health/score.mjs', 'health/store.mjs',
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
+    'orchestrator/approval.mjs',
     'orchestrator/workflow-declarations.json',
     // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)
     // and CLI (Wave 3) canary triggers can import canary-controller / evidence /
