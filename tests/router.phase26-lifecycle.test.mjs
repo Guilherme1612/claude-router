@@ -109,6 +109,7 @@ test('restart recovery restores the verified complete tuple after an interrupted
       codexRoot,
       ownedRoot,
       sourceRouter: join(root, 'router.mjs'),
+      now: NOW + 1,
       readinessTimeoutMs: 100,
       launchController: () => {
         writeFileSync(join(ownedRoot, 'controller', 'status.json'), `${JSON.stringify({

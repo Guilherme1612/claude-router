@@ -49,15 +49,21 @@ function routeFor(subject, record) {
 export function recoverReleaseTuple({ ownedRoot, now = Date.now() } = {}) {
   const root = resolve(ownedRoot);
   const loaded = loadCompiledIndex({ ownedRoot: root, now });
-  if (loaded.dispatch_eligible && loaded.source === 'active') return { status: 'already-active', tuple_version_id: loaded.tuple_version_id };
   let pointer;
   try { pointer = JSON.parse(readFileSync(join(root, 'release-tuples', 'known-good.json'), 'utf8')); } catch { pointer = null; }
   const candidate = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer });
-  if (!candidate.dispatch_eligible || !candidate.tuple_version_id) throw new Error('no_verified_release_tuple');
+  if (!candidate.dispatch_eligible || !candidate.tuple_version_id) {
+    throw Object.assign(new Error('no_verified_release_tuple'), { tuple_scope: 'complete' });
+  }
+  if (loaded.dispatch_eligible && loaded.source === 'active' && loaded.tuple_version_id === candidate.tuple_version_id) {
+    return { status: 'already-active', tuple_version_id: loaded.tuple_version_id, tuple_scope: 'complete' };
+  }
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
   const repaired = loadCompiledIndex({ ownedRoot: root, now });
-  if (!repaired.dispatch_eligible || repaired.tuple_version_id !== candidate.tuple_version_id) throw new Error('tuple_recovery_failed');
-  return { status: 'recovered', tuple_version_id: repaired.tuple_version_id };
+  if (!repaired.dispatch_eligible || repaired.tuple_version_id !== candidate.tuple_version_id) {
+    throw Object.assign(new Error('tuple_recovery_failed'), { tuple_scope: 'complete' });
+  }
+  return { status: 'recovered', tuple_version_id: repaired.tuple_version_id, tuple_scope: 'complete' };
 }
 
 export function publishCompiledIndex({

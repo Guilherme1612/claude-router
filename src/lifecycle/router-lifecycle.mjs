@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
 import { reconcileCandidate } from '../registry/reconcile.mjs';
 import { stableStringify } from '../registry/schema.mjs';
+import { recoverReleaseTuple } from '../prompt/publish-index.mjs';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
 
@@ -735,6 +736,9 @@ export async function restartController(options) {
   const p = paths(options);
   const config = readJson(p.controllerConfigPath, null, 'controller config');
   if (!config) throw new Error('controller config is missing; install the router first');
+  if (existsSync(join(p.ownedRoot, 'release-tuples'))) {
+    recoverReleaseTuple({ ownedRoot: p.ownedRoot, now: options.now ?? Date.now() });
+  }
   const configurationFingerprint = fingerprint(stableStringify(config));
   const current = readyController(p, configurationFingerprint, options.controllerStaleMs ?? 5_000);
   if (current) {
