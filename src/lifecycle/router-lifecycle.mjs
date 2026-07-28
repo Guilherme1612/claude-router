@@ -12,6 +12,8 @@ import { stableStringify } from '../registry/schema.mjs';
 import { recoverReleaseTuple } from '../prompt/publish-index.mjs';
 
 export const MANIFEST_SCHEMA_VERSION = 1;
+export const RUNTIME_PROFILES = Object.freeze(['claude', 'codex', 'combined']);
+export const RECOMMENDATION_KINDS = Object.freeze(['command', 'skill', 'agent', 'workflow', 'mcp', 'tool']);
 
 export function fingerprint(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -552,6 +554,8 @@ export async function installRouter(options) {
     const manifest = {
       schema_version: MANIFEST_SCHEMA_VERSION,
       state: 'complete',
+      runtime_profiles: RUNTIME_PROFILES,
+      recommendation_kinds: RECOMMENDATION_KINDS,
       roots: { claude: p.claudeRoot, codex: p.codexRoot },
       files: [
         { path: p.routerPath, fingerprint: sourceFingerprint },
