@@ -117,17 +117,21 @@ export function createHealthStore({ root } = {}) {
       const retentionFloor = now - MAX_RETENTION_MS;
       const kept = [];
       let dropped = 0;
+      let corrupt = 0;
       for (const line of lines) {
         if (line.length === 0) continue;
         let record;
-        try { record = JSON.parse(line); } catch { dropped += 1; continue; }
-        if (!record || typeof record !== 'object') { dropped += 1; continue; }
+        try { record = JSON.parse(line); } catch { corrupt += 1; continue; }
+        if (!record || typeof record !== 'object') { corrupt += 1; continue; }
         // Preserve compaction marker lines (they carry compacted_at_ms).
         if (record.compacted_at_ms !== undefined) { kept.push(line); continue; }
         if (!Number.isSafeInteger(record.timestamp_ms) || record.timestamp_ms < retentionFloor) { dropped += 1; continue; }
         kept.push(line);
       }
-      const marker = { compacted_at_ms: now, dropped, policy_version: 'health-policy-v1' };
+      // WR-05: track corrupt/unreadable lines separately from retention-expired
+      // drops so the compaction marker audit trail distinguishes the two (mirror
+      // of readWindow's corrupt_line_skipped field).
+      const marker = { compacted_at_ms: now, dropped, corrupt_line_skipped: corrupt, policy_version: 'health-policy-v1' };
       const rewritten = [...kept, JSON.stringify(marker)].join('\n');
       const tmp = `${outcomesPath}.compact-${process.pid}-${Date.now()}`;
       writeFileSync(tmp, `${rewritten}\n`, { mode: 0o600 });
