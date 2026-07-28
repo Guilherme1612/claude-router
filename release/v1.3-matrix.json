@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "milestone": "v1.3",
+  "versions": {
+    "registry": "canonical-registry-v1",
+    "index": "compiled-index-v1",
+    "policy": "workflow-transitions-v1",
+    "corpus": "router-calibration-v1"
+  },
+  "thresholds": {
+    "warm_p95_ms_lt": 25,
+    "max_route_ms_lt": 100,
+    "context_max_bytes": 2048
+  },
+  "requirements": [
+    {"id":"REL-01","primary":{"phase":26,"owner":"bounded-prompt-path","commands":["node --test tests/router.phase26-hot-path.test.mjs"],"gate_ids":["REL-01"]}},
+    {"id":"REL-02","primary":{"phase":26,"owner":"background-tuple-build","commands":["node --test tests/router.phase26-tuple.test.mjs"],"gate_ids":["REL-02"]}},
+    {"id":"REL-03","primary":{"phase":26,"owner":"immutable-complete-tuple","commands":["node --test tests/router.phase26-tuple.test.mjs"],"gate_ids":["REL-03"]}},
+    {"id":"REL-04","primary":{"phase":26,"owner":"atomic-invalidation","commands":["node --test tests/router.phase26-invalidation.test.mjs"],"gate_ids":["REL-04"]}},
+    {"id":"REL-05","primary":{"phase":26,"owner":"guarded-lifecycle","commands":["node --test tests/router.phase26-lifecycle.test.mjs"],"gate_ids":["REL-05"]}},
+    {"id":"REL-06","primary":{"phase":26,"owner":"dual-runtime-compatibility","commands":["node --test tests/router.phase26-dual-runtime.test.mjs"],"gate_ids":["REL-06"]}},
+    {"id":"REL-07","primary":{"phase":26,"owner":"isolated-performance","commands":["node --test tests/router.phase26-performance.test.mjs"],"gate_ids":["REL-07"]}},
+    {"id":"REL-08","primary":{"phase":26,"owner":"equivalence-and-recovery","commands":["node --test tests/router.phase26-equivalence.test.mjs"],"gate_ids":["REL-08"]}},
+    {"id":"REL-09","primary":{"phase":26,"owner":"approval-and-fail-open","commands":["node --test tests/router.phase26-authority.test.mjs"],"gate_ids":["REL-09"]}}
+  ],
+  "stages": [
+    {
+      "id": "focused",
+      "files": [
+        "tests/router.phase26-tuple.test.mjs",
+        "tests/router.phase26-hot-path.test.mjs",
+        "tests/router.phase26-invalidation.test.mjs",
+        "tests/router.phase26-equivalence.test.mjs",
+        "tests/router.registry-reconcile.test.mjs"
+      ],
+      "gate_ids": ["REL-01", "REL-02", "REL-03", "REL-04", "REL-08"]
+    },
+    {
+      "id": "lifecycle",
+      "files": [
+        "tests/router.phase26-lifecycle.test.mjs",
+        "tests/router.registry-watcher.test.mjs",
+        "tests/router.registry-activate.test.mjs",
+        "tests/router.lifecycle-recovery.test.mjs"
+      ],
+      "gate_ids": ["REL-05", "REL-08"]
+    },
+    {
+      "id": "compatibility",
+      "files": [
+        "tests/router.phase26-dual-runtime.test.mjs",
+        "tests/router.installer-coexistence.test.mjs",
+        "tests/router.autonomous-lifecycle.test.mjs"
+      ],
+      "gate_ids": ["REL-06"]
+    },
+    {
+      "id": "authority",
+      "files": [
+        "tests/router.phase26-authority.test.mjs",
+        "tests/router.approval.test.mjs",
+        "tests/router.safety-release.test.mjs"
+      ],
+      "gate_ids": ["REL-09"]
+    },
+    {
+      "id": "regression",
+      "files": [
+        "tests/router.compiled-index.test.mjs",
+        "tests/router.compiled-index.schema2.test.mjs",
+        "tests/router.context-prompt-integration.test.mjs"
+      ],
+      "gate_ids": ["regression"]
+    },
+    {
+      "id": "latency",
+      "files": ["tests/router.phase26-performance.test.mjs"],
+      "gate_ids": ["warm-p95", "hard-route-ceiling", "context-budget", "REL-07"],
+      "isolated": true
+    }
+  ]
+}

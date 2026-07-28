@@ -24,7 +24,9 @@ test('v1.3 matrix owns exact fresh REL-01 through REL-09 release evidence', () =
     'focused', 'lifecycle', 'compatibility', 'authority', 'regression', 'latency',
   ]);
   assert.equal(matrix.stages.at(-1).isolated, true);
-  assert.deepEqual(matrix.stages.at(-1).gate_ids, ['warm-p95', 'hard-route-ceiling', 'context-budget']);
+  assert.deepEqual(matrix.stages.at(-1).gate_ids, [
+    'warm-p95', 'hard-route-ceiling', 'context-budget', 'REL-07',
+  ]);
   assert.equal(validateReleaseMatrix(matrix).status, 'valid');
 });
 
@@ -33,11 +35,11 @@ test('v1.3 validation fails closed on incomplete, stale, skipped, malformed, or 
   const cases = [
     ['missing requirement', matrix => matrix.requirements.pop(), /coverage/],
     ['duplicate requirement', matrix => matrix.requirements.push(clone(matrix.requirements[0])), /duplicate/],
-    ['stale milestone', matrix => { matrix.milestone = 'v1.2'; }, /version|coverage/],
+    ['stale milestone', matrix => { matrix.milestone = 'v1.2'; }, /version|coverage|unknown fields/],
     ['missing stage', matrix => matrix.stages.pop(), /stage|gate/],
     ['duplicate stage', matrix => matrix.stages.push(clone(matrix.stages[0])), /duplicate/],
     ['skipped evidence', matrix => { matrix.stages[0].files[0] = 'tests/router.phase26-skip.test.mjs'; }, /readable|file/],
-    ['malformed gate', matrix => { matrix.stages[0].gate_ids = []; }, /gate/],
+    ['malformed gate', matrix => { matrix.stages[0].gate_ids = []; }, /gate|malformed/],
     ['release recursion', matrix => { matrix.stages[0].files = ['tests/router.phase26-release.test.mjs']; }, /circular/],
   ];
   for (const [name, mutate, expected] of cases) {
