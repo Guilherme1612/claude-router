@@ -106,11 +106,13 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 90 = 45 moduleNames mirrored to src/ × 2 roots (including the complete
     //   registry, health, steward, and approval dependency closure)
     //   gate fixtures + router.calibrate.mjs `../src/...` imports resolve in production)
-    // + 4 = 2 gate entrypoints (router.calibrate.mjs, calibration-tasks.json) × 2 roots
+    // + 6 = 3 gate entrypoints (router.calibrate.mjs, calibration-tasks.json,
+    //   build-manifest.mjs) × 2 roots (fresh-account onboarding: builder deployed
+    //   to both owned roots, runs once for claude's ownedRoot post-readiness)
     // + 20 = 10 gate fixtures (tests/*.test.mjs) × 2 roots (Blocker-2b: production
     //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality)
-    // = 213
-    assert.equal(manifest.files.length, 213);
+    // = 215
+    assert.equal(manifest.files.length, 215);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
