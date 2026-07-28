@@ -269,7 +269,11 @@ export function publishCompiledIndex({
   if (['manifest', 'before-manifest-write'].includes(crashAt)) throw new Error('injected crash before tuple manifest write');
   if (!existsSync(tupleRoot)) {
     mkdirSync(tupleRoot, { recursive: true });
-    for (const [name, bytes] of Object.entries(tupleMembers)) durableWrite(join(tupleRoot, name), bytes);
+    for (const [name, bytes] of Object.entries(tupleMembers)) {
+      if (crashAt === `before-member:${name}`) throw new Error(`injected crash before tuple member ${name}`);
+      durableWrite(join(tupleRoot, name), bytes);
+      if (crashAt === `after-member:${name}`) throw new Error(`injected crash after tuple member ${name}`);
+    }
     durableWrite(join(tupleRoot, 'prompt-projection.json'), promptProjectionBytes);
     const manifest = { schema_version: 2, state: 'verified', tuple_version_id: tupleVersionId,
       members: memberHashes,
@@ -284,6 +288,7 @@ export function publishCompiledIndex({
       created_at: now, expires_at: now + 30 * 24 * 60 * 60 * 1000 };
     durableWrite(join(tupleRoot, 'manifest.json'), json(manifest));
   }
+  if (crashAt === 'after-manifest-write') throw new Error('injected crash after tuple manifest write');
   // Phase 19 Decision 8: pointer schema_version bumped 1→2 alongside the tuple
   // schema bump (compile-index.mjs verifyTuple rejects schema-1 pointers).
   const pointer = {
@@ -294,9 +299,23 @@ export function publishCompiledIndex({
   if (['verification', 'before-verification'].includes(crashAt)) throw new Error('injected crash before tuple verification');
   const candidate = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: pointer });
   if (!candidate.dispatch_eligible || candidate.tuple_version_id !== tupleVersionId) throw new Error('tuple_validation_failed');
+  if (crashAt === 'after-verification') throw new Error('injected crash after tuple verification');
   if (crashAt === 'before-active-pointer') throw new Error('injected crash before active pointer');
   replacePointer(join(root, 'release-tuples', 'active.json'), pointer);
   if (crashAt === 'after-active-pointer') throw new Error('injected crash after active pointer');
+  try {
+    if (crashAt === 'reload') throw new Error('injected reload failure');
+    const active = loadCompiledIndex({ ownedRoot: root, now });
+    if (!active.dispatch_eligible || active.tuple_version_id !== tupleVersionId) throw new Error('tuple_reload_failed');
+  } catch (error) {
+    let knownGood;
+    try { knownGood = JSON.parse(readFileSync(join(root, 'release-tuples', 'known-good.json'), 'utf8')); } catch { knownGood = null; }
+    const fallback = loadCompiledIndex({ ownedRoot: root, now, releaseTuplePointer: knownGood });
+    if (fallback.dispatch_eligible && fallback.tuple_version_id) {
+      replacePointer(join(root, 'release-tuples', 'active.json'), knownGood);
+    }
+    throw error;
+  }
   replacePointer(join(root, 'release-tuples', 'known-good.json'), pointer);
   return {
     publication_status: 'published', tuple_version_id: tupleVersionId,

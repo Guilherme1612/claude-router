@@ -45,26 +45,26 @@ function snapshot(root) {
 }
 
 test('complete tuple publication preserves active routing at every pre-pointer failure', () => {
-  const root = mkdtempSync(join(tmpdir(), 'router-phase26-gates-'));
-  try {
-    publish(root, 'old');
-    const before = snapshot(root);
-    const failures = [
-      'build',
-      'before-member:registry.json',
-      'after-member:index.json',
-      'before-manifest-write',
-      'after-manifest-write',
-      'before-verification',
-      'after-verification',
-      'before-active-pointer',
-    ];
-    for (const crashAt of failures) {
+  const failures = [
+    'build',
+    'before-member:registry.json',
+    'after-member:index.json',
+    'before-manifest-write',
+    'after-manifest-write',
+    'before-verification',
+    'after-verification',
+    'before-active-pointer',
+  ];
+  for (const crashAt of failures) {
+    const root = mkdtempSync(join(tmpdir(), 'router-phase26-gates-'));
+    try {
+      publish(root, 'old');
+      const before = snapshot(root);
       assert.throws(() => publish(root, 'new', { crashAt }), /injected crash/);
       assert.deepEqual(snapshot(root), before, crashAt);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
   }
 });
 
