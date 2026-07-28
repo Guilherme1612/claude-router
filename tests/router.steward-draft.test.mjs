@@ -81,6 +81,11 @@ test('preview rejects escapes, malformed records, and unbounded collections', as
       suggestion: suggestion(),
       draft: draft({ semantic_changes: ['free form text'] }),
     }), TypeError);
+    assert.throws(() => previewDraft({
+      root: f.root,
+      suggestion: suggestion(),
+      draft: draft({ arbitrary_text: 'secret' }),
+    }), TypeError);
     const valid = previewDraft({ root: f.root, suggestion: suggestion(), draft: draft() });
     assert.equal(verifyDraftPreview({ ...valid, target_paths: ['/tmp/escape.json'] }, {
       root: f.root, suggestion: suggestion(), draft: draft(),
