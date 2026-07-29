@@ -13,6 +13,7 @@
 //   ROUTER_PROJECT_MCP_JSON      path to a project .mcp.json to include
 //   ROUTER_PROJECT_CONFIG_PATH   project path whose ~/.claude.json entry to read
 //   ROUTER_MANIFEST_OUT          default next to this script
+//   ROUTER_MODE_MAP_PATH         default ~/.claude/router/mode-map.json
 //
 // Robustness: every optional path is guarded. A completely empty ~/.claude yields
 // exit 0 with a valid manifest and all-zero counts.
@@ -34,6 +35,8 @@ const PROJECT_SKILL_DIRS = (process.env.ROUTER_PROJECT_SKILL_DIRS || '')
 const PROJECT_MCP_JSON = process.env.ROUTER_PROJECT_MCP_JSON || '';
 const PROJECT_CONFIG_PATH = process.env.ROUTER_PROJECT_CONFIG_PATH || '';
 const OUT = process.env.ROUTER_MANIFEST_OUT || join(SCRIPT_DIR, 'claude-inventory-manifest.json');
+const MODE_MAP_PATH = process.env.ROUTER_MODE_MAP_PATH || join(CLAUDE, 'router', 'mode-map.json');
+export const MODE_MAP_SIZE_CEILING = 30_000;
 
 function readJson(path, fallback) {
   if (!existsSync(path)) return fallback;
@@ -534,3 +537,9 @@ renameSync(tmp, OUT);
 console.log(JSON.stringify(manifest.counts, null, 2));
 console.log(`manifest written: ${OUT}`);
 console.log(`size: ${fileStatSize(OUT)} bytes`);
+
+const modeMapSize = fileStatSize(MODE_MAP_PATH);
+if (modeMapSize > MODE_MAP_SIZE_CEILING) {
+  console.error(`mode-map.json exceeds 30KB: ${modeMapSize} bytes`);
+  process.exitCode = 1;
+}
