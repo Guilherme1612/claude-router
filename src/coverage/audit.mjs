@@ -45,6 +45,7 @@ function capabilities(manifest) {
         category,
         id,
         scope: entry?.scope === 'project' || category === 'project_scoped_skills' ? 'project' : 'global',
+        routeableSkill: category !== 'agents_store_skills' || entry?.scope === 'global',
         missingMcp: category === 'agents' && Array.isArray(entry?.requires_mcp_not_in_manifest)
           ? entry.requires_mcp_not_in_manifest.map(cleanId).filter(Boolean).sort()
           : [],
@@ -63,7 +64,7 @@ function targetIndexes(rows) {
   };
   for (const row of rows) {
     if (row.category === 'commands') indexes.command.add(row.id);
-    if (SKILL_COLLECTIONS.has(row.category)) indexes.skill.add(row.id);
+    if (SKILL_COLLECTIONS.has(row.category) && row.routeableSkill) indexes.skill.add(row.id);
     if (row.category === 'agents') {
       indexes.agent.add(row.id);
       if (row.missingMcp.length) indexes.blockedAgent.add(row.id);
@@ -240,7 +241,8 @@ export function auditCoverage({ manifest, modeMap, baseline } = {}) {
     },
     unacknowledged_gaps: unacknowledgedGaps,
     fingerprints: {
-      manifest: fingerprint(rows.map(({ category, id, scope, missingMcp }) => ({ category, id, scope, missingMcp }))),
+      manifest: fingerprint(rows.map(({ category, id, scope, routeableSkill, missingMcp }) =>
+        ({ category, id, scope, routeableSkill, missingMcp }))),
       mode_map: fingerprint({
         command: [...routes.mapped.command].sort(),
         skill: [...routes.mapped.skill].sort(),

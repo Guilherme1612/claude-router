@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { auditCoverage } from '../src/coverage/audit.mjs';
 
 const BUILDER = fileURLToPath(new URL('../build-manifest.mjs', import.meta.url));
+const { validateRouteTargets } = await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
 
 function runBuilder({ modeMap = { schema_version: 2, entries: [] }, baseline = { schema_version: 1, entries: [] }, strict = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-coverage-builder-'));
@@ -135,6 +136,36 @@ test('reports typed forward targets without allowing baseline suppression', () =
   assert.deepEqual(report.forward_diagnostics.map(item => item.code), [
     'blocked_agent_target', 'stale_skill_target', 'stale_target',
   ]);
+});
+
+test('matches live routeability for non-global agents-store skills', () => {
+  const inventory = manifest();
+  inventory.agents_store_skills = [
+    { id: 'global-helper', scope: 'global' },
+    { id: 'store-only', scope: 'agents-store (not globally symlinked)' },
+  ];
+  const route = {
+    schema_version: 2,
+    entries: [{
+      id: 'store-route',
+      invoke_kind: 'skill',
+      signal_patterns: ['store helper'],
+      recommended_skills: ['store-only'],
+      recommended_agents: [],
+    }],
+  };
+
+  const live = validateRouteTargets(inventory, route);
+  const report = auditCoverage({
+    manifest: inventory,
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.ok(live.some(item => item.status === 'stale_target' && item.target === 'store-only'));
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'stale_skill_target' && item.target === 'store-only'));
+  assert.equal(record(report, 'agents_store_skills', 'store-only').classification, 'gap');
 });
 
 test('malformed optional inputs stay visible and acknowledge nothing', () => {
