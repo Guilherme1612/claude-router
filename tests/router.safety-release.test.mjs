@@ -19,6 +19,8 @@ const NODE = '/Users/guilherme/.hermes/node/bin/node';
 const BUDGET_MS = 100;
 const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
 const LIVE_SETTINGS = join(homedir(), '.claude', 'settings.json');
+const COVERAGE_REMINDER =
+  '<!-- router: coverage report may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 
 const HOT_PATH_FILES = [
   HOOK,
@@ -296,7 +298,13 @@ test('SAF-02/SAF-06/SAF-07: evolved worker-trigger hot path stays below 100ms wi
 
     assert.equal(r.status, 0, 'worker-trigger hook run must exit 0');
     assert.ok(r.wall < BUDGET_MS, `worker-trigger wall ${r.wall.toFixed(2)}ms >= ${BUDGET_MS}ms`);
-    assert.doesNotMatch(r.stdout, /doctor|routes|unmapped|coverage|proposals/i, 'hook output must not include operator diagnostics');
+    const output = JSON.parse(r.stdout);
+    const context = output.hookSpecificOutput.additionalContext;
+    assert.equal(context.match(/coverage report may be stale/g)?.length, 1,
+      'hook may emit exactly one COV-05 reminder');
+    assert.doesNotMatch(context.replace(COVERAGE_REMINDER, ''),
+      /doctor|routes|unmapped|coverage|proposals/i,
+      'hook output must not include operator diagnostics beyond the exact COV-05 reminder');
     const m = r.stderr.match(/__router_latency_ms=([0-9.]+)/);
     assert.ok(m, `worker-trigger run missing __router_latency_ms line: ${JSON.stringify(r.stderr)}`);
     assert.ok(parseFloat(m[1]) < BUDGET_MS, `worker-trigger self-latency ${m[1]}ms >= ${BUDGET_MS}ms`);
