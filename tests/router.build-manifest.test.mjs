@@ -28,6 +28,12 @@ function freshHome() {
   return root;
 }
 
+function withTempDir(fn) {
+  const dir = join(tmpdir(), `router-cache-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  mkdirSync(dir, { recursive: true });
+  try { return fn(dir); } finally { try { rmSync(dir, { recursive: true, force: true }); } catch {} }
+}
+
 function runBuilder(root, extraEnv = {}) {
   const out = join(root, '.claude', 'router', 'claude-inventory-manifest.json');
   const env = {
@@ -139,4 +145,32 @@ test('build-manifest: idempotent re-run produces identical bytes', () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('SAF-04 mode-map size guard accepts exactly 30000 bytes', () => withTempDir(root => {
+  const modeMap = join(root, 'mode-map.json');
+  writeFileSync(modeMap, 'x'.repeat(30_000));
+  const { r } = runBuilder(root, { ROUTER_MODE_MAP_PATH: modeMap });
+  assert.equal(r.status, 0, r.stderr);
+}));
+
+test('SAF-04 mode-map size guard rejects 30001 bytes', () => withTempDir(root => {
+  const modeMap = join(root, 'mode-map.json');
+  writeFileSync(modeMap, 'x'.repeat(30_001));
+  const { r } = runBuilder(root, { ROUTER_MODE_MAP_PATH: modeMap });
+  assert.notEqual(r.status, 0, 'builder must fail when mode-map exceeds 30KB');
+  assert.match(r.stderr, /mode-map\.json exceeds 30KB: 30001 bytes/);
+}));
+
+test('SAF-04 mode-map size guard accepts a typical 15000-byte map', () => withTempDir(root => {
+  const modeMap = join(root, 'mode-map.json');
+  writeFileSync(modeMap, 'x'.repeat(15_000));
+  const { r } = runBuilder(root, { ROUTER_MODE_MAP_PATH: modeMap });
+  assert.equal(r.status, 0, r.stderr);
+}));
+
+test('SAF-04 builder reuses its sole fileStatSize helper', () => {
+  const source = readFileSync(BUILDER, 'utf8');
+  assert.equal(source.match(/function fileStatSize\(/g)?.length, 1);
+  assert.match(source, /MODE_MAP_SIZE_CEILING/);
 });
