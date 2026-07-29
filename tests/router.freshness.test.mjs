@@ -135,7 +135,11 @@ test('hook subprocess: stale manifest emits exactly the one-line HTML-comment re
   const r = spawnSync(NODE, [HOOK], {
     input: JSON.stringify({ prompt: 'real prompt that is not trivial' }),
     encoding: 'utf8',
-    env: { ...process.env, ROUTER_TEST_FRESHNESS: 'stale' },
+    env: {
+      ...process.env,
+      ROUTER_TEST_FRESHNESS: 'stale',
+      ROUTER_TEST_COVERAGE_FRESHNESS: 'fresh',
+    },
   });
   assert.equal(r.status, 0);
   const out = r.stdout ? JSON.parse(r.stdout) : null;
@@ -148,7 +152,11 @@ test('hook subprocess: missing manifest emits nothing (pass-through)', () => {
   const r = spawnSync(NODE, [HOOK], {
     input: JSON.stringify({ prompt: 'real prompt that is not trivial' }),
     encoding: 'utf8',
-    env: { ...process.env, ROUTER_TEST_FRESHNESS: 'manifest_missing' },
+    env: {
+      ...process.env,
+      ROUTER_TEST_FRESHNESS: 'manifest_missing',
+      ROUTER_TEST_COVERAGE_FRESHNESS: 'fresh',
+    },
   });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
@@ -158,7 +166,11 @@ test('hook subprocess: fresh manifest emits nothing (pass-through)', () => {
   const r = spawnSync(NODE, [HOOK], {
     input: JSON.stringify({ prompt: 'real prompt that is not trivial' }),
     encoding: 'utf8',
-    env: { ...process.env, ROUTER_TEST_FRESHNESS: 'fresh' },
+    env: {
+      ...process.env,
+      ROUTER_TEST_FRESHNESS: 'fresh',
+      ROUTER_TEST_COVERAGE_FRESHNESS: 'fresh',
+    },
   });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
