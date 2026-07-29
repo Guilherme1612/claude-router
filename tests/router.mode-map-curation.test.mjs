@@ -102,7 +102,14 @@ test('design hard negatives never select the sibling route', () => {
 });
 
 test('installed schema-v3 map has no undeclared canonical collision', () => {
-  const diagnostics = validateRouteTargets(fixtureManifest(), loadModeMap());
+  const modeMap = loadModeMap();
+  for (const [id] of design) {
+    const entries = modeMap.entries.filter((entry) => entry.id === id);
+    assert.equal(entries.length, 1, `${id} must have exactly one route`);
+    assert.equal(entries[0].invoke_kind, 'skill');
+    assert.deepEqual(entries[0].recommended_skills, [id]);
+  }
+  const diagnostics = validateRouteTargets(fixtureManifest(), modeMap);
   assert.deepEqual(diagnostics.filter(({ status }) => status === 'pattern_collision'), []);
 });
 
