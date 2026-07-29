@@ -270,7 +270,9 @@ export function auditCoverage({ manifest, modeMap, baseline, routeDiagnostics = 
     .filter(entry => entry.classification === 'gap')
     .map(({ category, id }) => ({ category, id }));
   const patternDiagnostics = (Array.isArray(routeDiagnostics) ? routeDiagnostics : [])
-    .filter(entry => ['invalid_pattern_count', 'invalid_pattern', 'pattern_collision'].includes(entry?.status))
+    .filter(entry => [
+      'invalid_pattern_count', 'invalid_pattern', 'pattern_collision', 'validator_unavailable',
+    ].includes(entry?.status))
     .map(entry => ({
       code: entry.status,
       route: cleanId(entry.id) || '<missing id>',

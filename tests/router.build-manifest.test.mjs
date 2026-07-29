@@ -209,6 +209,16 @@ test('strict coverage fails closed when the route validator is unavailable', () 
   assert.match(r.stderr, /missing-router\.mjs/);
 }));
 
+test('non-strict coverage reports an unavailable route validator', () => withTempDir(root => {
+  const { r, report } = runBuilder(root, {
+    ROUTER_HOOK_PATH: join(root, 'missing-router.mjs'),
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const coverage = JSON.parse(readFileSync(report, 'utf8'));
+  assert.ok(coverage.forward_diagnostics.some(({ code, reason }) =>
+    code === 'validator_unavailable' && reason.includes('missing-router.mjs')));
+}));
+
 test('SAF-04 mode-map size guard accepts exactly 30000 bytes', () => withTempDir(root => {
   const modeMap = join(root, 'mode-map.json');
   writeFileSync(modeMap, 'x'.repeat(30_000));
