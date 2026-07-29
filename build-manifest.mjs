@@ -548,8 +548,15 @@ const coverageModeMap = readJson(MODE_MAP_PATH, null);
 let routeDiagnostics = [];
 try {
   const { validateRouteTargets } = await import(ROUTER_HOOK_PATH);
+  if (typeof validateRouteTargets !== 'function') throw new TypeError('router validator export is unavailable');
   routeDiagnostics = validateRouteTargets(manifest, coverageModeMap);
-} catch { /* installation validation remains fail-open if the hook is unavailable */ }
+} catch (error) {
+  if (STRICT_COVERAGE) throw error;
+  routeDiagnostics = [{
+    status: 'validator_unavailable',
+    reason: error instanceof Error ? error.message : String(error),
+  }];
+}
 const coverage = auditCoverage({
   manifest,
   modeMap: coverageModeMap,

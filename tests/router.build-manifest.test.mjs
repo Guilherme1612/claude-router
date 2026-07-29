@@ -193,6 +193,22 @@ test('COV-01 report and baseline overrides isolate malformed fixture inputs', ()
   assert.ok(parsed.forward_diagnostics.some(item => item.code === 'mode_map_malformed'));
 }));
 
+test('strict coverage fails closed when the route validator is unavailable', () => withTempDir(root => {
+  const out = join(root, 'manifest.json');
+  const r = spawnSync(NODE, [BUILDER, '--strict-coverage'], {
+    env: {
+      ROUTER_CLAUDE_HOME: join(root, '.claude'),
+      ROUTER_MANIFEST_OUT: out,
+      ROUTER_HOOK_PATH: join(root, 'missing-router.mjs'),
+    },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /missing-router\.mjs/);
+}));
+
 test('SAF-04 mode-map size guard accepts exactly 30000 bytes', () => withTempDir(root => {
   const modeMap = join(root, 'mode-map.json');
   writeFileSync(modeMap, 'x'.repeat(30_000));
