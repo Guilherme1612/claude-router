@@ -2637,8 +2637,11 @@ export function inspectDecision(prompt, options = {}) {
       return finish();
     }
 
+    const hasFixtureObjects = Object.hasOwn(opts, 'manifest') || Object.hasOwn(opts, 'modeMap');
     let fresh;
-    if (process.env.ROUTER_TEST_FRESHNESS) {
+    if (hasFixtureObjects) {
+      fresh = { status: 'fresh' };
+    } else if (process.env.ROUTER_TEST_FRESHNESS) {
       const forced = process.env.ROUTER_TEST_FRESHNESS;
       if (forced === 'stale') fresh = { status: 'stale', reminder: STALE_REMINDER };
       else if (forced === 'manifest_missing') fresh = { status: 'manifest_missing' };
@@ -2660,8 +2663,8 @@ export function inspectDecision(prompt, options = {}) {
       return finish();
     }
 
-    const manifest = loadManifest(opts.manifestPath);
-    const modeMap = loadModeMap(opts.modeMapPath);
+    const manifest = Object.hasOwn(opts, 'manifest') ? opts.manifest : loadManifest(opts.manifestPath);
+    const modeMap = Object.hasOwn(opts, 'modeMap') ? opts.modeMap : loadModeMap(opts.modeMapPath);
     state.modeMap = modeMap;
     if (!manifest || !modeMap) {
       state.tier = 'manifest_missing';
@@ -2690,8 +2693,8 @@ export function inspectDecision(prompt, options = {}) {
       return finish();
     }
 
-    const manifestMtime = opts.manifestMtime ?? statSync(opts.manifestPath).mtimeMs;
-    const modeMapMtime = opts.modeMapMtime ?? statSync(opts.modeMapPath).mtimeMs;
+    const manifestMtime = opts.manifestMtime ?? (Object.hasOwn(opts, 'manifest') ? 0 : statSync(opts.manifestPath).mtimeMs);
+    const modeMapMtime = opts.modeMapMtime ?? (Object.hasOwn(opts, 'modeMap') ? 0 : statSync(opts.modeMapPath).mtimeMs);
     const graph = graphifyHeuristic(prompt, opts.cwd);
     const graphMtime = opts.graphMtime ?? readGraphMtime(opts.cwd);
     state.graphify = {
