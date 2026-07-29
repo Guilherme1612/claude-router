@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { readFile, mkdir, rename, writeFile } from 'node:fs/promises';
+import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -420,6 +420,13 @@ export async function runRegistryWatcher(options) {
   const control = setInterval(async () => {
     const request = await readJson(config.control_path);
     if (!request || request.instance_id !== instanceId || request.configuration_fingerprint !== configurationFingerprint) return;
+    if (request.action === 'repair') {
+      await rm(config.control_path, { force: true });
+      await controller.repair();
+      await controller.flush();
+      await publish('ready');
+      return;
+    }
     if (request.action === 'shutdown' || request.action === 'restart') {
       clearInterval(control); clearInterval(heartbeat); stopping = true;
       await controller.close();

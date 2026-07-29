@@ -65,11 +65,13 @@ function assertRelativeImportClosure(root) {
 }
 
 async function waitUntil(predicate, timeoutMs = 2_000) {
-  const deadline = Date.now() + timeoutMs;
-  do {
+  const pollMs = 25;
+  const attempts = Math.ceil(timeoutMs / pollMs);
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     if (predicate()) return;
-    await new Promise(resolve => setTimeout(resolve, 25));
-  } while (Date.now() <= deadline);
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  if (predicate()) return;
   assert.fail(`condition was not met within ${timeoutMs} ms`);
 }
 
@@ -381,10 +383,13 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
       { diagnostics: firstFull.diagnostics, summary: firstFull.summary });
 
     const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
-    process.kill(status.pid, 'SIGTERM');
-    await waitUntil(() => {
-      try { process.kill(status.pid, 0); return false; } catch { return true; }
-    });
+    writeFileSync(join(f.options.claudeRoot, 'router', 'controller', 'request.json'), JSON.stringify({
+      schema_version: 1,
+      action: 'shutdown',
+      instance_id: status.instance_id,
+      configuration_fingerprint: installed.configurationFingerprint,
+    }) + '\n');
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).state === 'stopped');
     const downtimeSkill = join(f.options.codexRoot, 'skills', 'downtime', 'SKILL.md');
     mkdirSync(dirname(downtimeSkill), { recursive: true });
     writeFileSync(downtimeSkill, downtimeBytes);
@@ -422,7 +427,7 @@ test('installed project ancestor repairs initially absent Claude and Codex inven
     ],
   });
   const options = {
-    ...f.options, projectRoot, scopeId: 'fixture', repairMs: 200, contractOverlays,
+    ...f.options, projectRoot, scopeId: 'fixture', repairMs: 200, controlPollMs: 25, contractOverlays,
   };
   try {
     const installed = await installRouter(options);
@@ -435,11 +440,20 @@ test('installed project ancestor repairs initially absent Claude and Codex inven
     const claudeSkill = join(projectRoot, '.claude', 'skills', 'project-live', 'SKILL.md');
     mkdirSync(dirname(claudeSkill), { recursive: true });
     writeFileSync(claudeSkill, claudeBytes);
-    await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-live'));
     const codexSkill = join(projectRoot, '.codex', 'skills', 'project-codex', 'SKILL.md');
     mkdirSync(dirname(codexSkill), { recursive: true });
     writeFileSync(codexSkill, codexBytes);
-    await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('project-codex'));
+    const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
+    writeFileSync(join(f.options.claudeRoot, 'router', 'controller', 'request.json'), JSON.stringify({
+      schema_version: 1,
+      action: 'repair',
+      instance_id: status.instance_id,
+      configuration_fingerprint: installed.configurationFingerprint,
+    }) + '\n');
+    await waitUntil(() => {
+      const candidate = readFileSync(installed.candidatePath, 'utf8');
+      return candidate.includes('project-live') && candidate.includes('project-codex');
+    });
   } finally { await cleanup({ ...f, options }); }
 });
 
