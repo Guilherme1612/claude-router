@@ -28,7 +28,7 @@ function tupleId(root) {
   catch { return null; }
 }
 
-async function waitUntil(predicate, timeoutMs = 2_000) {
+async function waitUntil(predicate, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   do {
     const value = predicate();

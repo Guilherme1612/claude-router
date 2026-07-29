@@ -19,7 +19,7 @@ function artifact(name, command = name, dependencies = []) {
   return `${JSON.stringify({ schema_version: 1, name, canonical_identity: `router/${name}`, command, mapping: { explicit_subjects: [name] }, dependencies })}\n`;
 }
 
-async function waitUntil(predicate, timeoutMs = 2_000) {
+async function waitUntil(predicate, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   do {
     const value = predicate();

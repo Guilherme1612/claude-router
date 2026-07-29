@@ -157,6 +157,46 @@ test('SAF-02: routeTargetsExist returns true when all targets are present (norma
   assert.equal(routeTargetsExist(route, manifest), true);
 });
 
+test('SAF-02: routeTargetsExist rejects a blocked dispatch agent', () => {
+  const manifest = fakeManifest({ commands: ['gsd-debug'] });
+  manifest.agents = [{
+    name: 'blocked-reviewer',
+    requires_mcp_not_in_manifest: ['missing-mcp'],
+  }];
+  const route = {
+    invoke_kind: 'agent', id: 'gsd-debug', mode: 'gsd-debug',
+    recommended_skills: [], recommended_agents: ['blocked-reviewer'],
+  };
+  assert.equal(routeTargetsExist(route, manifest), false);
+});
+
+test('SAF-02: routeTargetsExist accepts an intentional mode-map route alias', () => {
+  const manifest = fakeManifest();
+  const modeMap = {
+    entries: [
+      { id: 'alias', mode: 'canonical-route' },
+      { id: 'canonical-route', mode: 'canonical-route' },
+    ],
+  };
+  const route = {
+    invoke_kind: 'slash', id: 'alias', mode: 'canonical-route',
+    recommended_skills: [], recommended_agents: [],
+  };
+  assert.equal(routeTargetsExist(route, manifest), false);
+  assert.equal(routeTargetsExist(route, manifest, modeMap), true);
+});
+
+test('SAF-02: routeTargetsExist accepts an intentional schema route', () => {
+  const manifest = fakeManifest();
+  const modeMap = { schema_version: 1, entries: [{ id: 'schema-route', mode: 'schema-route' }] };
+  const route = {
+    invoke_kind: 'slash', id: 'schema-route', mode: 'schema-route',
+    recommended_skills: [], recommended_agents: [],
+  };
+  assert.equal(routeTargetsExist(route, manifest), false);
+  assert.equal(routeTargetsExist(route, manifest, modeMap), true);
+});
+
 test('SAF-04 boundary: capRouteRender on exactly 3 skills and 2 agents does NOT set _render_cap_truncated', () => {
   const route = { recommended_skills: ['s1', 's2', 's3'], recommended_agents: ['a1', 'a2'] };
   const capped = capRouteRender(route);

@@ -152,12 +152,13 @@ test('GRD-02: impeccable (scope:project) never in a global route (fixture)', () 
   assert.ok(names.includes('systematic-debugging'), 'global skill must remain');
 });
 
-test('GRD-02: against real manifest, impeccable not in corpus', () => {
+test('GRD-02: real manifest excludes non-global skills from corpus', () => {
   const m = realManifest();
   const corpus = buildCorpus(m);
-  const names = corpus.map((c) => c.name);
-  assert.ok(!names.includes('impeccable'),
-    'impeccable (project-scoped / agents-store-not-symlinked) must never be in the global auto-dispatch pool');
+  assert.ok(!corpus.some(({ entry }) => (
+    entry.scope === 'project'
+    || entry.scope === 'agents-store (not globally symlinked)'
+  )), 'project-scoped and non-symlinked agent-store skills must never enter the global auto-dispatch pool');
 });
 
 // --- GRD-03: ralph two-gate (positive, negative, quote-don't-synthesize) ---
