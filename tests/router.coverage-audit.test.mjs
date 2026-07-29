@@ -95,6 +95,7 @@ test('allows only explicit present reverse-gap policy acknowledgements', () => {
     entries: [
       { category: 'skills', id: 'bm25-only', classification: 'expected_bm25_only', reason: 'lexical fallback is intentional' },
       { category: 'agents', id: 'safe-agent', classification: 'expected_phase_internal', reason: 'phase worker only' },
+      { category: 'hooks', id: 'prompt-hook', classification: 'expected_phase_internal', reason: 'must be derived' },
       { category: 'commands', id: 'missing', classification: 'expected_bm25_only', reason: 'stale' },
       { category: 'commands', id: 'route-id', classification: 'gap', reason: 'disallowed' },
       { category: 'skills', id: 'bm25-only', classification: 'expected_bm25_only', reason: 'duplicate' },
@@ -105,10 +106,13 @@ test('allows only explicit present reverse-gap policy acknowledgements', () => {
   assert.equal(record(report, 'skills', 'bm25-only').classification, 'gap',
     'duplicate baseline identities must never acknowledge a gap');
   assert.equal(record(report, 'agents', 'safe-agent').coverage_status, 'mapped',
-    'mapping takes precedence over a baseline acknowledgement');
+    'mapped capabilities cannot be pre-authorized');
+  assert.equal(record(report, 'hooks', 'prompt-hook').classification, 'expected_hook',
+    'manifest-derived classifications cannot be pre-authorized');
   assert.equal(record(report, 'commands', 'route-id').classification, 'gap');
   assert.deepEqual(report.baseline_diagnostics.map(item => item.code), [
-    'baseline_disallowed_classification', 'baseline_duplicate', 'baseline_stale',
+    'baseline_disallowed_classification', 'baseline_duplicate',
+    'baseline_stale', 'baseline_stale', 'baseline_stale',
   ]);
 });
 

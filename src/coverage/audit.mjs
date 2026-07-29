@@ -120,7 +120,7 @@ function typedMappings(modeMap, indexes) {
   return { mapped, diagnostics };
 }
 
-function baselinePolicy(baseline, rows) {
+function baselinePolicy(baseline, rows, eligibleGaps) {
   const accepted = new Map();
   const diagnostics = [];
   if (!baseline || baseline.schema_version !== 1 || !Array.isArray(baseline.entries)) {
@@ -153,6 +153,11 @@ function baselinePolicy(baseline, rows) {
       diagnostics.push({ code: 'baseline_stale', category, id, reason: 'capability is absent from the manifest' });
       continue;
     }
+    if (!eligibleGaps.has(key)) {
+      diagnostics.push({ code: 'baseline_stale', category, id,
+        reason: 'capability is not a current reverse coverage gap' });
+      continue;
+    }
     accepted.set(key, {
       classification: entry.classification,
       reason: String(entry.reason).trim(),
@@ -171,7 +176,14 @@ export function auditCoverage({ manifest, modeMap, baseline } = {}) {
   const rows = capabilities(manifest);
   const indexes = targetIndexes(rows);
   const routes = typedMappings(modeMap, indexes);
-  const policy = baselinePolicy(baseline, rows);
+  const eligibleGaps = new Set(rows
+    .filter(row =>
+      row.category !== 'hooks'
+      && !(row.category === 'agents' && row.missingMcp.length)
+      && row.scope !== 'project'
+      && !mapped(row, routes.mapped))
+    .map(row => identityKey(row.category, row.id)));
+  const policy = baselinePolicy(baseline, rows, eligibleGaps);
 
   const records = rows.map(row => {
     if (row.category === 'hooks') return {
