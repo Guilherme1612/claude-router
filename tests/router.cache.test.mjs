@@ -43,6 +43,8 @@ test('cacheKey: changing surfaceMtime produces a different key (surface profile 
   assert.notEqual(a, b);
 });
 
+// SAF-01: cacheKey folds weightsMtime (7th positional arg) so a weights.json
+// edit invalidates stale cached routes. Parallel to the surfaceMtime test above.
 test('cacheKey: changing weightsMtime produces a different key (SAF-01 weights-mtime invalidation)', () => {
   const a = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5000);
   const b = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5001);
