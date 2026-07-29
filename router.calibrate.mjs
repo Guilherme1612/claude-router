@@ -140,6 +140,8 @@ function dryRun(prompt, manifest, modeMap, cwd = process.cwd(), weights = null) 
     modeMapPath: MODE_MAP,
     weightsPath: join(ROUTER_DIR, '__calibration-no-file-weights.json'),
     cachePath: join(ROUTER_DIR, '__calibration-no-cache-writes.json'),
+    manifest,
+    modeMap,
     weights,
   });
   const top3 = (out.candidates || []).slice(0, 3).map((s) => ({
@@ -163,6 +165,162 @@ function dryRun(prompt, manifest, modeMap, cwd = process.cwd(), weights = null) 
   };
 }
 
+const thresholdTier = (record, thresholds) => {
+  if (record.score < thresholds.T_low) return 'low';
+  if (record.margin < thresholds.M) return record.canonical === false ? 'low' : 'medium';
+  return record.score >= thresholds.T_high ? 'high' : 'medium';
+};
+
+const uniqueSorted = (values) => [...new Set(values.filter(Number.isFinite))].sort((a, b) => a - b);
+
+export function enumerateThresholdCandidates(records, current) {
+  const breakpoints = (values) => values.flatMap((value) => [value, Number(Math.min(1, value + 0.001).toFixed(3))]);
+  const highs = uniqueSorted([current.T_high, ...breakpoints(records.map(({ score }) => score))]);
+  const lows = uniqueSorted([current.T_low, ...breakpoints(records.map(({ score }) => score))]);
+  const margins = uniqueSorted([current.M, ...breakpoints(records.map(({ margin }) => margin))]);
+  const candidates = [];
+  for (const T_high of highs) {
+    for (const T_low of lows) {
+      if (T_low > T_high) continue;
+      for (const M of margins) candidates.push({ T_high, T_low, M });
+    }
+  }
+  return candidates;
+}
+
+function evaluateThresholds(records, thresholds) {
+  const rows = records.map((record) => ({ ...record, actual_tier: thresholdTier(record, thresholds) }));
+  return {
+    rows,
+    wrong_high: rows.filter(({ correct, actual_tier }) => !correct && actual_tier === 'high').length,
+    correct_routes: rows.filter(({ correct }) => correct).length,
+    correct_tiers: rows.filter(({ expected_tier, actual_tier }) => expected_tier === actual_tier).length,
+    correct_high: rows.filter(({ correct, actual_tier }) => correct && actual_tier === 'high').length,
+    misses: rows.filter(({ correct, actual_tier }) => !correct || (correct && actual_tier === 'low')).length,
+  };
+}
+
+const betterObjective = (a, b) => a.some((value, index) =>
+  value !== b[index] && a.slice(0, index).every((prior, priorIndex) => prior === b[priorIndex])
+    ? value > b[index]
+    : false);
+
+function affectedSamples(records, thresholds, candidates, key) {
+  const selectedTiers = records.map((record) => thresholdTier(record, thresholds));
+  const alternatives = uniqueSorted(candidates.map((candidate) => candidate[key])).filter((value) => value !== thresholds[key]);
+  return records
+    .filter((record, index) => alternatives.some((value) =>
+      thresholdTier(record, { ...thresholds, [key]: value }) !== selectedTiers[index]))
+    .map(({ id }) => id);
+}
+
+export function selectThresholds(records, current) {
+  const candidates = enumerateThresholdCandidates(records, current);
+  let selected = null;
+  for (const thresholds of candidates) {
+    const metrics = evaluateThresholds(records, thresholds);
+    if (metrics.wrong_high) continue;
+    const objective = [
+      -metrics.wrong_high,
+      metrics.correct_routes,
+      metrics.correct_tiers,
+      metrics.correct_high,
+      -metrics.misses,
+      -thresholds.T_high,
+      -thresholds.T_low,
+      -thresholds.M,
+    ];
+    if (!selected || betterObjective(objective, selected.objective)) {
+      selected = { thresholds, metrics, objective };
+    }
+  }
+  if (!selected) throw new Error('no zero-wrong-high threshold candidate');
+  selected.affected_samples = Object.fromEntries(
+    ['T_high', 'T_low', 'M'].map((key) => [key, affectedSamples(records, selected.thresholds, candidates, key)]),
+  );
+  selected.supported_boundaries = Object.entries(selected.affected_samples)
+    .filter(([, ids]) => ids.length > 0)
+    .map(([key]) => key);
+  selected.distance_from_current = ['T_high', 'T_low', 'M']
+    .reduce((sum, key) => sum + Math.abs(selected.thresholds[key] - current[key]), 0);
+  return selected;
+}
+
+export function leaveOneOutThresholds(records, current) {
+  const selections = records.map((omitted, index) => ({
+    omitted: omitted.id,
+    thresholds: selectThresholds(records.filter((_, recordIndex) => recordIndex !== index), current).thresholds,
+  }));
+  const ranges = {};
+  const frequency = {};
+  for (const key of ['T_high', 'T_low', 'M']) {
+    const values = selections.map(({ thresholds }) => thresholds[key]);
+    ranges[key] = { min: Math.min(...values), max: Math.max(...values) };
+    frequency[key] = Object.fromEntries(uniqueSorted(values).map((value) => [
+      String(value),
+      values.filter((candidate) => candidate === value).length,
+    ]));
+  }
+  return { ranges, frequency, selections };
+}
+
+const boundaryFixture = (task, thresholds) => {
+  const top = 'gsd-ship';
+  const runner = 'image-to-code';
+  return {
+    manifest: {
+      commands: [],
+      skills: [
+        { id: top, name: top, description: task.prompt },
+        { id: runner, name: runner, description: task.prompt },
+      ],
+      plugin_skills: [],
+      agents_store_skills: [],
+      agents: [],
+    },
+    modeMap: {
+      schema_version: 3,
+      thresholds,
+      entries: [top, runner].map((id) => ({
+        id,
+        mode: id,
+        invoke_kind: 'skill',
+        signal_patterns: [task.prompt],
+        recommended_skills: [id],
+        recommended_agents: [],
+      })),
+    },
+    weights: {
+      schema_version: 2,
+      blend: 1,
+      weights: {
+        [top]: { score: task.boundary.score },
+        [runner]: { score: task.boundary.score - task.boundary.margin },
+      },
+    },
+  };
+};
+
+export function phase29CalibrationRecords(tasks, manifest, modeMap) {
+  return tasks.filter(({ phase29 }) => phase29 === true).map((task) => {
+    const fixture = task.boundary ? boundaryFixture(task, modeMap.thresholds) : { manifest, modeMap, weights: null };
+    const result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || process.cwd(), fixture.weights);
+    const actualRoute = result.route?.id || result.route?.mode || null;
+    const expectedRoute = task.right.mode?.replace(/^\//, '') || null;
+    return {
+      id: task.id,
+      score: result.top3[0]?.norm || 0,
+      margin: result.margin,
+      correct: task.right.status === 'pass_through' ? result.route == null || result.tier === 'low' : actualRoute === expectedRoute,
+      expected_tier: task.right.tier,
+      canonical: actualRoute != null,
+      actual_route: actualRoute,
+      expected_route: expectedRoute,
+      classification: task.phase29_classification,
+    };
+  });
+}
+
 // Compare the dry-run result against the right-pick.
 function evaluate(task, result) {
   const right = task.right;
@@ -184,7 +342,7 @@ function evaluate(task, result) {
   // ralph two-gate: if guards dropped the route (no_verifiable_done_criteria),
   // that's a mismatch UNLESS the right-pick also expects the fallback.
   const rightMode = normMode(right.mode);
-  const gotMode = normMode(route.mode);
+  const gotMode = normMode(route.mode || (rightMode ? route.id : null));
   // Accept secondary_mode as an alternate (task #9: gsd-secure-phase OR review-pr)
   const altMode = right.secondary_mode ? normMode(right.secondary_mode) : null;
   const modeOk = gotMode === rightMode || (altMode != null && gotMode === altMode);
@@ -307,7 +465,7 @@ if (isMain()) {
   }
 
   const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = tasks.filter((t) => !t.phase29 && !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
   const codebaseCount = tasks.filter((t) => t.codebase === true).length;
   const evolutionCount = tasks.filter((t) => t.evolution === true).length;
   const mappingCount = tasks.filter((t) => t.phase14_mapping === true).length;
@@ -372,12 +530,13 @@ if (isMain()) {
       }
       evolutionOutcomes.push({ id: task.id, outcome: evo.detail.outcome_actual, ok });
     } else {
-      result = dryRun(task.prompt, manifest, modeMap, task.cwd || process.cwd());
+      const fixture = task.boundary ? boundaryFixture(task, modeMap.thresholds) : { manifest, modeMap, weights: null };
+      result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || process.cwd(), fixture.weights);
       const ev = evaluate(task, result);
       ok = ev.ok;
       detail = ev.detail;
       if (ok) rightCount++;
-      if (ok && !task.codebase && !task.evolution && !task.phase14_mapping && !String(task?.right?.edge || '').includes('COV-')) originalRightCount++;
+      if (ok && !task.phase29 && !task.codebase && !task.evolution && !task.phase14_mapping && !String(task?.right?.edge || '').includes('COV-')) originalRightCount++;
       if (ok && task.codebase === true) codebaseRightCount++;
     }
     const taxonomy = ok ? null : classifyCalibrationMiss(task, result, { ok, detail });
@@ -452,6 +611,14 @@ if (isMain()) {
     }
   }
   console.log(`Thresholds: T_high=${modeMap.thresholds.T_high} T_low=${modeMap.thresholds.T_low} M=${modeMap.thresholds.M}`);
+
+  const phase29Records = phase29CalibrationRecords(tasks, manifest, modeMap);
+  const selection = selectThresholds(phase29Records, modeMap.thresholds);
+  const sensitivity = leaveOneOutThresholds(phase29Records, modeMap.thresholds);
+  console.log(`Selected thresholds: ${JSON.stringify(selection.thresholds)}`);
+  console.log(`Affected samples: ${JSON.stringify(selection.affected_samples)}`);
+  console.log(`Leave-one-out ranges: ${JSON.stringify(sensitivity.ranges)}`);
+  console.log(`Leave-one-out frequencies: ${JSON.stringify(sensitivity.frequency)}`);
 
   process.exit(rightCount >= passThreshold && originalRightCount === originalCount && codebaseRightCount >= codebaseTarget ? 0 : 1);
 }

@@ -75,9 +75,9 @@ test('selection follows the documented objective and deterministic stable tie-br
     [
       -a.metrics.wrong_high,
       a.metrics.correct_routes,
+      a.metrics.correct_tiers,
       a.metrics.correct_high,
       -a.metrics.misses,
-      -a.distance_from_current,
     ],
   );
 });
@@ -88,6 +88,18 @@ test('labeled boundaries independently identify T_high, T_low, and M', () => {
   assert.ok(selected.affected_samples.T_high.length > 0);
   assert.ok(selected.affected_samples.T_low.length > 0);
   assert.ok(selected.affected_samples.M.length > 0);
+});
+
+test('real Phase 29 corpus is inspected through supplied objects and reselects every constant', () => {
+  const manifest = C.loadManifest();
+  const modeMap = C.loadModeMap();
+  const calibration = C.phase29CalibrationRecords(tasks, manifest, modeMap);
+  const selected = C.selectThresholds(calibration, modeMap.thresholds);
+
+  assert.equal(calibration.length, 26);
+  assert.equal(selected.metrics.wrong_high, 0);
+  assert.deepEqual(selected.thresholds, { T_high: 0.591, T_low: 0.291, M: 0.191 });
+  assert.deepEqual(new Set(selected.supported_boundaries), new Set(['T_high', 'T_low', 'M']));
 });
 
 test('leave-one-out sensitivity is deterministic, reports ranges and frequency, and is pure', () => {

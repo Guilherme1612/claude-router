@@ -596,54 +596,54 @@
     "prompt": "generate a new illustration for the page",
     "phase29": true,
     "phase29_classification": "negative",
-    "right": { "mode": null, "skills": [], "agents": [], "tier": "low", "status": "pass_through", "edge": "Phase 29 image-to-code family hard negative" }
+    "right": { "mode": "/imagegen-frontend-web", "skills": ["imagegen-frontend-web"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 image-to-code family hard negative" }
   },
   {
     "id": 53,
-    "prompt": "boundary fixture low score",
+    "prompt": "prepare the branch and pull request for release below the low confidence boundary",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.29, "margin": 0.29 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "low", "status": "route", "edge": "Phase 29 T_low below boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "low", "status": "route", "edge": "Phase 29 T_low below boundary" }
   },
   {
     "id": 54,
-    "prompt": "boundary fixture medium score",
+    "prompt": "prepare the branch and pull request for release at the low confidence boundary",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.3, "margin": 0.2 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_low at boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_low at boundary" }
   },
   {
     "id": 55,
-    "prompt": "boundary fixture medium confidence",
+    "prompt": "prepare the branch and pull request for release below the high confidence boundary",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.59, "margin": 0.39 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_high below boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_high below boundary" }
   },
   {
     "id": 56,
-    "prompt": "boundary fixture high confidence",
+    "prompt": "prepare the branch and pull request for release at the high confidence boundary",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.6, "margin": 0.4 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 T_high at boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 T_high at boundary" }
   },
   {
     "id": 57,
-    "prompt": "boundary fixture near tie",
+    "prompt": "prepare the branch and pull request for release below the decisive confidence margin",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.9, "margin": 0.19 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 M below boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 M below boundary" }
   },
   {
     "id": 58,
-    "prompt": "boundary fixture decisive margin",
+    "prompt": "prepare the branch and pull request for release at the decisive confidence margin",
     "phase29": true,
     "phase29_classification": "boundary",
     "boundary": { "score": 0.9, "margin": 0.2 },
-    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 M at boundary" }
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 M at boundary" }
   }
 ]
