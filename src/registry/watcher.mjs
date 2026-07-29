@@ -142,6 +142,7 @@ export function createRegistryWatcher(options) {
   const diff = options.diff || diffFingerprintTrees;
   const reconcile = options.reconcile || (async () => {});
   const writeState = options.writeState || (state => saveFingerprintState(options.statePath, state));
+  const onReconciled = options.onReconciled;
   const onError = options.onError || (() => {});
   const watchers = [];
   const dirty = new Set();
@@ -252,6 +253,7 @@ export function createRegistryWatcher(options) {
           ? structuredClone(result.semanticSnapshot)
           : operational.last_complete_semantic_snapshot,
       });
+      if (onReconciled) await onReconciled(snapshotOperational());
     } catch (error) {
       setOperational('failed', {
         reason_code: error?.code || 'reconciliation_failed',
@@ -400,6 +402,7 @@ export async function runRegistryWatcher(options) {
     maxLatencyMs: config.max_latency_ms,
     repairMs: config.repair_ms,
     reconcile,
+    onReconciled: () => publish('ready'),
     onError: async error => {
       await atomicJson(config.status_path, {
         schema_version: 1, state: 'error', instance_id: instanceId, pid: process.pid,

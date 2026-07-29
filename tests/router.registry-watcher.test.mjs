@@ -135,6 +135,17 @@ test('failed reconcile retains the last valid state and reports the error', asyn
   await h.controller.close();
 });
 
+test('successful reconciliation notifies its status publisher immediately', async () => {
+  const completed = [];
+  const h = harness({ onReconciled(state) { completed.push(state); } });
+  await h.controller.ready;
+  h.callbacks.get('/virtual/claude')('change', 'live.md');
+  await h.scheduler.advance(250);
+  assert.deepEqual(completed.map(state => state.trigger), ['startup', 'filesystem-event']);
+  assert.equal(completed.at(-1).state, 'current');
+  await h.controller.close();
+});
+
 test('[phase21-red:convergence] watcher exposes complete-baseline authority and four-state operational inspection', async () => {
   const h = harness();
   assert.equal(h.controller.inspect().state, 'reconciling');
