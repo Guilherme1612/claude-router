@@ -10,7 +10,15 @@ import { tmpdir, homedir } from 'node:os';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const mod = await import(HOOK);
-const { cacheKey, routeTargetsExist, capRouteRender, formatInjection } = mod;
+const {
+  cacheKey,
+  routeTargetsExist,
+  capRouteRender,
+  formatInjection,
+  inspectDecision,
+  writeCache,
+  saveCache,
+} = mod;
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-mutation-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -227,3 +235,109 @@ test('SAF-04: _render_cap_truncated is stripped from the injected route before f
   const out = formatInjection(capped, 'fix bug', 'abcd1234');
   assert.ok(!/_render_cap_truncated/.test(out), 'internal flag leaked into injection output');
 });
+
+test('SAF-01 integration: a weights mtime change prevents the old cached route from being served', () => withTempDir(dir => {
+  const cachePath = join(dir, 'cache.json');
+  const manifestPath = join(dir, 'manifest.json');
+  writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
+  const staleSig = cacheKey('fix cached bug', [], 1, 2, 0, 0, 10);
+  const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, staleSig, {
+    id: 'debug',
+    mode: 'gsd-debug',
+    invoke_kind: 'slash',
+    tier: 'high',
+    recommended_skills: [],
+    recommended_agents: [],
+    args_hint: 'POISONED-CACHE-ENTRY',
+  });
+  saveCache(cache, cachePath);
+
+  const out = inspectDecision('fix cached bug', {
+    cachePath,
+    manifestPath,
+    modeMapMtime: 1,
+    manifestMtime: 2,
+    graphMtime: 0,
+    surfaceMtime: 0,
+    weightsMtime: 11,
+    mutateCache: false,
+    logTelemetry: false,
+  });
+
+  assert.equal(out.cache.status, 'miss');
+  assert.equal(out.cache.scoring_skipped, false);
+  assert.doesNotMatch(out.final_injected_context, /POISONED-CACHE-ENTRY/);
+}));
+
+test('SAF-02 integration: a poisoned cached target is recomputed and never injected', () => withTempDir(dir => {
+  const cachePath = join(dir, 'cache.json');
+  const manifestPath = join(dir, 'manifest.json');
+  writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
+  const sig = cacheKey('fix poisoned route', [], 1, 2, 0, 0, 0);
+  const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
+    id: 'debug',
+    mode: 'gsd-debug',
+    invoke_kind: 'slash',
+    tier: 'high',
+    recommended_skills: ['ghost-skill'],
+    recommended_agents: [],
+  });
+  saveCache(cache, cachePath);
+
+  const out = inspectDecision('fix poisoned route', {
+    cachePath,
+    manifestPath,
+    modeMapMtime: 1,
+    manifestMtime: 2,
+    graphMtime: 0,
+    surfaceMtime: 0,
+    weightsMtime: 0,
+    mutateCache: false,
+    logTelemetry: false,
+  });
+
+  assert.equal(out.cache.status, 'stale_target_recompute');
+  assert.equal(out.cache.scoring_skipped, false);
+  assert.ok(out.decision_trace.includes('cache:stale_target'));
+  assert.doesNotMatch(out.final_injected_context, /ghost-skill/);
+}));
+
+test('SAF-04 integration: an oversized cached route is capped by the production render path', () => withTempDir(dir => {
+  const cachePath = join(dir, 'cache.json');
+  const manifestPath = join(dir, 'manifest.json');
+  const skills = ['s1', 's2', 's3', 's4'];
+  const agents = ['a1', 'a2', 'a3'];
+  writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'], skills, agents })));
+  const sig = cacheKey('fix oversized route', [], 1, 2, 0, 0, 0);
+  const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
+    id: 'debug',
+    mode: 'gsd-debug',
+    invoke_kind: 'slash',
+    tier: 'high',
+    recommended_skills: skills,
+    recommended_agents: agents,
+  });
+  saveCache(cache, cachePath);
+
+  const out = inspectDecision('fix oversized route', {
+    cachePath,
+    manifestPath,
+    modeMapMtime: 1,
+    manifestMtime: 2,
+    graphMtime: 0,
+    surfaceMtime: 0,
+    weightsMtime: 0,
+    mutateCache: false,
+    logTelemetry: false,
+  });
+
+  assert.equal(out.cache.status, 'hit');
+  assert.ok(out.decision_trace.includes('render:cap_truncated'));
+  assert.match(out.final_injected_context, /s1/);
+  assert.match(out.final_injected_context, /s2/);
+  assert.match(out.final_injected_context, /s3/);
+  assert.doesNotMatch(out.final_injected_context, /s4/);
+  assert.match(out.final_injected_context, /a1/);
+  assert.match(out.final_injected_context, /a2/);
+  assert.doesNotMatch(out.final_injected_context, /a3|_render_cap_truncated/);
+}));
