@@ -15,7 +15,7 @@ import { safeFixtureContractOverlays } from './helpers/test-mode-seam.mjs';
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const INSTALLER = join(REPO_ROOT, 'install-router.mjs');
 
-function fixture({ withSettings = true } = {}) {
+function fixture({ withSettings = true, trackControllers = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-lifecycle-'));
   const claudeRoot = join(root, '.claude');
   const codexRoot = join(root, '.codex');
@@ -23,19 +23,53 @@ function fixture({ withSettings = true } = {}) {
   const settingsPath = join(claudeRoot, 'settings.json');
   const routerPath = join(claudeRoot, 'hooks', 'router.mjs');
   const manifestPath = join(claudeRoot, 'router', 'install-manifest.json');
+  const controllerChildren = [];
   writeFileSync(sourceRouter, 'export const router = true;\n');
   if (withSettings) {
     mkdirSync(claudeRoot, { recursive: true });
     writeFileSync(settingsPath, '{\n  "hooks": {},\n  "theme": "dark"\n}\n');
   }
-  return {
-    root, settingsPath, routerPath, manifestPath,
-    options: { claudeRoot, codexRoot, sourceRouter, settingsPath, routerPath, manifestPath, nodeBinary: process.execPath },
+  const options = {
+    claudeRoot, codexRoot, sourceRouter, settingsPath, routerPath, manifestPath,
+    nodeBinary: process.execPath,
   };
+  if (trackControllers) {
+    options.launchController = (binary, args, spawnOptions) => {
+      const child = spawn(binary, args, spawnOptions);
+      child.unref = () => child;
+      controllerChildren.push(child);
+      return child;
+    };
+  }
+  return {
+    root, settingsPath, routerPath, manifestPath, controllerChildren, options,
+  };
+}
+
+async function stopFixtureControllers(f) {
+  await Promise.all((f.controllerChildren || []).map(async child => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    await new Promise((resolveExit, rejectExit) => {
+      const timeout = setTimeout(
+        () => rejectExit(new Error(`fixture controller ${child.pid} did not exit after SIGTERM`)),
+        5_000,
+      );
+      child.once('exit', () => {
+        clearTimeout(timeout);
+        resolveExit();
+      });
+      child.once('error', error => {
+        clearTimeout(timeout);
+        rejectExit(error);
+      });
+      child.kill('SIGTERM');
+    });
+  }));
 }
 
 async function cleanup(f) {
   try { await uninstallRouter(f.options); } catch { /* fixture may be intentionally corrupt */ }
+  await stopFixtureControllers(f);
   rmSync(f.root, { recursive: true, force: true });
 }
 
@@ -302,7 +336,7 @@ test('uninstall retains a user-modified owned file', async () => {
 });
 
 test('malformed ownership manifest fails closed without mutations', async () => {
-  const f = fixture();
+  const f = fixture({ trackControllers: true });
   try {
     await installRouter(f.options);
     const settingsBefore = readFileSync(f.settingsPath, 'utf8');
