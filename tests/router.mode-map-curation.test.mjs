@@ -83,6 +83,29 @@ test('lifecycle hard negatives never select the sibling route', () => {
   }
 });
 
+test('all ten design outcome prompts route through supplied neutral fixture objects', () => {
+  const manifest = fixtureManifest();
+  const modeMap = fixtureModeMap();
+  for (const [id, prompt] of design) {
+    const out = inspect(prompt, manifest, modeMap);
+    assert.equal(out.selected_route?.id ?? out.selected_route?.mode, id, `${id}: ${prompt}`);
+  }
+});
+
+test('design hard negatives never select the sibling route', () => {
+  const manifest = fixtureManifest();
+  const modeMap = fixtureModeMap();
+  for (const [id, , negative] of design) {
+    const out = inspect(negative, manifest, modeMap);
+    assert.notEqual(out.selected_route?.id ?? out.selected_route?.mode, id, `${id} must reject: ${negative}`);
+  }
+});
+
+test('installed schema-v3 map has no undeclared canonical collision', () => {
+  const diagnostics = validateRouteTargets(fixtureManifest(), loadModeMap());
+  assert.deepEqual(diagnostics.filter(({ status }) => status === 'pattern_collision'), []);
+});
+
 test('schema-v3 map caps every entry at six output-anchored patterns', () => {
   const modeMap = loadModeMap();
   assert.equal(modeMap.schema_version, 3);
