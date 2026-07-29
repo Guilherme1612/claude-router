@@ -13,6 +13,7 @@ const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
 
 const EXPECTED_REMINDER = '<!-- router: manifest may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
+const EXPECTED_COVERAGE_REMINDER = '<!-- router: coverage report may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-freshness-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -93,6 +94,36 @@ test('checkFreshness: default args use real ~/.claude/router/ paths (smoke)', as
   assert.ok(['fresh', 'stale', 'manifest_missing', 'error'].includes(r.status));
 });
 
+test('checkCoverageFreshness: missing, older, equal, newer, and stat errors are fail-open', async () => {
+  const m = await importHook();
+  withTempDir((dir) => {
+    const manifest = join(dir, 'manifest.json');
+    const report = join(dir, 'coverage-report.json');
+    writeFileSync(manifest, '{}');
+
+    assert.deepEqual(m.checkCoverageFreshness(manifest, report), {
+      status: 'missing', reminder: EXPECTED_COVERAGE_REMINDER,
+    });
+
+    writeFileSync(report, '{}');
+    const now = Date.now();
+    utimesSync(report, new Date(now - 10_000), new Date(now - 10_000));
+    utimesSync(manifest, new Date(now), new Date(now));
+    assert.deepEqual(m.checkCoverageFreshness(manifest, report), {
+      status: 'stale', reminder: EXPECTED_COVERAGE_REMINDER,
+    });
+
+    utimesSync(report, new Date(now), new Date(now));
+    assert.deepEqual(m.checkCoverageFreshness(manifest, report), { status: 'fresh' });
+    utimesSync(report, new Date(now + 10_000), new Date(now + 10_000));
+    assert.deepEqual(m.checkCoverageFreshness(manifest, report), { status: 'fresh' });
+
+    assert.deepEqual(m.checkCoverageFreshness(join(dir, 'missing-manifest'), report), {
+      status: 'error', reminder: EXPECTED_COVERAGE_REMINDER,
+    });
+  });
+});
+
 function runHook(stdinStr) {
   const r = spawnSync(NODE, [HOOK], { input: stdinStr, encoding: 'utf8', env: process.env });
   return { status: r.status, stdout: r.stdout ?? '' };
@@ -131,4 +162,22 @@ test('hook subprocess: fresh manifest emits nothing (pass-through)', () => {
   });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
+});
+
+test('hook subprocess: stale coverage appends one reminder without blocking route context', () => {
+  const r = spawnSync(NODE, [HOOK], {
+    input: JSON.stringify({ prompt: 'debug this failing authentication test and find the root cause' }),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROUTER_TEST_FRESHNESS: 'fresh',
+      ROUTER_TEST_COVERAGE_FRESHNESS: 'stale',
+    },
+  });
+  assert.equal(r.status, 0);
+  const out = JSON.parse(r.stdout);
+  const context = out.hookSpecificOutput.additionalContext;
+  assert.match(context, /router-inject/);
+  assert.equal(context.match(/coverage report may be stale/g)?.length, 1);
+  assert.equal(out.decision, undefined);
 });
