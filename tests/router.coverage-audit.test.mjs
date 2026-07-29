@@ -303,6 +303,39 @@ test('malformed optional inputs stay visible and acknowledge nothing', () => {
   assert.ok(report.unacknowledged_gaps.length > 0);
 });
 
+test('canonical pattern diagnostics pass through coverage audit unchanged', () => {
+  const route = {
+    schema_version: 3,
+    entries: [
+      { id: 'too-many', invoke_kind: 'skill', signal_patterns: ['a', 'b', 'c', 'd', 'e', 'f', 'g'],
+        recommended_skills: ['shared'], recommended_agents: [] },
+      { id: 'bad-kind', invoke_kind: 'skill', signal_patterns: [{ kind: 'regex', value: 'build' }],
+        recommended_skills: ['shared'], recommended_agents: [] },
+      { id: 'collision-a', invoke_kind: 'skill', signal_patterns: ['same signal'],
+        recommended_skills: ['shared'], recommended_agents: [] },
+      { id: 'collision-b', invoke_kind: 'skill', signal_patterns: [{ kind: 'contains', value: 'same signal' }],
+        recommended_skills: ['shared'], recommended_agents: [] },
+    ],
+  };
+  const routeDiagnostics = validateRouteTargets(manifest(), route);
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+    routeDiagnostics,
+  });
+
+  assert.deepEqual(
+    report.forward_diagnostics
+      .filter(({ code }) => code.startsWith('invalid_pattern') || code === 'pattern_collision')
+      .map(({ code, route, target, reason }) => ({ code, route, target, reason })),
+    routeDiagnostics
+      .filter(({ status }) => status.startsWith('invalid_pattern') || status === 'pattern_collision')
+      .map(({ status, id, target, reason }) => ({ code: status, route: id, target, reason }))
+      .sort((a, b) => a.code.localeCompare(b.code) || a.route.localeCompare(b.route)),
+  );
+});
+
 test('equivalent inputs produce byte-identical sorted JSON-ready reports without private fields', () => {
   const first = auditCoverage({ manifest: manifest(), modeMap: modeMap(), baseline: { schema_version: 1, entries: [] } });
   const shuffled = manifest();

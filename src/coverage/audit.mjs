@@ -222,7 +222,7 @@ function mapped(row, mappings) {
   return row.category === 'agents' && mappings.agent.has(row.id);
 }
 
-export function auditCoverage({ manifest, modeMap, baseline } = {}) {
+export function auditCoverage({ manifest, modeMap, baseline, routeDiagnostics = [] } = {}) {
   const rows = capabilities(manifest);
   const indexes = targetIndexes(rows);
   const routes = typedMappings(modeMap, indexes);
@@ -269,7 +269,16 @@ export function auditCoverage({ manifest, modeMap, baseline } = {}) {
   const unacknowledgedGaps = records
     .filter(entry => entry.classification === 'gap')
     .map(({ category, id }) => ({ category, id }));
-  const forwardDiagnostics = routes.diagnostics.sort(compareDiagnostic);
+  const patternDiagnostics = (Array.isArray(routeDiagnostics) ? routeDiagnostics : [])
+    .filter(entry => ['invalid_pattern_count', 'invalid_pattern', 'pattern_collision'].includes(entry?.status))
+    .map(entry => ({
+      code: entry.status,
+      route: cleanId(entry.id) || '<missing id>',
+      target: entry.target || '',
+      category: 'mode_map',
+      reason: entry.reason || '',
+    }));
+  const forwardDiagnostics = [...routes.diagnostics, ...patternDiagnostics].sort(compareDiagnostic);
   const baselineDiagnostics = policy.diagnostics.sort((left, right) =>
     left.code.localeCompare(right.code)
       || left.category.localeCompare(right.category)

@@ -44,6 +44,7 @@ const COVERAGE_REPORT_PATH = process.env.ROUTER_COVERAGE_REPORT_PATH
 const COVERAGE_BASELINE_PATH = process.env.ROUTER_COVERAGE_BASELINE_PATH
   || join(SCRIPT_DIR, 'coverage-baseline.json');
 const STRICT_COVERAGE = process.argv.includes('--strict-coverage');
+const ROUTER_HOOK_PATH = process.env.ROUTER_HOOK_PATH || join(HOME, '.claude', 'hooks', 'router.mjs');
 export const MODE_MAP_SIZE_CEILING = 30_000;
 
 function readJson(path, fallback) {
@@ -543,10 +544,17 @@ const tmp = `${OUT}.tmp.${process.pid}`;
 writeFileSync(tmp, JSON.stringify(manifest, null, 2));
 renameSync(tmp, OUT);
 
+const coverageModeMap = readJson(MODE_MAP_PATH, null);
+let routeDiagnostics = [];
+try {
+  const { validateRouteTargets } = await import(ROUTER_HOOK_PATH);
+  routeDiagnostics = validateRouteTargets(manifest, coverageModeMap);
+} catch { /* installation validation remains fail-open if the hook is unavailable */ }
 const coverage = auditCoverage({
   manifest,
-  modeMap: readJson(MODE_MAP_PATH, null),
+  modeMap: coverageModeMap,
   baseline: readJson(COVERAGE_BASELINE_PATH, null),
+  routeDiagnostics,
 });
 mkdirSync(dirname(COVERAGE_REPORT_PATH), { recursive: true });
 const coverageTmp = `${COVERAGE_REPORT_PATH}.tmp.${process.pid}`;
