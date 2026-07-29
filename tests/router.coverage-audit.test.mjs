@@ -102,7 +102,8 @@ test('allows only explicit present reverse-gap policy acknowledgements', () => {
   };
   const report = auditCoverage({ manifest: manifest(), modeMap: modeMap(), baseline });
 
-  assert.equal(record(report, 'skills', 'bm25-only').classification, 'expected_bm25_only');
+  assert.equal(record(report, 'skills', 'bm25-only').classification, 'gap',
+    'duplicate baseline identities must never acknowledge a gap');
   assert.equal(record(report, 'agents', 'safe-agent').coverage_status, 'mapped',
     'mapping takes precedence over a baseline acknowledgement');
   assert.equal(record(report, 'commands', 'route-id').classification, 'gap');
@@ -183,6 +184,27 @@ test('strict builder fails only after publishing unacknowledged reverse gaps', (
     },
   });
   assert.equal(acknowledged.result.status, 0);
+});
+
+test('strict builder rejects duplicate baseline acknowledgements', () => {
+  const strict = runBuilder({ strict: true });
+  const entries = strict.report.unacknowledged_gaps.map(item => ({
+    category: item.category,
+    id: item.id,
+    classification: 'expected_bm25_only',
+    reason: 'fixture acknowledgement',
+  }));
+  entries.push({ ...entries[0], reason: 'duplicate fixture acknowledgement' });
+
+  const duplicated = runBuilder({
+    strict: true,
+    baseline: { schema_version: 1, entries },
+  });
+
+  assert.equal(duplicated.result.status, 1);
+  assert.ok(duplicated.report.baseline_diagnostics.some(item => item.code === 'baseline_duplicate'));
+  assert.ok(duplicated.report.unacknowledged_gaps.some(item =>
+    item.category === entries[0].category && item.id === entries[0].id));
 });
 
 test('strict builder fails on forward diagnostics while stale acknowledgements remain warnings', () => {

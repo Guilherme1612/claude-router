@@ -131,15 +131,19 @@ function baselinePolicy(baseline, rows) {
 
   const present = new Set(rows.map(row => identityKey(row.category, row.id)));
   const seen = new Set();
+  const duplicates = new Set();
   for (const entry of baseline.entries) {
     const category = String(entry?.category || '');
     const id = cleanId(entry?.id);
     const key = identityKey(category, id);
     if (seen.has(key)) {
       diagnostics.push({ code: 'baseline_duplicate', category, id, reason: 'duplicate category and id' });
+      duplicates.add(key);
+      accepted.delete(key);
       continue;
     }
     seen.add(key);
+    if (duplicates.has(key)) continue;
     if (!ALLOWED_BASELINE.has(entry?.classification) || !String(entry?.reason || '').trim()) {
       diagnostics.push({ code: 'baseline_disallowed_classification', category, id,
         reason: 'classification must be allowed and reason must be non-empty' });
