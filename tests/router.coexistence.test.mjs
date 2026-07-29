@@ -11,6 +11,8 @@ import { spawnSync } from 'node:child_process';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const NODE = '/Users/guilherme/.hermes/node/bin/node';
+const COVERAGE_REMINDER =
+  '<!-- router: coverage report may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 const CAVEMAN_TRACKER = join(
   homedir(),
   '.claude/plugins/marketplaces/caveman/src/hooks/caveman-mode-tracker.js'
@@ -52,10 +54,12 @@ test('explicitOverrideDetect: no /-prefix -> no override', async () => {
   }
 });
 
-test('hook subprocess: /-prefix prompt exits 0 with empty stdout', () => {
+test('hook subprocess: /-prefix prompt exits 0 with only the stale coverage reminder', () => {
   const r = runHook(JSON.stringify({ prompt: '/gsd-debug fix it' }));
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, '');
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.additionalContext, COVERAGE_REMINDER);
+  assert.equal(out.decision, undefined);
 });
 
 // --- sentinel re-entry dedupe (INJ-05) -------------------------------------
@@ -76,7 +80,9 @@ test('sentinelScan: non-router HTML comment -> false (exact match only)', async 
 test('hook subprocess: prompt containing the exact sentinel -> pass-through', () => {
   const r = runHook(JSON.stringify({ prompt: '<!-- router-inject --> something' }));
   assert.equal(r.status, 0);
-  assert.equal(r.stdout, '');
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.additionalContext, COVERAGE_REMINDER);
+  assert.equal(out.decision, undefined);
 });
 
 test('hook subprocess: prompt with a non-router HTML comment does NOT skip', () => {
