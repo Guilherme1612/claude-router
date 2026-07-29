@@ -43,6 +43,12 @@ test('cacheKey: changing surfaceMtime produces a different key (surface profile 
   assert.notEqual(a, b);
 });
 
+test('cacheKey: changing weightsMtime produces a different key (SAF-01 weights-mtime invalidation)', () => {
+  const a = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5000);
+  const b = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5001);
+  assert.notEqual(a, b);
+});
+
 test('cacheKey: changing normalizedPrompt produces a different key', () => {
   const a = cacheKey('fix bug', ['fix'], 1000, 2000);
   const b = cacheKey('ship pr', ['fix'], 1000, 2000);
