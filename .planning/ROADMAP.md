@@ -6,10 +6,11 @@
 - ✅ **[v1.1 Inspectable Routing Control Layer](milestones/v1.1-ROADMAP.md)** — Phases 5-10 (shipped 2026-07-14)
 - ✅ **[v1.2 Autonomous Dual-Runtime Control Plane](milestones/v1.2-ROADMAP.md)** — Phases 11-20 (shipped 2026-07-23)
 - ✅ **[v1.3 Adaptive Local Capability Steward and Intent-Native Routing](milestones/v1.3-ROADMAP.md)** — Phases 21-26 (shipped 2026-07-28, ship_with_deferred — v1.3.1 release-gate hardening open)
+- 🚧 **v1.4 Coverage Completeness & Auto-Skill Routing Improvement** — Phases 27-29 (in progress)
 
 ## Overview
 
-Claude Router is an always-on, self-evolving orchestration layer. v1.3 makes the verified dual-runtime control plane framework-neutral and locally adaptive: the user's installed `.claude` and `.codex` capabilities become authoritative, explicit natural-language intent resolves through normalized contracts and current workflow state, and bounded local outcomes support quiet advisory stewardship. Prompt-time routing remains deterministic, read-only, local, fail-open, and below the 100ms hard ceiling while every publication continues through the existing verifier, canary, rollback, and recovery lifecycle.
+Claude Router is an always-on, self-evolving orchestration layer. v1.4 is a delta on the shipped v1.3 router: it closes the mode-map coverage gap (only ~18 of ~60 gsd-* workflow modes mapped; ~9 design skills unmapped) and sharpens auto-skill routing via `signal_patterns` expansion — without adding dependencies, hot-path cost, or mutation risk. The hot path (`router.mjs`) stays semantically unchanged; all mutation work moves to the builder (`build-manifest.mjs`) and the curated `mode-map.json` overlay. Evolution weight tuning (FUT-05..07) is deferred — `signal_patterns` expansion is the safer primary lever for "auto-use the right skills improves." Fail-open, <100ms, no-API-call constraints unchanged.
 
 ## Phases
 
@@ -61,201 +62,73 @@ Ship verdict: `ship_with_deferred` — 27/27 phase success criteria met; BLOCKER
 
 </details>
 
+### 🚧 v1.4 Coverage Completeness & Auto-Skill Routing Improvement (In Progress)
+
+**Milestone Goal:** No manifest skill/command/agent goes unnoticed by the router, and the right skill is auto-suggested more often — dropping rework from mis-routed tasks further.
+
+- [ ] **Phase 27: Mutation Safety Infrastructure** - Cache versioning + latency regression gate + render/size caps that must exist before any mode-map mutation ships
+- [ ] **Phase 28: Coverage Audit-Guard** - Build-seam audit classifying every manifest capability into an expected_* taxonomy, bi-directional orphan detection, CI gate, and fail-open hook staleness reminder
+- [ ] **Phase 29: Mode-Map Curation and Signal Patterns Expansion** - New gsd-* and design-skill entries with sharp output-type-anchored signal patterns, v3 schema, collision lint, and threshold re-derivation
+
 ## Phase Details
 
-### Phase 21: Authoritative Personalized Inventory
-
-**Goal**: Users can rely on Router's inventory as a current, safe, framework-neutral representation of the capabilities actually installed in their Claude and Codex environments.
-**Depends on**: Phase 20
-**Requirements**: DISC-01, DISC-02, DISC-03, DISC-04, DISC-05, DISC-06, DISC-07, DISC-08
+### Phase 27: Mutation Safety Infrastructure
+**Goal**: Mutations to the previously-stable mode-map and weights cannot poison cached routes or creep latency — the safety rails exist before any curation ships.
+**Depends on**: Phase 26
+**Requirements**: SAF-01, SAF-02, SAF-03, SAF-04
 **Success Criteria** (what must be TRUE):
 
-  1. A user can add, edit, rename, move, disable, replace, or remove a local capability and observe the candidate inventory and all affected relationships converge to the same result through incremental or authoritative reconciliation.
-  2. A user can inspect each installed capability's runtime, scope, provenance, enabled state, invocation form, dependencies, and lifecycle role without GSD, Gstack, Claude, or Codex being treated as the default ecosystem.
-  3. Claude-versus-Codex gaps and unknown future capability types appear by semantic category and adapter evidence rather than hard-coded framework names.
-  4. Unsafe paths, scope escapes, symlinks, and capability-authored policy text cannot become trusted inventory or executable Router policy.
+  1. When `mode-map.json` or `weights.json` changes (mtime bump), a previously-cached route is recomputed on the next prompt rather than served stale.
+  2. A cached route whose target capability id is absent from the current manifest is never injected — the router recomputes the route instead.
+  3. On the calibration corpus, warm routing p95 stays below 40ms and every measured route stays below 100ms after the full expanded mode-map (regression test re-runnable each subsequent phase).
+  4. `additionalContext` output never exceeds 1 mode + 3 skills + 2 agents + 1 reasoning line (hard drop-and-log boundary), and `mode-map.json` stays below 30KB.
 
-**Plans**: 6/6 plans complete
+**Plans**: 2 plans
+- [ ] 27-01-PLAN.md — Hot-path safety guards (SAF-01 cache versioning, SAF-02 stale-target recompute, SAF-04 render cap) in router.mjs
+- [ ] 27-02-PLAN.md — Off-hot-path regression gate (SAF-03 p95<40ms/max<100ms) + mode-map 30KB size guard (SAF-04) in perf-measure.mjs and build-manifest.mjs
 
-- [x] 21-06-PLAN.md
-
-**Wave 1**
-
-- [x] 21-01-PLAN.md
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 21-02-PLAN.md
-- [x] 21-03-PLAN.md
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 21-04-PLAN.md
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 21-05-PLAN.md
-
-### Phase 22: Conservative Contracts and Relationship Graph
-
-**Goal**: Users can understand what each installed capability can safely do, why Router believes it, and whether it is eligible for dispatch.
-**Depends on**: Phase 21
-**Requirements**: CONT-01, CONT-02, CONT-03, CONT-04, CONT-05, CONT-06, CONT-07, CONT-08, CONT-09
+### Phase 28: Coverage Audit-Guard
+**Goal**: Every manifest rebuild produces a classified coverage report that tells the user exactly which unmapped capabilities are intentional and which are real gaps — bi-directionally, CI-gated, and fail-open in the hook.
+**Depends on**: Phase 27
+**Requirements**: COV-01, COV-02, COV-03, COV-04, COV-05
 **Success Criteria** (what must be TRUE):
 
-  1. A user can inspect a normalized contract for every discovered capability, including field-level evidence, provenance, inference version, confidence, permissions, effects, reversibility, risk, lifecycle role, and workflow transitions.
-  2. Missing, stale, conflicting, or low-confidence dispatch fields remain visibly unknown and keep the capability recommendation-only.
-  3. Optional manifests and approved corrections enrich only the exact installed capability identity and are rejected or invalidated when schema, fingerprint, or lineage evidence no longer matches.
-  4. Users can distinguish substitutes, variants, prerequisites, compositions, conflicts, fallbacks, implementations, and aliases, while only fully validated targets become dispatch eligible.
+  1. After `build-manifest.mjs` runs, a `coverage-report.json` exists classifying every manifest skill/command/agent into an `expected_*` category (gap / expected_hook / expected_warn_mcp / expected_bm25_only / expected_phase_internal / expected_scope_project) — not a boolean gap check.
+  2. The audit detects orphans in both directions: mode-map entries pointing at capabilities no longer in the manifest, AND manifest capabilities with no mode-map entry.
+  3. Running `build-manifest.mjs --strict-coverage` exits non-zero only on unacknowledged gaps; items recorded in `coverage-baseline.json` do not fail the CI gate.
+  4. When `coverage-report.json` is missing or older than the manifest, the hook injects a one-line staleness reminder and still passes the prompt through unchanged (fail-open).
 
 **Plans**: TBD
 
-### Phase 23: Intent-Safe State-Aware Execution
-
-**Goal**: Users can express actions in natural language and have Router execute exactly one safe, locally available capability only when intent and authoritative workflow state permit it.
-**Depends on**: Phase 22
-**Requirements**: INT-01, INT-02, INT-03, INT-04, INT-05, INT-06, EXEC-01, EXEC-02, EXEC-03, EXEC-04, EXEC-05, EXEC-06, EXEC-07, EXEC-08, EXEC-09, EXEC-10
+### Phase 29: Mode-Map Curation and Signal Patterns Expansion
+**Goal**: High-value unmapped gsd-* modes and design skills get mode-map entries with sharp, output-type-anchored signal patterns — validated against a manifest-agnostic fixture, collision-linted, and threshold-calibrated on the expanded set — so the right mode/skill is auto-suggested more often.
+**Depends on**: Phase 28
+**Requirements**: MAP-01, MAP-02, MAP-03, SIG-01, SIG-02, SIG-03, SIG-04
 **Success Criteria** (what must be TRUE):
 
-  1. Explicit positive action requests can select one compatible installed capability, while explanations, hypotheticals, quotations, examples, negations, prohibitions, previews, conditions, ambiguity, and unsafe requests never invoke one.
-  2. "Go to the next phase" reads fresh authoritative project state, identifies one valid transition, and invokes the safest compatible locally installed capability; ties, stale state, gaps, terminal states, or checkpoints produce abstention or one focused clarification.
-  3. "There is a bug" or "debug this" selects the compatible installed debugging capability, and "Create a phase about X" derives current numbering and invokes the compatible installed phase-creation capability with the topic—regardless of whether that capability comes from GSD, Gstack, another collection, or a future local adapter.
-  4. Destructive, external, privileged, or difficult-to-reverse actions require separately bound approval, and Router never elevates permissions, bypasses runtime restrictions, or invokes hooks as task tools.
-  5. After work completes, the user receives the correct next locally available capability and a ready-to-use framework-neutral prompt, with newest explicit instructions overriding stale context.
+  1. A user prompt expressing a lifecycle intent (ship, new project, execute phase, quick fix, validate, verify, resume, complete milestone) gets routed to the corresponding gsd-* mode without the user typing the slash.
+  2. A user prompt expressing a design intent (brandkit, minimalist/brutalist UI, image-to-code, imagegen frontend, redesign, stitch taste, excalidraw, gpt-taste) gets the matching design skill suggested.
+  3. All new entries pass `validateRouteTargets`, MCP-missing agents stay in `warn` tier (never auto-dispatched), and a manifest-agnostic synthetic fixture asserts the new entries route correctly on a non-gsd manifest.
+  4. `mode-map.json` schema v3 accepts both plain-string and `{kind,value}` signal patterns, v2 plain-string entries still parse, the 159+ existing tests stay green, and no signal pattern appears in more than one entry unless explicitly declared.
+  5. `T_high` / `T_low` / `M` thresholds are re-derived from the calibration set on the expanded entry list (not left at the v1.3 29-entry values).
 
-**Plans**: 3/3 plans executed
-**Wave 1**
-
-- [x] 23-01-PLAN.md — Tracer: end-to-end "go to next phase" through all 8 layers + intent classifier 8-disposition matrix
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 23-02-PLAN.md — Adversarial intent corpus (INT-03/06) + action mapper debug/create-phase verbs (EXEC-01/02/03/04/06/10)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 23-03-PLAN.md — Approval gate (EXEC-07/08/09) + full dispatch integration matrix (EXEC-05/06/09/10)
-
-### Phase 24: Privacy-Safe Outcomes and Capability Health
-
-**Goal**: Users receive trustworthy local capability-health observations without Router retaining sensitive prompt content or penalizing capabilities on weak evidence.
-**Depends on**: Phase 23
-**Requirements**: HLTH-01, HLTH-02, HLTH-03, HLTH-04, HLTH-05, HLTH-06, HLTH-07, HLTH-08, HLTH-09, HLTH-10, HLTH-11
-**Success Criteria** (what must be TRUE):
-
-  1. A user can inspect bounded local outcome records and confirm that raw prompts, transcripts, secrets, source documents, arbitrary outputs, and unbounded arguments are neither stored nor sent off-machine.
-  2. A user can inspect, reset, dispose of, and recover health state without changing authoritative capability definitions or the active routing map.
-  3. Health observations distinguish missing, unavailable, stale, unused, duplicate, overlapping, complementary, repeatedly ineffective, and reusable-workflow opportunities with reason codes, evidence windows, opportunity counts, freshness, confidence, and non-destructive remedies.
-  4. Rare or new recovery, incident, release, and migration capabilities remain unjudged when evidence is insufficient, while versioned thresholds, decay, cooldown, and multilingual calibration are testable and canary-guarded.
-
-**Plans**: 4/4 plans executed
-
-**Wave 1**
-
-- [x] 24-01-PLAN.md — Tracer: outcome schema + privacy boundary + minimal observer + inspect, end-to-end
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 24-02-PLAN.md — Full 9-kind observation capture (HLTH-03) + usefulness scoring (HLTH-06) + rare-role unjudged tier (HLTH-07)
-
-**Wave 3** *(blocked on Wave 2 completion)*
-
-- [x] 24-03-PLAN.md — Health observation catalog: 10 kinds + HLTH-10 required fields (HLTH-08/09/10) + admin reset/dispose/recover (HLTH-05)
-
-**Wave 4** *(blocked on Wave 3 completion)*
-
-- [x] 24-04-PLAN.md — Versioned thresholds + canary-guarded activation + multilingual calibration plumbing (HLTH-11)
-
-### Phase 25: Advisory Stewardship and Guarded Drafts
-
-**Goal**: Users receive at most one high-value capability recommendation and can safely inspect or prepare changes without Router mutating personal capabilities.
-**Depends on**: Phase 24
-**Requirements**: UX-01, UX-02, UX-03, UX-04, UX-05, UX-06, UX-07, UX-08, UX-09
-**Success Criteria** (what must be TRUE):
-
-  1. Startup stays silent unless one novel, actionable, high-confidence observation exists; when shown, it is compact, non-blocking, deduplicated, cooldown-controlled, and directs the user to `/router suggestion`.
-  2. `/router suggestion` returns exactly one prioritized action plus a compact health overview and exposes its evidence, confidence, affected capabilities, expected benefit, risk, and safe next step.
-  3. A user can inspect, dismiss, snooze, or correct a suggestion without silently changing capability definitions or routing policy.
-  4. Missing-capability remediation requires explicit approval before a draft and preview, shows exact paths, semantic changes, dependencies, conflicts, route effects, verification and rollback implications, and never automatically installs or publishes the result.
-  5. Router presents no dashboard, timeline, per-session summary, unranked finding dump, or maintenance-command suite.
-
-**Plans**: 4/4 plans complete
-
-Plans:
-
-- [x] 25-01-PLAN.md — Deterministic one-item suggestion policy and private interaction state
-- [x] 25-02-PLAN.md — Complete preview-only drafts with fresh explicit approval
-- [x] 25-03-PLAN.md — Canonical `/router suggestion` CLI interaction family
-- [x] 25-04-PLAN.md — Precomputed bounded startup pointer and read-only hot-path consumer
-
+**Plans**: TBD
 **UI hint**: yes
-
-### Phase 26: Coherent Publication and Dual-Runtime Release
-
-**Goal**: Users retain fast, compatible, recoverable routing when every v1.3 decision artifact is activated and exercised across installed Claude and Codex capabilities.
-**Depends on**: Phase 25
-**Requirements**: REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, REL-09
-**Success Criteria** (what must be TRUE):
-
-  1. Prompt submission remains a bounded read-only projection with no discovery, parsing, history analysis, health calculation, graph traversal, mutation, network request, or additional model call.
-  2. Registry, contracts, relationships, intent policy, workflow routes, health policy, and suggestion references activate and roll back as one immutable version-consistent tuple through the existing verifier, canary, last-known-good, and recovery lifecycle.
-  3. Full and incremental builds are byte-identical, invalidation affects every dependent tuple member atomically, and failed or partial background work cannot alter active routing.
-  4. Existing command, skill, agent, workflow, MCP, and tool recommendations remain compatible across installed Claude and Codex environments, including recommendation-only fail-open behavior and approval-gated mutations.
-  5. Release evidence shows warm routing p95 below 25ms, every measured route below 100ms, bounded injected context, and safe publish/rollback/recovery under realistic large local registries.
-
-**Plans**: 8/8 plans complete
-
-**Wave 0**
-
-- [x] 26-01-PLAN.md — Clean mode-map baseline and failure-capable Phase 26 behavioral owners
-
-**Wave 1**
-
-- [x] 26-02-PLAN.md — Complete immutable tuple and bounded read-only prompt projection
-
-**Wave 2**
-
-- [x] 26-03-PLAN.md — Dependency-complete invalidation and full/incremental tuple equivalence
-
-**Wave 3**
-
-- [x] 26-04-PLAN.md — Existing verifier/canary activation, rollback, and recovery lifecycle
-
-**Wave 4**
-
-- [x] 26-05-PLAN.md — Installed Claude/Codex six-kind lifecycle compatibility
-- [x] 26-06-PLAN.md — Approval authority preservation and recommendation fail-open behavior
-
-**Wave 5**
-
-- [x] 26-07-PLAN.md — Realistic 300-record installed-route performance and context evidence
-
-**Wave 6**
-
-- [x] 26-08-PLAN.md — Existing release runner v1.3 evidence matrix and final gates
+**Research flag**: Consider `/gsd-plan-phase --research-phase 29` — the threshold re-derivation method (isotonic vs Platt vs manual) needs validation against the actual calibration set size (currently 10 tasks, likely too small for isotonic), and collision-lint design needs the full expanded entry set.
 
 ## Progress
 
+**Execution Order:**
+Phases execute in numeric order: 27 → 28 → 29
+
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 1-4 | v1.0 | 14/14 | Complete | 2026-07-09 |
-| 5-10 | v1.1 | 23/23 | Complete | 2026-07-14 |
-| 11. Canonical Registry and Runtime Adapters | v1.2 | 6/6 | Complete | 2026-07-14 |
-| 12. Incremental Change Detection and Watcher | v1.2 | 4/4 | Complete | 2026-07-15 |
-| 13. Target Safety, Hook Reconciliation, and Quarantine | v1.2 | 3/3 | Complete | 2026-07-15 |
-| 14. Deterministic Mapping, Activation, and Rollback | v1.2 | 7/7 | Complete | 2026-07-16 |
-| 15. Context Capsules and Workflow-State Recovery | v1.2 | 3/3 | Complete | 2026-07-16 |
-| 16. Workflow-First Orchestration and Context Budgets | v1.2 | 4/4 | Complete | 2026-07-16 |
-| 17. Compiled Prompt Routing and Safe Evolution | v1.2 | 5/5 | Complete | 2026-07-16 |
-| 18. Autonomous Lifecycle and Release Gates | v1.2 | 5/5 | Complete | 2026-07-17 |
-| 19. Close gap TOK-02 + ORC-01 | v1.2 | 4/4 | Complete | 2026-07-22 |
-| 20. Close gap EVO-05 | v1.2 | 5/5 | Complete | 2026-07-22 |
-| 21. Authoritative Personalized Inventory | v1.3 | 6/6 | Complete    | 2026-07-26 |
-| 22. Conservative Contracts and Relationship Graph | v1.3 | 6/6 | Complete    | 2026-07-27 |
-| 23. Intent-Safe State-Aware Execution | v1.3 | 3/3 | Complete    | 2026-07-27 |
-| 24. Privacy-Safe Outcomes and Capability Health | v1.3 | 4/4 | Complete    | 2026-07-28 |
-| 25. Advisory Stewardship and Guarded Drafts | v1.3 | 4/4 | Complete    | 2026-07-28 |
-| 26. Coherent Publication and Dual-Runtime Release | v1.3 | 8/8 | Complete   | 2026-07-28 |
+| 27. Mutation Safety Infrastructure | v1.4 | 0/2 | Not started | - |
+| 28. Coverage Audit-Guard | v1.4 | 0/TBD | Not started | - |
+| 29. Mode-Map Curation and Signal Patterns Expansion | v1.4 | 0/TBD | Not started | - |
 
----
-*Roadmap updated 2026-07-28 after v1.3 milestone ship. Prior milestone details are archived under `.planning/milestones/`.*
+## Deferred / Out of Scope (v1.4)
+
+- **Evolution weight tuning (FUT-05, FUT-06, FUT-07):** Deferred — highest research flag (SIGIR: up to 80% metric loss from weak-signal PRF); ship-disabled-by-default yields no near-term value; `signal_patterns` expansion is the safer primary lever. See REQUIREMENTS.md Future Requirements.
+- **Confidence-tier recalibration, multi-intent triggers, boundary-aware substring matching (FUT-08, FUT-09):** v2 — high complexity / thrash risk, needs telemetry that does not exist yet.
+- **Hot-path schema change or new dependency:** v1.4 is stdlib-only, off-hot-path mutation; hot path stays semantically unchanged.
