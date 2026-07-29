@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const { inspectDecision, loadModeMap, validateRouteTargets } =
   await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
+const canonicalModeMap = JSON.parse(readFileSync(new URL('../mode-map.json', import.meta.url), 'utf8'));
 
 const lifecycle = [
   ['gsd-ship', 'prepare the branch and pull request for release', 'walk me through acceptance of what was just built'],
@@ -48,7 +50,7 @@ function fixtureModeMap() {
   return {
     schema_version: 3,
     thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 },
-    entries: loadModeMap().entries.filter(({ id }) => ids.has(id)),
+    entries: canonicalModeMap.entries.filter(({ id }) => ids.has(id)),
   };
 }
 
@@ -114,8 +116,8 @@ test('design hard negatives never select the sibling route', () => {
   }
 });
 
-test('installed schema-v3 map has no undeclared canonical collision', () => {
-  const modeMap = loadModeMap();
+test('canonical schema-v3 map has no undeclared canonical collision', () => {
+  const modeMap = canonicalModeMap;
   for (const [id] of design) {
     const entries = modeMap.entries.filter((entry) => entry.id === id);
     assert.equal(entries.length, 1, `${id} must have exactly one route`);
@@ -127,7 +129,7 @@ test('installed schema-v3 map has no undeclared canonical collision', () => {
 });
 
 test('schema-v3 map caps every entry at six output-anchored patterns', () => {
-  const modeMap = loadModeMap();
+  const modeMap = canonicalModeMap;
   assert.equal(modeMap.schema_version, 3);
   for (const entry of modeMap.entries) {
     assert.ok(entry.signal_patterns.length >= 1 && entry.signal_patterns.length <= 6, entry.id);
@@ -136,6 +138,10 @@ test('schema-v3 map caps every entry at six output-anchored patterns', () => {
       assert.notEqual(value, entry.id, `${entry.id} must not route from its skill name`);
     }
   }
+});
+
+test('installed mode map matches the repository canonical source', () => {
+  assert.deepEqual(loadModeMap(), canonicalModeMap);
 });
 
 test('fixture routing is isolated from live manifest and mode-map paths', () => {

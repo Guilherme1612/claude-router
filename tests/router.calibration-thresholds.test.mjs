@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import * as C from '../router.calibrate.mjs';
 
 const tasks = JSON.parse(readFileSync(new URL('../calibration-tasks.json', import.meta.url), 'utf8'));
+const canonicalModeMap = JSON.parse(readFileSync(new URL('../mode-map.json', import.meta.url), 'utf8'));
 const current = { T_high: 0.6, T_low: 0.3, M: 0.2 };
 const records = [
   { id: 'high-correct', score: 0.9, margin: 0.4, correct: true, expected_tier: 'high' },
@@ -92,7 +93,7 @@ test('labeled boundaries independently identify T_high, T_low, and M', () => {
 
 test('real Phase 29 corpus is inspected through supplied objects and reselects every constant', () => {
   const manifest = C.loadManifest();
-  const modeMap = C.loadModeMap();
+  const modeMap = canonicalModeMap;
   const calibration = C.phase29CalibrationRecords(tasks, manifest, modeMap);
   const selected = C.selectThresholds(calibration, modeMap.thresholds);
 
