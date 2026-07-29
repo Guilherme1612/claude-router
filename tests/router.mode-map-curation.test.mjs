@@ -62,6 +62,7 @@ function inspect(prompt, manifest, modeMap) {
     emitInjection: false,
     bumpEvolution: false,
     includePrompt: false,
+    weights: null,
   });
 }
 
@@ -151,11 +152,27 @@ test('fixture routing is isolated from live manifest and mode-map paths', () => 
     logTelemetry: false,
     emitInjection: false,
     bumpEvolution: false,
+    weights: null,
   });
 
   assert.equal(out.selected_route?.id ?? out.selected_route?.mode, 'gsd-quick');
   assert.deepEqual(manifest, beforeManifest);
   assert.deepEqual(modeMap, beforeModeMap);
+});
+
+test('synthetic inspection ignores adversarial live evolution weights', () => {
+  const manifest = fixtureManifest();
+  const modeMap = fixtureModeMap();
+  const prompt = 'make this small repository change with tracked verification';
+  const baseline = inspect(prompt, manifest, modeMap);
+  const adversarial = inspectDecision(prompt, {
+    manifest,
+    modeMap,
+    weights: { blend: 1, weights: { 'gsd-quick': { score: -1_000 } } },
+  });
+
+  assert.equal(baseline.selected_route?.id, 'gsd-quick');
+  assert.notEqual(adversarial.selected_tier, baseline.selected_tier);
 });
 
 test('missing-MCP agents remain absent from validation-safe candidates and dispatch targets', () => {

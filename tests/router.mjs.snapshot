@@ -2677,7 +2677,7 @@ export function inspectDecision(prompt, options = {}) {
     state.score_debug.T_high = state.thresholds.T_high;
     state.score_debug.M = state.thresholds.M;
     setModeMapForBlend(modeMap);
-    const weights = opts.weights || loadWeights(opts.weightsPath);
+    const weights = Object.hasOwn(opts, 'weights') ? opts.weights : loadWeights(opts.weightsPath);
     state.weights = weights;
     const blendFactor = (weights && typeof weights.blend === 'number') ? weights.blend : 0.15;
     state.evolvedAfter = (() => {
