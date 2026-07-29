@@ -10,6 +10,18 @@ import { auditCoverage } from '../src/coverage/audit.mjs';
 const BUILDER = fileURLToPath(new URL('../build-manifest.mjs', import.meta.url));
 const { validateRouteTargets } = await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
 
+test('repository baseline explicitly and deterministically acknowledges only stable BM25 gaps', () => {
+  const baseline = JSON.parse(readFileSync(new URL('../coverage-baseline.json', import.meta.url), 'utf8'));
+  const keys = baseline.entries.map(({ category, id }) => `${category}\0${id}`);
+  assert.equal(baseline.schema_version, 1);
+  assert.equal(baseline.entries.length, 210);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.equal(new Set(keys).size, keys.length);
+  assert.ok(baseline.entries.every(({ classification, reason }) =>
+    classification === 'expected_bm25_only'
+    && reason === 'safe global capability remains available to BM25 routing'));
+});
+
 function runBuilder({
   modeMap = { schema_version: 2, entries: [] },
   baseline = { schema_version: 1, entries: [] },

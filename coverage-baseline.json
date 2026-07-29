@@ -1,4 +1,1265 @@
 {
   "schema_version": 1,
-  "entries": []
+  "entries": [
+    {
+      "category": "agents",
+      "id": "agent-creator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-py",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-ts",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "architecture-critic",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "business-rules-extractor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-builder",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-investigator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-reviewer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "claude-security",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "code-architect",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "code-explorer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "code-reviewer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "code-simplifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "comment-analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "comparator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "conversation-analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "explore",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "grader",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-assumptions-analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-code-fixer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-debug-session-manager",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-classifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-synthesizer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-verifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-writer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-auditor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-planner",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-framework-selector",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-integration-checker",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-intel-updater",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-mempalace-curator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-nyquist-auditor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-pattern-mapper",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-plan-checker",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-research-synthesizer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-roadmapper",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-security-auditor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-auditor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-checker",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-user-profiler",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-verifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "legacy-analyst",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "patch-generator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "patch-verifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "plugin-validator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "pr-test-analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "scan-inventory",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "scan-researcher",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "scan-verifier",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "security-auditor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "silent-failure-hunter",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "skill-reviewer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "test-engineer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "type-design-analyzer",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "uplift-migrator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents",
+      "id": "version-delta-analyst",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-design-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-gap-finder",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-orchestrator-trace",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-from-gsd2",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-join-discord",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-review-backlog",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-workstreams",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "cancel-ralph",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-commit",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-compress",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-help",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-init",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-stats",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "clean_gone",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "commit",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "configure",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "create-docker-mcp-tunnel",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "create-plugin",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "example-command",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "feature-dev",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "help",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "hookify",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "list",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "maker-setup",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-brief",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-extract-rules",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-harden",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-map",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-preflight",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-reimagine",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-status",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-transform",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-uplift",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "new-sdk-app",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "commands",
+      "id": "revise-claude-md",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "access",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "agent-development",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "brainstorming",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-app",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-server",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcpb",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cardputer-buddy",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cavecrew",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-commit",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-compress",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-help",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-stats",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-automation-recommender",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-md-improver",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-security",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "command-development",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "configure",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode-ops",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-doctor",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-index",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-insight",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-purge",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-search",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-stats",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-upgrade",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "dispatching-parallel-agents",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-command",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-skill",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "executing-plans",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "finishing-a-development-branch",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "hook-development",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "m5-onboard",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "math-olympiad",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "mcp-integration",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "playground",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-settings",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-structure",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "project-artifact",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receipts",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receiving-code-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "session-report",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-creator",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-development",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "subagent-driven-development",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-git-worktrees",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-superpowers",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "verification-before-completion",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-hookify-rules",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-skills",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "full-output-enforcement",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-add-tests",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ai-integration-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-fix",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-milestone",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-uat",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-autonomous",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-capture",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-cleanup",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-code-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-config",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-debug",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-discuss-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-docs-update",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-eval-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-explore",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-extract-learnings",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-fast",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-forensics",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-graphify",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-health",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-help",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-import",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-inbox",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ingest-docs",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-manager",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-map-codebase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-capture",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-recall",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-milestone-summary",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mvp-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-new-milestone",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-next",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-context",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-ideate",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-manage",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-project",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-workflow",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-onboard",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pause-work",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-review-convergence",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pr-branch",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-profile-user",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-progress",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review-backlog",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-secure-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-settings",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-sketch",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spec-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spike",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-stats",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-surface",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-thread",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-review",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ultraplan-phase",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-undo",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-update",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workspace",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workstreams",
+      "classification": "expected_bm25_only",
+      "reason": "safe global capability remains available to BM25 routing"
+    }
+  ]
 }
