@@ -701,7 +701,7 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
       if (!collisions.has(key)) collisions.set(key, []);
       collisions.get(key).push({
         entry,
-        group: pattern.collision_group || (typeof entry.collision_group === 'string' ? entry.collision_group.trim() : ''),
+        group: pattern.collision_group || '',
       });
     });
 

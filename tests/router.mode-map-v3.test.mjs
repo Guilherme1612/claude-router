@@ -77,6 +77,10 @@ test('canonical duplicates require the same non-empty collision group everywhere
       entries: [entry('a', ['redesign the ui'], 'design-redesign'), entry('b', ['redesign the ui'])],
     },
     {
+      name: 'entry group cannot authorize patterns',
+      entries: [entry('a', ['redesign the ui'], 'shared'), entry('b', ['redesign the ui'], 'shared')],
+    },
+    {
       name: 'mismatched groups',
       entries: [entry('a', ['redesign the ui'], 'one'), entry('b', ['redesign the ui'], 'two')],
     },
@@ -91,8 +95,8 @@ test('canonical duplicates require the same non-empty collision group everywhere
     diagnostics({
       schema_version: 3,
       entries: [
-        entry('redesign-existing-projects', ['redesign the ui'], 'redesign-ui'),
-        entry('gpt-taste', [{ kind: 'contains', value: ' Redesign  The UI ' }], 'redesign-ui'),
+        entry('redesign-existing-projects', [{ kind: 'contains', value: 'redesign the ui', collision_group: 'redesign-ui' }]),
+        entry('gpt-taste', [{ kind: 'contains', value: ' Redesign  The UI ', collision_group: 'redesign-ui' }]),
       ],
     }),
     [],
