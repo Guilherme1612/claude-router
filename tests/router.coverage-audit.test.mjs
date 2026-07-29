@@ -63,6 +63,7 @@ function modeMap() {
       id: 'route-id',
       invoke_kind: 'slash',
       mode: 'build',
+      signal_patterns: ['build'],
       recommended_skills: ['shared'],
       recommended_agents: ['safe-agent'],
     }],
@@ -122,9 +123,12 @@ test('reports typed forward targets without allowing baseline suppression', () =
     manifest: manifest(),
     modeMap: {
       entries: [
-        { id: 'missing-command', invoke_kind: 'slash', mode: 'missing-command' },
-        { id: 'missing-skill', invoke_kind: 'skill', recommended_skills: ['no-skill'] },
-        { id: 'blocked', invoke_kind: 'agent', recommended_agents: ['blocked-agent'] },
+        { id: 'missing-command', invoke_kind: 'slash', mode: 'missing-command',
+          signal_patterns: ['missing command'], recommended_skills: [], recommended_agents: [] },
+        { id: 'missing-skill', invoke_kind: 'skill', signal_patterns: ['missing skill'],
+          recommended_skills: ['no-skill'], recommended_agents: [] },
+        { id: 'blocked', invoke_kind: 'agent', signal_patterns: ['blocked agent'],
+          recommended_skills: [], recommended_agents: ['blocked-agent'] },
       ],
     },
     baseline: {
@@ -166,6 +170,33 @@ test('matches live routeability for non-global agents-store skills', () => {
   assert.ok(report.forward_diagnostics.some(item =>
     item.code === 'stale_skill_target' && item.target === 'store-only'));
   assert.equal(record(report, 'agents_store_skills', 'store-only').classification, 'gap');
+});
+
+test('malformed routes emit diagnostics and cannot manufacture mapped coverage', () => {
+  const entries = [
+    { invoke_kind: 'skill', signal_patterns: ['missing id'],
+      recommended_skills: ['shared'], recommended_agents: [] },
+    { id: 'bad-kind', invoke_kind: 'other', signal_patterns: ['bad kind'],
+      recommended_skills: ['shared'], recommended_agents: [] },
+    { id: 'missing-signals', invoke_kind: 'skill',
+      recommended_skills: ['shared'], recommended_agents: [] },
+    { id: 'bad-skills', invoke_kind: 'agent', signal_patterns: ['bad skills'],
+      recommended_skills: 'shared', recommended_agents: ['safe-agent'] },
+    { id: 'bad-agents', invoke_kind: 'skill', signal_patterns: ['bad agents'],
+      recommended_skills: ['shared'], recommended_agents: 'safe-agent' },
+    { id: 'empty-agent', invoke_kind: 'agent', signal_patterns: ['empty agent'],
+      recommended_skills: ['shared'], recommended_agents: [] },
+  ];
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: { schema_version: 2, entries },
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.equal(report.forward_diagnostics.filter(item => item.code === 'invalid_shape').length, entries.length);
+  assert.equal(record(report, 'skills', 'shared').classification, 'gap');
+  assert.equal(record(report, 'plugin_skills', 'shared').classification, 'gap');
+  assert.equal(record(report, 'agents', 'safe-agent').classification, 'gap');
 });
 
 test('malformed optional inputs stay visible and acknowledge nothing', () => {
@@ -247,7 +278,8 @@ test('strict builder fails on forward diagnostics while stale acknowledgements r
     strict: true,
     modeMap: {
       schema_version: 2,
-      entries: [{ id: 'missing', invoke_kind: 'skill', recommended_skills: ['missing'] }],
+      entries: [{ id: 'missing', invoke_kind: 'skill', signal_patterns: ['missing'],
+        recommended_skills: ['missing'], recommended_agents: [] }],
     },
     baseline: {
       schema_version: 1,

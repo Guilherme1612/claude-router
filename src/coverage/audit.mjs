@@ -13,6 +13,7 @@ const SKILL_COLLECTIONS = new Set([
   'agents_store_skills', 'plugin_skills', 'project_scoped_skills', 'skills',
 ]);
 const ALLOWED_BASELINE = new Set(['expected_bm25_only', 'expected_phase_internal']);
+const ROUTE_INVOKE_KINDS = new Set(['slash', 'skill', 'agent', 'warn']);
 
 const cleanId = value => String(value || '').replace(/^\/+/, '').trim();
 const compareIdentity = (left, right) =>
@@ -85,6 +86,48 @@ function typedMappings(modeMap, indexes) {
   const routeIds = new Set(modeMap.entries.map(entry => cleanId(entry?.id)).filter(Boolean));
   for (const entry of modeMap.entries) {
     const route = cleanId(entry?.id) || '<missing id>';
+    const shapeErrors = [];
+    if (!entry?.id) shapeErrors.push(['<entry>', 'missing id']);
+    if (!entry?.invoke_kind || !ROUTE_INVOKE_KINDS.has(entry.invoke_kind)) {
+      shapeErrors.push([entry?.invoke_kind || '<invoke_kind>', 'invalid invoke_kind']);
+    }
+    if (!Array.isArray(entry?.signal_patterns) || entry.signal_patterns.length === 0) {
+      shapeErrors.push(['signal_patterns', 'must be a non-empty array']);
+    }
+    if (!Array.isArray(entry?.recommended_skills)) {
+      shapeErrors.push(['recommended_skills', 'must be an array']);
+    }
+    if (!Array.isArray(entry?.recommended_agents)) {
+      shapeErrors.push(['recommended_agents', 'must be an array']);
+    }
+    for (const [target, reason] of shapeErrors) diagnostics.push({
+      code: 'invalid_shape', route, target, category: 'mode_map', reason,
+    });
+    if (shapeErrors.length) continue;
+    if (entry.invoke_kind === 'agent' && entry.recommended_agents.length === 0) {
+      diagnostics.push({
+        code: 'invalid_shape', route, target: '<recommended_agents>', category: 'mode_map',
+        reason: 'invoke_kind agent requires at least one safe agent',
+      });
+      continue;
+    }
+    if (entry.invoke_kind === 'warn') {
+      const warning = String(entry.warning || '');
+      if (!warning && (entry.recommended_skills.length || entry.recommended_agents.length)) {
+        diagnostics.push({
+          code: 'warning_only', route, target: '<warning>', category: 'mode_map',
+          reason: 'warn route needs a warning string when target lists are non-empty',
+        });
+      }
+      if (/Dispatch agent/i.test(warning)) {
+        diagnostics.push({
+          code: 'warning_only', route, target: '<warning>', category: 'mode_map',
+          reason: 'warn route must not imply Dispatch agent wording',
+        });
+      }
+      continue;
+    }
+
     const mode = cleanId(entry?.mode);
     if (entry?.invoke_kind === 'slash') {
       const alias = mode && mode !== route && routeIds.has(mode);
@@ -96,16 +139,14 @@ function typedMappings(modeMap, indexes) {
       });
     }
 
-    const skills = Array.isArray(entry?.recommended_skills) ? entry.recommended_skills : [];
-    for (const rawTarget of skills) {
+    for (const rawTarget of entry.recommended_skills) {
       const target = cleanId(rawTarget);
       if (indexes.skill.has(target)) mapped.skill.add(target);
       else diagnostics.push({ code: 'stale_skill_target', route, target: target || '<skill>',
         category: 'skills', reason: 'recommended skill is absent from the manifest' });
     }
 
-    const agents = Array.isArray(entry?.recommended_agents) ? entry.recommended_agents : [];
-    for (const rawTarget of agents) {
+    for (const rawTarget of entry.recommended_agents) {
       const target = cleanId(rawTarget);
       if (!indexes.agent.has(target)) diagnostics.push({
         code: 'stale_agent_target', route, target: target || '<agent>', category: 'agents',
