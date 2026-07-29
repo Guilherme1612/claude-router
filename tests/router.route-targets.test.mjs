@@ -8,6 +8,7 @@ import { join } from 'node:path';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const {
+  inspectDecision,
   loadManifest,
   loadModeMap,
   validateRouteTargets,
@@ -151,4 +152,39 @@ test('COV-12: warn entries do not imply dispatch wording', () => {
     () => validateModeMapTargets(manifest, modeMap),
     /route bad-warn-copy target <warning>: warn route must not imply Dispatch agent wording/
   );
+});
+
+test('missing-MCP agent remains warning-only despite strong prompt overlap', () => {
+  const manifest = fixtureManifest();
+  manifest.agents.find(({ id }) => id === 'blocked-agent').description =
+    'prepare the branch and pull request for release with final verification';
+  const modeMap = {
+    schema_version: 3,
+    thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 },
+    entries: [
+      {
+        id: 'blocked-agent-warning',
+        mode: null,
+        invoke_kind: 'warn',
+        signal_patterns: ['prepare the branch and pull request for release'],
+        recommended_skills: [],
+        recommended_agents: [],
+        warning: 'blocked-agent requires fixture-mcp',
+      },
+    ],
+  };
+
+  assert.ok(validateRouteTargets(manifest, modeMap).every(({ status }) => status === 'ok'));
+  const out = inspectDecision('prepare the branch and pull request for release', {
+    manifest,
+    modeMap,
+    cwd: process.cwd(),
+    mutateCache: false,
+    logTelemetry: false,
+    emitInjection: false,
+    bumpEvolution: false,
+  });
+  assert.ok(!(out.candidates || []).some(({ id }) => id === 'blocked-agent'));
+  assert.deepEqual(out.selected_route?.recommended_agents || [], []);
+  assert.notEqual(out.selected_route?.invoke_kind, 'agent');
 });

@@ -92,6 +92,18 @@ test('all ten design outcome prompts route through supplied neutral fixture obje
   }
 });
 
+test('portable fixture owns exactly the 18 curated typed targets', () => {
+  const manifest = fixtureManifest();
+  const modeMap = fixtureModeMap();
+  const expected = new Set([...lifecycle, ...design].map(([id]) => id));
+  assert.equal(modeMap.entries.length, expected.size);
+  assert.deepEqual(new Set(manifest.skills.map(({ id }) => id)), expected);
+  for (const entry of modeMap.entries) {
+    assert.equal(entry.invoke_kind, 'skill');
+    assert.deepEqual(entry.recommended_skills, [entry.id]);
+  }
+});
+
 test('design hard negatives never select the sibling route', () => {
   const manifest = fixtureManifest();
   const modeMap = fixtureModeMap();
