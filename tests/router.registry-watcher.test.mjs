@@ -1,13 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler } from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { mapCandidateRegistry } from '../src/registry/map.mjs';
 import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
+
+test('control repair is single-flight and acknowledged only after success', () => {
+  const source = readFileSync(new URL('../src/registry/watcher.mjs', import.meta.url), 'utf8');
+  const repair = source.indexOf("if (request.action === 'repair')");
+  const acknowledge = source.indexOf('await rm(config.control_path', repair);
+  assert.doesNotMatch(source, /setInterval\(async/);
+  assert.ok(repair < source.indexOf('await controller.repair()', repair));
+  assert.ok(source.indexOf("await publish('ready')", repair) < acknowledge);
+});
 
 function hashForTest(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');

@@ -417,34 +417,42 @@ export async function runRegistryWatcher(options) {
   // interval/handler registration so nothing leaks past the close. stopping is set by close().
   if (stopping) return { controller, instanceId, configurationFingerprint, close: async () => {} };
   const heartbeat = setInterval(() => { publish('ready').catch(() => {}); }, heartbeatMs);
-  const control = setInterval(async () => {
-    const request = await readJson(config.control_path);
-    if (!request || request.instance_id !== instanceId || request.configuration_fingerprint !== configurationFingerprint) return;
-    if (request.action === 'repair') {
-      await rm(config.control_path, { force: true });
-      await controller.repair();
-      await controller.flush();
-      await publish('ready');
-      return;
-    }
-    if (request.action === 'shutdown' || request.action === 'restart') {
-      clearInterval(control); clearInterval(heartbeat); stopping = true;
-      await controller.close();
-      await publish('stopped');
-      if (request.action === 'restart') {
-        if (configPath) {
+  let control = null;
+  const pollControl = async () => {
+    try {
+      const request = await readJson(config.control_path);
+      if (!request || request.instance_id !== instanceId || request.configuration_fingerprint !== configurationFingerprint) return;
+      if (request.action === 'repair') {
+        await controller.repair();
+        await controller.flush();
+        await publish('ready');
+        await rm(config.control_path, { force: true });
+        return;
+      }
+      if (request.action === 'shutdown' || request.action === 'restart') {
+        clearInterval(heartbeat); stopping = true;
+        await controller.close();
+        await publish('stopped');
+        await rm(config.control_path, { force: true });
+        if (request.action === 'restart' && configPath) {
           spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
             detached: true, stdio: 'ignore',
           }).unref();
         }
-        // When configPath is null (in-process test harness with options.config), there is
-        // no on-disk config to re-exec from; the harness owns the controller lifecycle.
       }
+    } catch (error) {
+      await atomicJson(config.status_path, {
+        schema_version: 1, state: 'error', instance_id: instanceId, pid: process.pid,
+        heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint, error: error.message,
+      }).catch(() => {});
+    } finally {
+      if (!stopping) control = setTimeout(pollControl, controlPollMs);
     }
-  }, controlPollMs);
+  };
+  control = setTimeout(pollControl, controlPollMs);
   const close = async () => {
     if (stopping) return;
-    stopping = true; clearInterval(control); clearInterval(heartbeat);
+    stopping = true; clearTimeout(control); clearInterval(heartbeat);
     await controller.close(); await publish('stopped');
   };
   process.once('SIGTERM', close);
