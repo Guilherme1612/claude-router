@@ -67,6 +67,7 @@ function runHook(prompt, env = {}) {
         ROUTER_STARTUP_ACK_MODULE_PATH: resolve('src/steward/startup-ack.mjs'),
         ROUTER_STARTUP_POINTER_MODULE_PATH: resolve('src/steward/startup-pointer.mjs'),
         ROUTER_TEST_FRESHNESS: 'fresh',
+        ROUTER_TEST_COVERAGE_FRESHNESS: 'fresh',
         ...env,
       },
     });
@@ -118,7 +119,7 @@ test('real UserPromptSubmit hook resolves before normal routing and failures rem
     assert.notEqual(resumed.stdout, '', resumed.stderr);
     const output = JSON.parse(resumed.stdout);
     assert.match(output.hookSpecificOutput.additionalContext, /context-recovery/);
-    assert.equal((output.hookSpecificOutput.additionalContext.match(/router-inject/g) || []).length, 1);
+    assert.equal((output.hookSpecificOutput.additionalContext.match(/<!-- router-inject\b/g) || []).length, 1);
 
     const forced = runHook('continue', { ROUTER_CONTEXT_OWNED_ROOT: root, ROUTER_CONTEXT_PROJECT_ROOT: root, ROUTER_CONTEXT_MODULE_PATH: join(root, 'missing.mjs') });
     assert.equal(forced.status, 0);

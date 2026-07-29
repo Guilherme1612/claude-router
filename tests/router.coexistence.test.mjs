@@ -55,7 +55,7 @@ test('explicitOverrideDetect: no /-prefix -> no override', async () => {
 });
 
 test('hook subprocess: /-prefix prompt exits 0 with only the stale coverage reminder', () => {
-  const r = runHook(JSON.stringify({ prompt: '/gsd-debug fix it' }));
+  const r = runHook(JSON.stringify({ prompt: '/gsd-debug fix it' }), { ROUTER_TEST_COVERAGE_FRESHNESS: 'stale' });
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.additionalContext, COVERAGE_REMINDER);
@@ -78,7 +78,7 @@ test('sentinelScan: non-router HTML comment -> false (exact match only)', async 
 });
 
 test('hook subprocess: prompt containing the exact sentinel -> pass-through', () => {
-  const r = runHook(JSON.stringify({ prompt: '<!-- router-inject --> something' }));
+  const r = runHook(JSON.stringify({ prompt: '<!-- router-inject --> something' }), { ROUTER_TEST_COVERAGE_FRESHNESS: 'stale' });
   assert.equal(r.status, 0);
   const out = JSON.parse(r.stdout);
   assert.equal(out.hookSpecificOutput.additionalContext, COVERAGE_REMINDER);

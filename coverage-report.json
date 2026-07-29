@@ -1,0 +1,2850 @@
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "category": "agents",
+      "id": "agent-creator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-py",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-ts",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "architecture-critic",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "business-rules-extractor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-builder",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-investigator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-reviewer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "claude-security",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "code-architect",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "code-explorer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "code-reviewer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "code-simplifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "comment-analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "comparator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "conversation-analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "explore",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "grader",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-advisor-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, plugin_context7_context7"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ai-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, plugin_context7_context7"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-assumptions-analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-code-fixer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-code-reviewer",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents",
+      "id": "gsd-codebase-mapper",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents",
+      "id": "gsd-debug-session-manager",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-debugger",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-classifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-synthesizer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-verifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-writer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-domain-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, plugin_context7_context7"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-auditor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-planner",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-executor",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, plugin_context7_context7"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-framework-selector",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-integration-checker",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-intel-updater",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-mempalace-curator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-nyquist-auditor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-pattern-mapper",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-phase-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, exa, firecrawl, jina, perplexity, plugin_context7_context7, ref, tavily"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-plan-checker",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-planner",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, plugin_context7_context7"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-project-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, exa, firecrawl, jina, perplexity, plugin_context7_context7, ref, tavily"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-research-synthesizer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-roadmapper",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-security-auditor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-auditor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-checker",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-researcher",
+      "coverage_status": "unmapped",
+      "classification": "expected_warn_mcp",
+      "reason": "requires unavailable MCP: context7, exa, firecrawl, jina, plugin_context7_context7, ref, tavily"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-user-profiler",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-verifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "legacy-analyst",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "patch-generator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "patch-verifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "plugin-validator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "pr-test-analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "scaffolder",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents",
+      "id": "scan-inventory",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "scan-researcher",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "scan-verifier",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "security-auditor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "silent-failure-hunter",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "skill-reviewer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "test-engineer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "type-design-analyzer",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "uplift-migrator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents",
+      "id": "version-delta-analyst",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "design-taste-frontend",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "impeccable",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-design-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-gap-finder",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-orchestrator-trace",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-from-gsd2",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-join-discord",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-review-backlog",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-workstreams",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "cancel-ralph",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-commit",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-compress",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-help",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-init",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-stats",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "clean_gone",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "code-review",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "commands",
+      "id": "commit",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "commit-push-pr",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "commands",
+      "id": "configure",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "create-docker-mcp-tunnel",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "create-plugin",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "example-command",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "feature-dev",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "help",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "hookify",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "list",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "maker-setup",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-assess",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "commands",
+      "id": "modernize-brief",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-extract-rules",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-harden",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-map",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-preflight",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-reimagine",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-status",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-transform",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-uplift",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "new-sdk-app",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "commands",
+      "id": "ralph-loop",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "commands",
+      "id": "review-pr",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "commands",
+      "id": "revise-claude-md",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "hooks",
+      "id": "context-mode-cache-heal",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-check-update",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-check-update-worker",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-config-reload",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-context-monitor",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-post-tool",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-pre-tool",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-session-start",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-stop",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-subagent-start",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-cursor-subagent-stop",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-ensure-canonical-path",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-graphify-update",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-phase-boundary",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-prompt-guard",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-read-guard",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-read-injection-scanner",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-session-state",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-statusline",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-update-banner",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-validate-commit",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-windsurf-pre-command",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-windsurf-pre-write",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-workflow-guard",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "gsd-worktree-path-guard",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "lib/git-cmd",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "lib/gsd-graphify-rebuild",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "managed-hooks-registry",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "router",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "router.evolve",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
+      "id": "router.mjs.pre-v1.2",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "access",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "agent-development",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "brainstorming",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-app",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-server",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcpb",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cardputer-buddy",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cavecrew",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-commit",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-compress",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-help",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-stats",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-automation-recommender",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-md-improver",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-security",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "command-development",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "configure",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode-ops",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-doctor",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-index",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-insight",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-purge",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-search",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-stats",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-upgrade",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "dispatching-parallel-agents",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-command",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-skill",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "executing-plans",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "finishing-a-development-branch",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "frontend-design",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "plugin_skills",
+      "id": "hook-development",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "m5-onboard",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "math-olympiad",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "mcp-integration",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "playground",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-settings",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-structure",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "project-artifact",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receipts",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receiving-code-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "requesting-code-review",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "plugin_skills",
+      "id": "session-report",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-creator",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-development",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "subagent-driven-development",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "systematic-debugging",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "plugin_skills",
+      "id": "test-driven-development",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-git-worktrees",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-superpowers",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "verification-before-completion",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-hookify-rules",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-plans",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-skills",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "brandkit",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "design-taste-frontend",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "excalidraw-diagram",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "find-skills",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "full-output-enforcement",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gpt-taste",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "graphify",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-add-tests",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ai-integration-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-fix",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-milestone",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-uat",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-autonomous",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-capture",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-cleanup",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-code-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-complete-milestone",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-config",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-debug",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-discuss-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-docs-update",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-eval-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-execute-phase",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-explore",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-extract-learnings",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-fast",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-forensics",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-graphify",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-health",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-help",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-import",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-inbox",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ingest-docs",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-manager",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-map-codebase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-capture",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-recall",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-milestone-summary",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mvp-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-new-milestone",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-new-project",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-next",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-context",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-ideate",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-manage",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-project",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-workflow",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-onboard",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pause-work",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-review-convergence",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pr-branch",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-profile-user",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-progress",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-quick",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-resume-work",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review-backlog",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-secure-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-settings",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ship",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-sketch",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spec-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spike",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-stats",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-surface",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-thread",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-review",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ultraplan-phase",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-undo",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-update",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-validate-phase",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-verify-work",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workspace",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workstreams",
+      "coverage_status": "unmapped",
+      "classification": "gap",
+      "reason": "no typed mode-map target or intentional classification"
+    },
+    {
+      "category": "skills",
+      "id": "high-end-visual-design",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "image-to-code",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "imagegen-frontend-mobile",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "imagegen-frontend-web",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "impeccable",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "industrial-brutalist-ui",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "minimalist-ui",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "redesign-existing-projects",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "stitch-design-taste",
+      "coverage_status": "mapped",
+      "classification": null
+    },
+    {
+      "category": "skills",
+      "id": "ui-ux-pro-max",
+      "coverage_status": "mapped",
+      "classification": null
+    }
+  ],
+  "forward_diagnostics": [],
+  "baseline_diagnostics": [],
+  "counts": {
+    "total": 289,
+    "mapped": 40,
+    "unmapped": 249,
+    "forward_diagnostics": 0,
+    "baseline_diagnostics": 0,
+    "by_classification": {
+      "expected_hook": 31,
+      "expected_warn_mcp": 8,
+      "gap": 210,
+      "mapped": 40
+    }
+  },
+  "unacknowledged_gaps": [
+    {
+      "category": "agents",
+      "id": "agent-creator"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-py"
+    },
+    {
+      "category": "agents",
+      "id": "agent-sdk-verifier-ts"
+    },
+    {
+      "category": "agents",
+      "id": "analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "architecture-critic"
+    },
+    {
+      "category": "agents",
+      "id": "business-rules-extractor"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-builder"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-investigator"
+    },
+    {
+      "category": "agents",
+      "id": "cavecrew-reviewer"
+    },
+    {
+      "category": "agents",
+      "id": "claude-security"
+    },
+    {
+      "category": "agents",
+      "id": "code-architect"
+    },
+    {
+      "category": "agents",
+      "id": "code-explorer"
+    },
+    {
+      "category": "agents",
+      "id": "code-reviewer"
+    },
+    {
+      "category": "agents",
+      "id": "code-simplifier"
+    },
+    {
+      "category": "agents",
+      "id": "comment-analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "comparator"
+    },
+    {
+      "category": "agents",
+      "id": "conversation-analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "explore"
+    },
+    {
+      "category": "agents",
+      "id": "grader"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-assumptions-analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-code-fixer"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-debug-session-manager"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-classifier"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-synthesizer"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-verifier"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-doc-writer"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-auditor"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-eval-planner"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-framework-selector"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-integration-checker"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-intel-updater"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-mempalace-curator"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-nyquist-auditor"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-pattern-mapper"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-plan-checker"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-research-synthesizer"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-roadmapper"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-security-auditor"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-auditor"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-ui-checker"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-user-profiler"
+    },
+    {
+      "category": "agents",
+      "id": "gsd-verifier"
+    },
+    {
+      "category": "agents",
+      "id": "legacy-analyst"
+    },
+    {
+      "category": "agents",
+      "id": "patch-generator"
+    },
+    {
+      "category": "agents",
+      "id": "patch-verifier"
+    },
+    {
+      "category": "agents",
+      "id": "plugin-validator"
+    },
+    {
+      "category": "agents",
+      "id": "pr-test-analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "scan-inventory"
+    },
+    {
+      "category": "agents",
+      "id": "scan-researcher"
+    },
+    {
+      "category": "agents",
+      "id": "scan-verifier"
+    },
+    {
+      "category": "agents",
+      "id": "security-auditor"
+    },
+    {
+      "category": "agents",
+      "id": "silent-failure-hunter"
+    },
+    {
+      "category": "agents",
+      "id": "skill-reviewer"
+    },
+    {
+      "category": "agents",
+      "id": "test-engineer"
+    },
+    {
+      "category": "agents",
+      "id": "type-design-analyzer"
+    },
+    {
+      "category": "agents",
+      "id": "uplift-migrator"
+    },
+    {
+      "category": "agents",
+      "id": "version-delta-analyst"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-design-review"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-gap-finder"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "pmacs-orchestrator-trace"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-from-gsd2"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-join-discord"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-review-backlog"
+    },
+    {
+      "category": "agents_store_skills",
+      "id": "source-command-gsd-workstreams"
+    },
+    {
+      "category": "commands",
+      "id": "cancel-ralph"
+    },
+    {
+      "category": "commands",
+      "id": "caveman"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-commit"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-compress"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-help"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-init"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-review"
+    },
+    {
+      "category": "commands",
+      "id": "caveman-stats"
+    },
+    {
+      "category": "commands",
+      "id": "clean_gone"
+    },
+    {
+      "category": "commands",
+      "id": "commit"
+    },
+    {
+      "category": "commands",
+      "id": "configure"
+    },
+    {
+      "category": "commands",
+      "id": "create-docker-mcp-tunnel"
+    },
+    {
+      "category": "commands",
+      "id": "create-plugin"
+    },
+    {
+      "category": "commands",
+      "id": "example-command"
+    },
+    {
+      "category": "commands",
+      "id": "feature-dev"
+    },
+    {
+      "category": "commands",
+      "id": "help"
+    },
+    {
+      "category": "commands",
+      "id": "hookify"
+    },
+    {
+      "category": "commands",
+      "id": "list"
+    },
+    {
+      "category": "commands",
+      "id": "maker-setup"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-brief"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-extract-rules"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-harden"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-map"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-preflight"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-reimagine"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-status"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-transform"
+    },
+    {
+      "category": "commands",
+      "id": "modernize-uplift"
+    },
+    {
+      "category": "commands",
+      "id": "new-sdk-app"
+    },
+    {
+      "category": "commands",
+      "id": "revise-claude-md"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "access"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "agent-development"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "brainstorming"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-app"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcp-server"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "build-mcpb"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cardputer-buddy"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "cavecrew"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-commit"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-compress"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-help"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-review"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "caveman-stats"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-automation-recommender"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-md-improver"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "claude-security"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "command-development"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "configure"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "context-mode-ops"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-doctor"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-index"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-insight"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-purge"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-search"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-stats"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "ctx-upgrade"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "dispatching-parallel-agents"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-command"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "example-skill"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "executing-plans"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "finishing-a-development-branch"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "hook-development"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "m5-onboard"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "math-olympiad"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "mcp-integration"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "playground"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-settings"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "plugin-structure"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "project-artifact"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receipts"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "receiving-code-review"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "session-report"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-creator"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "skill-development"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "subagent-driven-development"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-git-worktrees"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "using-superpowers"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "verification-before-completion"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-hookify-rules"
+    },
+    {
+      "category": "plugin_skills",
+      "id": "writing-skills"
+    },
+    {
+      "category": "skills",
+      "id": "full-output-enforcement"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-add-tests"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ai-integration-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-fix"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-milestone"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-audit-uat"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-autonomous"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-capture"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-cleanup"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-code-review"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-config"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-debug"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-discuss-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-docs-update"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-eval-review"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-explore"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-extract-learnings"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-fast"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-forensics"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-graphify"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-health"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-help"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-import"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-inbox"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ingest-docs"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-manager"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-map-codebase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-capture"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mempalace-recall"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-milestone-summary"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-mvp-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-new-milestone"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-next"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-context"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-ideate"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-manage"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-project"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-review"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ns-workflow"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-onboard"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pause-work"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-plan-review-convergence"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-pr-branch"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-profile-user"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-progress"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-review-backlog"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-secure-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-settings"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-sketch"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spec-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-spike"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-stats"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-surface"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-thread"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ui-review"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-ultraplan-phase"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-undo"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-update"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workspace"
+    },
+    {
+      "category": "skills",
+      "id": "gsd-workstreams"
+    }
+  ],
+  "fingerprints": {
+    "manifest": "79aee07fb73ec47c3a238d8d9490e8d715e950b6cdeda5d7f04e054eda4f0893",
+    "mode_map": "0ba92c28d846ab46273f9a99e4eb3f5a1c420797362a417ea0ccaf750489aa38",
+    "baseline": "85b2725d632be536fedcd3d8ef9d4fe270fdd827f22d9c6a5a0d6d51f63ef7d8"
+  }
+}

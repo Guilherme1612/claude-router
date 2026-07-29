@@ -2872,12 +2872,12 @@ export function inspectDecision(prompt, options = {}) {
   }
 }
 
-function main(payload, { additionalContext = '' } = {}) {
+function main(payload, { additionalContext = '', skipRouting = false } = {}) {
   const startNs = process.hrtime.bigint();
   if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
   const prompt = payload?.prompt ?? payload?.message;
   if (!payload || typeof prompt !== 'string') return;
-  const decision = inspectDecision(prompt, {
+  const decision = skipRouting ? { final_injected_context: '', pass_through_reason: 'context_handled' } : inspectDecision(prompt, {
     cwd: process.cwd(),
     mutateCache: true,
     logTelemetry: true,
@@ -3105,7 +3105,7 @@ if (isMain()) {
         || join(ROUTER_DIR, 'modules', 'context', 'prompt-route.mjs');
       const { routeContextPrompt } = await import(modulePath);
       const routed = routeContextPrompt({ prompt, ownedRoot, projectRoot });
-      const emitted = main(payload, { additionalContext: routed.additional_context || '' });
+      const emitted = main(payload, { additionalContext: routed.additional_context || '', skipRouting: routed.handled === true });
       if (routed.startup_notice_emitted && emitted.additionalContext) {
         try {
           const ackPath = process.env.ROUTER_STARTUP_ACK_MODULE_PATH

@@ -27,10 +27,11 @@ test('calibration-tasks.json: total entries include originals, codebase, evoluti
   const tasks = JSON.parse(readFileSync(CALIBRATION_TASKS, 'utf8'));
   assert.ok(Array.isArray(tasks), 'tasks must be an array');
   assert.ok(tasks.length >= 27, `expected at least 27 entries, got ${tasks.length}`);
-  const phase05Count = tasks.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
-  const originalCount = tasks.filter((t) => !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
-  const codebaseCount = tasks.filter((t) => t.codebase === true).length;
-  const evolutionCount = tasks.filter((t) => t.evolution === true).length;
+  const legacy = tasks.filter((t) => t.phase29 !== true);
+  const phase05Count = legacy.filter((t) => String(t?.right?.edge || '').includes('COV-')).length;
+  const originalCount = legacy.filter((t) => !t.codebase && !t.evolution && !t.phase14_mapping && !String(t?.right?.edge || '').includes('COV-')).length;
+  const codebaseCount = legacy.filter((t) => t.codebase === true).length;
+  const evolutionCount = legacy.filter((t) => t.evolution === true).length;
   assert.equal(originalCount, 10, '10 Phase-1 originals must be preserved');
   assert.ok(codebaseCount >= 7, `expected at least 7 codebase fixtures, got ${codebaseCount}`);
   assert.ok(evolutionCount >= 3 && evolutionCount <= 5, `expected 3-5 evolution fixtures, got ${evolutionCount}`);

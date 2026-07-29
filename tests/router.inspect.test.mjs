@@ -146,7 +146,7 @@ test('inspectDecision export: hit explanation includes full prompt-level contrac
 });
 
 test('router inspect JSON: threshold miss/no-match explains pass-through reason', () => {
-  const out = runJsonCommand(['inspect', '--json', 'zzzxxy untranslated one-off words']);
+  const out = runJsonCommand(['inspect', '--json', 'how does the memo writer persona work? what calls it?']);
   assertInspectShape(out);
   assert.ok(out.pass_through_reason, 'pass-through reason required on no-match');
   assert.ok(
