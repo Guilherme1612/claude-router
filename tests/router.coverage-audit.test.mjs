@@ -1,6 +1,45 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { auditCoverage } from '../src/coverage/audit.mjs';
+
+const BUILDER = fileURLToPath(new URL('../build-manifest.mjs', import.meta.url));
+
+function runBuilder({ modeMap = { schema_version: 2, entries: [] }, baseline = { schema_version: 1, entries: [] }, strict = false } = {}) {
+  const root = mkdtempSync(join(tmpdir(), 'router-coverage-builder-'));
+  const claude = join(root, '.claude');
+  const manifestPath = join(root, 'manifest.json');
+  const reportPath = join(root, 'coverage-report.json');
+  const modeMapPath = join(root, 'mode-map.json');
+  const baselinePath = join(root, 'coverage-baseline.json');
+  const agentsSkills = join(root, 'agents-skills');
+  mkdirSync(claude, { recursive: true });
+  mkdirSync(join(agentsSkills, 'fixture-skill'), { recursive: true });
+  writeFileSync(join(agentsSkills, 'fixture-skill', 'SKILL.md'),
+    '---\nname: fixture-skill\ndescription: fixture\n---\n# Fixture\n');
+  writeFileSync(modeMapPath, JSON.stringify(modeMap));
+  writeFileSync(baselinePath, JSON.stringify(baseline));
+  const result = spawnSync(process.execPath, [BUILDER, ...(strict ? ['--strict-coverage'] : [])], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ROUTER_CLAUDE_HOME: claude,
+      ROUTER_AGENTS_SKILLS_DIR: agentsSkills,
+      ROUTER_CLAUDE_JSON: join(root, 'claude.json'),
+      ROUTER_MANIFEST_OUT: manifestPath,
+      ROUTER_MODE_MAP_PATH: modeMapPath,
+      ROUTER_COVERAGE_REPORT_PATH: reportPath,
+      ROUTER_COVERAGE_BASELINE_PATH: baselinePath,
+    },
+  });
+  const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+  rmSync(root, { recursive: true, force: true });
+  return { result, report };
+}
 
 function manifest() {
   return {
@@ -118,4 +157,48 @@ test('equivalent inputs produce byte-identical sorted JSON-ready reports without
         : ['category', 'classification', 'coverage_status', 'id', 'reason'],
     );
   }
+});
+
+test('strict builder fails only after publishing unacknowledged reverse gaps', () => {
+  const normal = runBuilder();
+  assert.equal(normal.result.status, 0);
+  assert.ok(normal.report.unacknowledged_gaps.length > 0);
+
+  const strict = runBuilder({ strict: true });
+  assert.equal(strict.result.status, 1);
+  assert.ok(strict.report.unacknowledged_gaps.length > 0,
+    'the complete report must be readable after strict failure');
+
+  const acknowledged = runBuilder({
+    strict: true,
+    baseline: {
+      schema_version: 1,
+      entries: strict.report.unacknowledged_gaps
+        .map(item => ({
+          category: item.category,
+          id: item.id,
+          classification: 'expected_bm25_only',
+          reason: 'fixture acknowledgement',
+        })),
+    },
+  });
+  assert.equal(acknowledged.result.status, 0);
+});
+
+test('strict builder fails on forward diagnostics while stale acknowledgements remain warnings', () => {
+  const { result, report } = runBuilder({
+    strict: true,
+    modeMap: {
+      schema_version: 2,
+      entries: [{ id: 'missing', invoke_kind: 'skill', recommended_skills: ['missing'] }],
+    },
+    baseline: {
+      schema_version: 1,
+      entries: [{ category: 'skills', id: 'gone', classification: 'expected_bm25_only', reason: 'stale fixture' }],
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.ok(report.forward_diagnostics.length > 0);
+  assert.ok(report.baseline_diagnostics.some(item => item.code === 'baseline_stale'));
 });
