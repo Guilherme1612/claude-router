@@ -418,6 +418,12 @@ export async function runRegistryWatcher(options) {
   if (stopping) return { controller, instanceId, configurationFingerprint, close: async () => {} };
   const heartbeat = setInterval(() => { publish('ready').catch(() => {}); }, heartbeatMs);
   let control = null;
+  const onSigterm = () => { close().catch(() => {}); };
+  const onSigint = () => { close().catch(() => {}); };
+  const removeSignalHandlers = () => {
+    process.off('SIGTERM', onSigterm);
+    process.off('SIGINT', onSigint);
+  };
   const pollControl = async () => {
     try {
       const request = await readJson(config.control_path);
@@ -433,6 +439,7 @@ export async function runRegistryWatcher(options) {
         clearInterval(heartbeat); stopping = true;
         await controller.close();
         await publish('stopped');
+        removeSignalHandlers();
         await rm(config.control_path, { force: true });
         if (request.action === 'restart' && configPath) {
           spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
@@ -453,10 +460,11 @@ export async function runRegistryWatcher(options) {
   const close = async () => {
     if (stopping) return;
     stopping = true; clearTimeout(control); clearInterval(heartbeat);
-    await controller.close(); await publish('stopped');
+    try { await controller.close(); await publish('stopped'); }
+    finally { removeSignalHandlers(); }
   };
-  process.once('SIGTERM', close);
-  process.once('SIGINT', close);
+  process.once('SIGTERM', onSigterm);
+  process.once('SIGINT', onSigint);
   return { controller, instanceId, configurationFingerprint, close };
 }
 

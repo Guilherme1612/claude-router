@@ -201,7 +201,7 @@ test('install verb: fresh install into empty Claude and Codex homes installs the
     // Unrelated files are byte-identical to the pre-install snapshot.
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -212,7 +212,7 @@ test('upgrade verb: generation N to N+1 selects the new generation and preserves
   const preSnapshot = snapshotUnrelated(f);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     writeFileSync(f.sourceRouter, 'export const generation = 2;\n');
     const upgraded = await upgradeRouter({ ...f, skipController: true });
     assert.equal(upgraded.status, 'upgraded');
@@ -224,7 +224,7 @@ test('upgrade verb: generation N to N+1 selects the new generation and preserves
     nonRouterHooksPreserved(f);
     assert.equal(routerBindingPresent(f), true);
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -242,7 +242,7 @@ test('reinstall verb: uninstall followed by install with same source produces a 
   const preSettingsBytes = readFileSync(f.settingsPath);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     assert.equal(existsSync(f.routerPath), true);
 
     // Uninstall: only router-owned artifacts removed; settings.json restored to pre-install bytes.
@@ -268,11 +268,11 @@ test('reinstall verb: uninstall followed by install with same source produces a 
     nonRouterHooksPreserved(f);
     // Unrelated files preserved byte-identically across reinstall.
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
-    safeStopController(f, reinstallHolder);
+    await safeStopController(f, reinstallHolder);
     reinstallHolder = null;
   } finally {
-    if (reinstallHolder) safeStopController(f, reinstallHolder);
-    safeStopController(f, holder);
+    if (reinstallHolder) await safeStopController(f, reinstallHolder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -284,7 +284,7 @@ test('disable+enable verb: binding transitions are exact and non-router hooks ar
   // verified generation pointer (install alone does not create a generation; upgrade does).
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     await upgradeRouter({ ...f, skipController: true });
     const postUpgradeSettings = JSON.parse(readFileSync(f.settingsPath, 'utf8'));
     assert.equal(routerBindingPresent(f), true);
@@ -300,7 +300,7 @@ test('disable+enable verb: binding transitions are exact and non-router hooks ar
     const postEnableSettings = JSON.parse(readFileSync(f.settingsPath, 'utf8'));
     assert.deepEqual(postEnableSettings, postUpgradeSettings);
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -312,7 +312,7 @@ test('uninstall verb: owned root removed and settings.json byte-identical to pre
   const preSettingsBytes = readFileSync(f.settingsPath);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     const result = await uninstallRouter(f);
     assert.equal(result.status, 'uninstalled');
     // Owned root is removed.
@@ -326,7 +326,7 @@ test('uninstall verb: owned root removed and settings.json byte-identical to pre
     const second = await uninstallRouter(f);
     assert.equal(second.status, 'already-uninstalled');
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -340,7 +340,7 @@ test('together-mode isolation: Claude and Codex installations remain independent
   try {
     // Install: both Claude and Codex owned roots are distinct directories.
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     assert.notEqual(f.ownedRoot, f.codexOwnedRoot);
     assert.equal(existsSync(f.ownedRoot), true);
     assert.equal(existsSync(f.codexOwnedRoot), true);
@@ -375,7 +375,7 @@ test('together-mode isolation: Claude and Codex installations remain independent
     // Unrelated files STILL preserved byte-identically after uninstall.
     assertUnrelatedUnchanged(f, preSnapshot);
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -391,7 +391,7 @@ test('crash sampling: upgrade before-active-pointer leaves prior generation sele
   const preSnapshot = snapshotUnrelated(f);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     await upgradeRouter({ ...f, skipController: true });
     const first = resolveInstallGeneration(f);
     writeFileSync(f.sourceRouter, 'export const generation = 2;\n');
@@ -401,7 +401,7 @@ test('crash sampling: upgrade before-active-pointer leaves prior generation sele
     assert.equal(resolveInstallGeneration(f).generationId, first.generationId);
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -412,7 +412,7 @@ test('crash sampling: upgrade after-active-pointer commits new generation and pr
   const preSnapshot = snapshotUnrelated(f);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     await upgradeRouter({ ...f, skipController: true });
     const first = resolveInstallGeneration(f);
     writeFileSync(f.sourceRouter, 'export const generation = 2;\n');
@@ -423,7 +423,7 @@ test('crash sampling: upgrade after-active-pointer commits new generation and pr
     assert.notEqual(resolved.generationId, first.generationId);
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -439,7 +439,7 @@ test('crash sampling: reinstall boundary samples both before-active-pointer and 
   const preSettingsBytes = readFileSync(f.settingsPath);
   try {
     await installRouter(installOptions(f, holder));
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     await upgradeRouter({ ...f, skipController: true });
     const first = resolveInstallGeneration(f);
     // Uninstall then reinstall (fresh install transaction with same source).
@@ -447,7 +447,7 @@ test('crash sampling: reinstall boundary samples both before-active-pointer and 
     assert.deepEqual(readFileSync(f.settingsPath), preSettingsBytes);
     const reinstallHolder = {};
     await installRouter(installOptions(f, reinstallHolder));
-    safeStopController(f, reinstallHolder);
+    await safeStopController(f, reinstallHolder);
     await upgradeRouter({ ...f, skipController: true });
     assert.equal(resolveInstallGeneration(f).generationId, first.generationId);
     // Advance via upgrade and crash before active pointer: prior generation selected.
@@ -460,7 +460,7 @@ test('crash sampling: reinstall boundary samples both before-active-pointer and 
     // Unrelated state preserved byte-identically across the entire reinstall+crash sequence.
     assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
   } finally {
-    safeStopController(f, holder);
+    await safeStopController(f, holder);
     rmSync(f.root, { recursive: true, force: true });
   }
 });
@@ -475,7 +475,7 @@ for (const variant of ['claude', 'codex', 'together']) {
     const preSettingsBytes = readFileSync(f.settingsPath);
     try {
       await installRouter(installOptions(f, holder));
-      safeStopController(f, holder);
+      await safeStopController(f, holder);
       assert.equal(routerBindingPresent(f), true);
       nonRouterHooksPreserved(f);
       assertUnrelatedUnchanged(f, preSnapshot, { excludeSettings: true });
@@ -484,7 +484,7 @@ for (const variant of ['claude', 'codex', 'together']) {
       assert.deepEqual(readFileSync(f.settingsPath), preSettingsBytes);
       assertUnrelatedUnchanged(f, preSnapshot);
     } finally {
-      safeStopController(f, holder);
+      await safeStopController(f, holder);
       rmSync(f.root, { recursive: true, force: true });
     }
   });

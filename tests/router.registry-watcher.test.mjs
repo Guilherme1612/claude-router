@@ -18,6 +18,13 @@ test('control repair is single-flight and acknowledged only after success', () =
   assert.ok(source.indexOf("await publish('ready')", repair) < acknowledge);
 });
 
+test('watcher shutdown unregisters both process signal handlers', () => {
+  const source = readFileSync(new URL('../src/registry/watcher.mjs', import.meta.url), 'utf8');
+  assert.match(source, /process\.off\('SIGTERM', onSigterm\)/);
+  assert.match(source, /process\.off\('SIGINT', onSigint\)/);
+  assert.match(source, /finally \{ removeSignalHandlers\(\); \}/);
+});
+
 function hashForTest(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
 }
