@@ -457,5 +457,193 @@
       "status": "pass_through",
       "edge": "MAP-01 insufficient-confidence active-but-unmapped calibration fixture"
     }
+  },
+  {
+    "id": 33,
+    "prompt": "prepare the branch and pull request for release",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-ship", "skills": ["gsd-ship"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 34,
+    "prompt": "turn this idea into a scoped project with requirements and a roadmap",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-new-project", "skills": ["gsd-new-project"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 35,
+    "prompt": "carry out every approved plan in the current phase",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-execute-phase", "skills": ["gsd-execute-phase"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 36,
+    "prompt": "make this small repository change with tracked verification",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-quick", "skills": ["gsd-quick"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 37,
+    "prompt": "fill the missing automated checks for the completed phase",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-validate-phase", "skills": ["gsd-validate-phase"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 38,
+    "prompt": "walk me through acceptance of what was just built",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-verify-work", "skills": ["gsd-verify-work"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 39,
+    "prompt": "continue from the saved handoff and unfinished session state",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-resume-work", "skills": ["gsd-resume-work"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 40,
+    "prompt": "archive the finished release cycle and prepare the next one",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gsd-complete-milestone", "skills": ["gsd-complete-milestone"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle positive" }
+  },
+  {
+    "id": 41,
+    "prompt": "create a coherent logo palette typography and brand asset kit",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/brandkit", "skills": ["brandkit"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 42,
+    "prompt": "design a quiet editorial interface with restrained spacing and typography",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/minimalist-ui", "skills": ["minimalist-ui"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 43,
+    "prompt": "build a raw mechanical control panel with exposed structure",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/industrial-brutalist-ui", "skills": ["industrial-brutalist-ui"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 44,
+    "prompt": "turn this screenshot into a working responsive page",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/image-to-code", "skills": ["image-to-code"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 45,
+    "prompt": "generate the hero artwork and web visuals for this landing page",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/imagegen-frontend-web", "skills": ["imagegen-frontend-web"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 46,
+    "prompt": "generate polished visual assets for this mobile app screen",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/imagegen-frontend-mobile", "skills": ["imagegen-frontend-mobile"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 47,
+    "prompt": "audit and overhaul the interface already in this repository",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/redesign-existing-projects", "skills": ["redesign-existing-projects"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 48,
+    "prompt": "define semantic design tokens and a reusable component language",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/stitch-design-taste", "skills": ["stitch-design-taste"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 49,
+    "prompt": "draw an editable hand sketched system architecture diagram",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/excalidraw-diagram", "skills": ["excalidraw-diagram"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 50,
+    "prompt": "polish this interface with premium motion and advanced interaction detail",
+    "phase29": true,
+    "phase29_classification": "positive",
+    "right": { "mode": "/gpt-taste", "skills": ["gpt-taste"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 design positive" }
+  },
+  {
+    "id": 51,
+    "prompt": "walk me through acceptance of what was just built",
+    "phase29": true,
+    "phase29_classification": "near_collision",
+    "right": { "mode": "/gsd-verify-work", "skills": ["gsd-verify-work"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 lifecycle sibling near-collision for gsd-ship" }
+  },
+  {
+    "id": 52,
+    "prompt": "generate a new illustration for the page",
+    "phase29": true,
+    "phase29_classification": "negative",
+    "right": { "mode": null, "skills": [], "agents": [], "tier": "low", "status": "pass_through", "edge": "Phase 29 image-to-code family hard negative" }
+  },
+  {
+    "id": 53,
+    "prompt": "boundary fixture low score",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.29, "margin": 0.29 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "low", "status": "route", "edge": "Phase 29 T_low below boundary" }
+  },
+  {
+    "id": 54,
+    "prompt": "boundary fixture medium score",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.3, "margin": 0.2 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_low at boundary" }
+  },
+  {
+    "id": 55,
+    "prompt": "boundary fixture medium confidence",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.59, "margin": 0.39 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 T_high below boundary" }
+  },
+  {
+    "id": 56,
+    "prompt": "boundary fixture high confidence",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.6, "margin": 0.4 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 T_high at boundary" }
+  },
+  {
+    "id": 57,
+    "prompt": "boundary fixture near tie",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.9, "margin": 0.19 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "medium", "status": "route", "edge": "Phase 29 M below boundary" }
+  },
+  {
+    "id": 58,
+    "prompt": "boundary fixture decisive margin",
+    "phase29": true,
+    "phase29_classification": "boundary",
+    "boundary": { "score": 0.9, "margin": 0.2 },
+    "right": { "mode": "/phase29-boundary-top", "skills": ["phase29-boundary-top"], "agents": [], "tier": "high", "status": "route", "edge": "Phase 29 M at boundary" }
   }
 ]
