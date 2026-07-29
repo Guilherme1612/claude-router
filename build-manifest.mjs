@@ -14,6 +14,8 @@
 //   ROUTER_PROJECT_CONFIG_PATH   project path whose ~/.claude.json entry to read
 //   ROUTER_MANIFEST_OUT          default next to this script
 //   ROUTER_MODE_MAP_PATH         default ~/.claude/router/mode-map.json
+//   ROUTER_COVERAGE_REPORT_PATH  default beside ROUTER_MANIFEST_OUT
+//   ROUTER_COVERAGE_BASELINE_PATH default beside this script
 //
 // Robustness: every optional path is guarded. A completely empty ~/.claude yields
 // exit 0 with a valid manifest and all-zero counts.
@@ -22,6 +24,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync, statS
 import { join, dirname, basename, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { auditCoverage } from './src/coverage/audit.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -36,6 +39,10 @@ const PROJECT_MCP_JSON = process.env.ROUTER_PROJECT_MCP_JSON || '';
 const PROJECT_CONFIG_PATH = process.env.ROUTER_PROJECT_CONFIG_PATH || '';
 const OUT = process.env.ROUTER_MANIFEST_OUT || join(SCRIPT_DIR, 'claude-inventory-manifest.json');
 const MODE_MAP_PATH = process.env.ROUTER_MODE_MAP_PATH || join(CLAUDE, 'router', 'mode-map.json');
+const COVERAGE_REPORT_PATH = process.env.ROUTER_COVERAGE_REPORT_PATH
+  || join(dirname(OUT), 'coverage-report.json');
+const COVERAGE_BASELINE_PATH = process.env.ROUTER_COVERAGE_BASELINE_PATH
+  || join(SCRIPT_DIR, 'coverage-baseline.json');
 export const MODE_MAP_SIZE_CEILING = 30_000;
 
 function readJson(path, fallback) {
@@ -534,8 +541,20 @@ mkdirSync(dirname(OUT), { recursive: true });
 const tmp = `${OUT}.tmp.${process.pid}`;
 writeFileSync(tmp, JSON.stringify(manifest, null, 2));
 renameSync(tmp, OUT);
+
+const coverage = auditCoverage({
+  manifest,
+  modeMap: readJson(MODE_MAP_PATH, null),
+  baseline: readJson(COVERAGE_BASELINE_PATH, null),
+});
+mkdirSync(dirname(COVERAGE_REPORT_PATH), { recursive: true });
+const coverageTmp = `${COVERAGE_REPORT_PATH}.tmp.${process.pid}`;
+writeFileSync(coverageTmp, JSON.stringify(coverage, null, 2));
+renameSync(coverageTmp, COVERAGE_REPORT_PATH);
+
 console.log(JSON.stringify(manifest.counts, null, 2));
 console.log(`manifest written: ${OUT}`);
+console.log(`coverage report written: ${COVERAGE_REPORT_PATH}`);
 console.log(`size: ${fileStatSize(OUT)} bytes`);
 
 const modeMapSize = fileStatSize(MODE_MAP_PATH);

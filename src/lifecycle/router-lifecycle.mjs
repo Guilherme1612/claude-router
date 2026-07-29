@@ -357,6 +357,7 @@ export async function installRouter(options) {
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
+    'coverage/audit.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
@@ -398,7 +399,10 @@ export async function installRouter(options) {
   // ownedRoot has modules/ not src/, so the mirror makes those imports resolve
   // without modifying the dev fixtures. validate.mjs subprocess env now
   // inherits the real HOME so fixtures find the deployed hook via homedir().
-  const gateEntryNames = ['router.calibrate.mjs', 'calibration-tasks.json', 'build-manifest.mjs'];
+  const gateEntryNames = [
+    'router.calibrate.mjs', 'calibration-tasks.json', 'build-manifest.mjs',
+    'coverage-baseline.json',
+  ];
   const gateFixtureNames = [
     'tests/router.registry-schema.test.mjs',
     'tests/router.adapters.test.mjs',
@@ -761,8 +765,13 @@ export async function uninstallRouter(options) {
   // (claude-inventory-manifest.json) at install time. It is intentionally outside the
   // ownership manifest (rebuilt, not installed), so prune it here so uninstall removes
   // the owned root completely instead of leaving the runtime manifest as an orphan.
-  for (const inventoryManifest of [join(p.ownedRoot, 'claude-inventory-manifest.json'), join(p.codexOwnedRoot, 'claude-inventory-manifest.json')]) {
-    if (existsSync(inventoryManifest)) rmSync(inventoryManifest, { force: true });
+  for (const generatedAsset of [
+    join(p.ownedRoot, 'claude-inventory-manifest.json'),
+    join(p.codexOwnedRoot, 'claude-inventory-manifest.json'),
+    join(p.ownedRoot, 'coverage-report.json'),
+    join(p.codexOwnedRoot, 'coverage-report.json'),
+  ]) {
+    if (existsSync(generatedAsset)) rmSync(generatedAsset, { force: true });
   }
   // Re-prune the owned roots now that lifecycle state is gone so they are removed when empty.
   for (const directory of [p.ownedRoot, p.codexOwnedRoot]) {
