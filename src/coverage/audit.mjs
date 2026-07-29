@@ -46,7 +46,8 @@ function capabilities(manifest) {
         category,
         id,
         scope: entry?.scope === 'project' || category === 'project_scoped_skills' ? 'project' : 'global',
-        routeableSkill: category !== 'agents_store_skills' || entry?.scope === 'global',
+        routeableSkill: category !== 'project_scoped_skills'
+          && (category !== 'agents_store_skills' || entry?.scope === 'global'),
         missingMcp: category === 'agents' && Array.isArray(entry?.requires_mcp_not_in_manifest)
           ? entry.requires_mcp_not_in_manifest.map(cleanId).filter(Boolean).sort()
           : [],

@@ -15,6 +15,7 @@ function runBuilder({
   baseline = { schema_version: 1, entries: [] },
   strict = false,
   blockedAgent = false,
+  projectSkill = false,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-coverage-builder-'));
   const claude = join(root, '.claude');
@@ -23,11 +24,17 @@ function runBuilder({
   const modeMapPath = join(root, 'mode-map.json');
   const baselinePath = join(root, 'coverage-baseline.json');
   const agentsSkills = join(root, 'agents-skills');
+  const projectRoot = join(root, 'project');
   mkdirSync(claude, { recursive: true });
   if (blockedAgent) {
     mkdirSync(join(claude, 'agents'), { recursive: true });
     writeFileSync(join(claude, 'agents', 'blocked-agent.md'),
       '---\nname: blocked-agent\ndescription: blocked fixture\ntools: mcp__missing__tool\n---\n# Blocked\n');
+  }
+  if (projectSkill) {
+    mkdirSync(join(projectRoot, '.claude', 'skills', 'project-only'), { recursive: true });
+    writeFileSync(join(projectRoot, '.claude', 'skills', 'project-only', 'SKILL.md'),
+      '---\nname: project-only\ndescription: project fixture\n---\n# Project\n');
   }
   mkdirSync(join(agentsSkills, 'fixture-skill'), { recursive: true });
   writeFileSync(join(agentsSkills, 'fixture-skill', 'SKILL.md'),
@@ -40,6 +47,7 @@ function runBuilder({
       ...process.env,
       ROUTER_CLAUDE_HOME: claude,
       ROUTER_AGENTS_SKILLS_DIR: agentsSkills,
+      ROUTER_PROJECT_SKILL_DIRS: projectSkill ? projectRoot : '',
       ROUTER_CLAUDE_JSON: join(root, 'claude.json'),
       ROUTER_MANIFEST_OUT: manifestPath,
       ROUTER_MODE_MAP_PATH: modeMapPath,
@@ -180,6 +188,45 @@ test('matches live routeability for non-global agents-store skills', () => {
   assert.ok(report.forward_diagnostics.some(item =>
     item.code === 'stale_skill_target' && item.target === 'store-only'));
   assert.equal(record(report, 'agents_store_skills', 'store-only').classification, 'gap');
+});
+
+test('project-scoped skills remain expected but cannot satisfy global routes', () => {
+  const route = {
+    schema_version: 2,
+    entries: [{
+      id: 'project-route',
+      invoke_kind: 'skill',
+      signal_patterns: ['project helper'],
+      recommended_skills: ['project-only'],
+      recommended_agents: [],
+    }],
+  };
+  const live = validateRouteTargets(manifest(), route);
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.ok(live.some(item => item.status === 'stale_target' && item.target === 'project-only'));
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'stale_skill_target' && item.target === 'project-only'));
+  assert.equal(record(report, 'project_scoped_skills', 'project-only').classification,
+    'expected_scope_project');
+
+  const initial = runBuilder({ modeMap: route, projectSkill: true });
+  const baseline = {
+    schema_version: 1,
+    entries: initial.report.unacknowledged_gaps.map(item => ({
+      ...item,
+      classification: 'expected_bm25_only',
+      reason: 'fixture acknowledgement',
+    })),
+  };
+  const strict = runBuilder({ modeMap: route, baseline, projectSkill: true, strict: true });
+  assert.equal(strict.result.status, 1);
+  assert.ok(strict.report.forward_diagnostics.some(item =>
+    item.code === 'stale_skill_target' && item.target === 'project-only'));
 });
 
 test('warn routes report blocked agents without making them dispatch targets', () => {
