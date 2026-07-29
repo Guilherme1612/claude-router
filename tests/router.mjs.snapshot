@@ -696,6 +696,52 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
   return rows;
 }
 
+// SAF-02 hot-path stale-target predicate. Factored from validateRouteTargets
+// (lines 636-697) but evaluates a SINGLE cached route against the current
+// manifest instead of iterating the whole mode-map. Reuses buildTargetIndexes,
+// knownSkillTargets, stripLeadingSlash, and the same indexes.commands /
+// indexes.safeAgents / indexes.blockedAgents sets — no second Set builder
+// (Pitfall 3 guard). Returns true for null/warn/pass-through routes (nothing
+// to verify) and true on any internal error (fail-open: never blocks a cache
+// hit from being served; the caller falls through to recompute on false only).
+// Do NOT call validateRouteTargets on the hot path — it builds diagnostic
+// rows for every entry (prohibition).
+export function routeTargetsExist(route, manifest, indexes) {
+  try {
+    if (!route) return true; // nothing to verify (warn/pass-through/no route)
+    const kind = route.invoke_kind;
+    // Warn routes carry a warning string, not dispatch targets — nothing to verify.
+    if (kind === 'warn') return true;
+    // Pass-through routes (no invoke_kind or low tier with no injection) — nothing to verify.
+    if (!kind || kind === '') return true;
+    // Build indexes inside the try so a malformed manifest fails open (returns
+    // true) instead of throwing out of the default-parameter evaluation.
+    const idx = indexes || buildTargetIndexes(manifest);
+    const skills = knownSkillTargets(idx);
+    // Slash routes: the id/mode must resolve as a manifest command. (Intentional
+    // mode-map aliases / schema routes are a modeMap-level concern; a cached
+    // route's id is a command id, so a miss here means the command was removed
+    // or renamed since the cache entry was written.)
+    if (kind === 'slash') {
+      const id = stripLeadingSlash(route.id || route.mode || '');
+      if (id && !idx.commands.has(id)) return false;
+    }
+    for (const target of (route.recommended_skills || [])) {
+      const name = stripLeadingSlash(target);
+      if (!skills.has(name)) return false;
+    }
+    for (const target of (route.recommended_agents || [])) {
+      const name = stripLeadingSlash(target);
+      // An agent in blockedAgents is still a known target (warn routes may
+      // reference it); absence from both sets means the agent was removed.
+      if (!idx.safeAgents.has(name) && !idx.blockedAgents.has(name)) return false;
+    }
+    return true;
+  } catch {
+    return true; // fail-open: never block a cache hit on an internal error
+  }
+}
+
 const UNMAPPED_RANK_BASIS = 'commands, global skills, plugin skills, safe agents, keyword priority, name';
 const UNMAPPED_KEYWORD_RE = /\b(gsd|router|codebase|debug|test|review|docs?|graph|audit|fix|health|coverage)\b/i;
 
@@ -1506,15 +1552,16 @@ export function cacheLookup(sig, cache) {
   return e && e.route ? e.route : null;
 }
 
-// Cache key (RTE-07). sha256(normalizedPrompt + "|" + intentKeywords.join(" ")
-// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime + "|" + surfaceMtime). Folding mtimes
-// means a mode-map edit, manifest rebuild, graph.json rebuild for cwd, OR
-// surface profile change invalidates stale entries (key changes). graphMtime
-// and surfaceMtime default to 0 to keep older callers backward-compatible.
-export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0, surfaceMtime = 0) {
+// Cache key (RTE-07 / SAF-01). sha256(normalizedPrompt + "|" + intentKeywords.join(" ")
+// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime + "|" + surfaceMtime
+// + "|" + weightsMtime). Folding mtimes means a mode-map edit, manifest rebuild,
+// graph.json rebuild for cwd, surface profile change, OR weights.json edit
+// invalidates stale entries (key changes). graphMtime/surfaceMtime/weightsMtime
+// default to 0 to keep older callers backward-compatible.
+export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0, surfaceMtime = 0, weightsMtime = 0) {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
-  const joined = [np, ik, modeMapMtime, manifestMtime, graphMtime, surfaceMtime].join('|');
+  const joined = [np, ik, modeMapMtime, manifestMtime, graphMtime, surfaceMtime, weightsMtime].join('|');
   return createHash('sha256').update(joined).digest('hex');
 }
 
@@ -1540,6 +1587,19 @@ function readSurfaceMtime(runtimeConfigDir = RUNTIME_CONFIG_DIR) {
     const p = join(runtimeConfigDir, '.gsd-surface.json');
     if (!existsSync(p)) return 0;
     return statSync(p).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+// Read weights.json mtime (best-effort; returns 0 when the file is missing or
+// stat fails). Used to fold weights edits into the cache key (SAF-01) so a
+// Phase 28/29 weights mutation invalidates stale cached routes. Mirrors
+// readSurfaceMtime — WEIGHTS is a single fixed file, not cwd-dependent.
+function readWeightsMtime(weightsPath = WEIGHTS) {
+  try {
+    if (!existsSync(weightsPath)) return 0;
+    return statSync(weightsPath).mtimeMs;
   } catch {
     return 0;
   }
@@ -2115,6 +2175,33 @@ function assembleBlock(route, sigHash, reasoning, bodyLines) {
   return [open, `Reasoning: ${reasoning}`, ...bodyLines, close].join('\n');
 }
 
+// SAF-04 hard render-count cap. Pure function: caps recommended_skills to the
+// first 3 and recommended_agents to the first 2, preserving author priority
+// order (skills[0] is primary — consistent with formatInjection's
+// primarySkill = skills[0] semantics). Sets _render_cap_truncated (a
+// telemetry-only flag) when the input exceeds either cap; the flag is stripped
+// from the route before formatInjection produces injection output. Called
+// before formatInjection on BOTH the cache-hit and fresh-route paths. Never
+// throws — returns the route unchanged on any error.
+export function capRouteRender(route) {
+  if (!route) return route;
+  try {
+    const inSkills = Array.isArray(route.recommended_skills) ? route.recommended_skills : [];
+    const inAgents = Array.isArray(route.recommended_agents) ? route.recommended_agents : [];
+    const skills = inSkills.slice(0, 3);
+    const agents = inAgents.slice(0, 2);
+    const truncated = (inSkills.length > 3) || (inAgents.length > 2);
+    return {
+      ...route,
+      recommended_skills: skills,
+      recommended_agents: agents,
+      _render_cap_truncated: truncated || undefined,
+    };
+  } catch {
+    return route;
+  }
+}
+
 export function formatInjection(route, prompt = '', sigHash = '') {
   if (!route) return '';
   // Re-entry dedupe (INJ-05) — scan the incoming prompt for the exact sentinel.
@@ -2285,6 +2372,9 @@ function routeToInspectShape(state) {
       warning_text: route && route.warning ? route.warning : null,
     },
     decision_trace: state.decision_trace || [],
+    // SAF-01: derived mtime fingerprint (mode_map:manifest:weights) for this
+    // decision — observable in inspectDecision output and telemetry.
+    routing_version: state.routing_version || null,
   };
 }
 
@@ -2356,6 +2446,9 @@ function telemetryEntryFromState(decision, startNs) {
     surface_status: decision.surface_status || 'unconfigured',
     surface_disabled_count: typeof decision.surface_disabled_count === 'number' ? decision.surface_disabled_count : 0,
     cwd: decision.cwd,
+    // SAF-01: derived mtime-fingerprint of the mode-map/manifest/weights mtimes
+    // that produced this route's cache key. Observability only — no prompt text.
+    routing_version: decision.routing_version || null,
   };
 }
 
@@ -2536,17 +2629,31 @@ export function inspectDecision(prompt, options = {}) {
       graph_mtime: graphMtime,
     };
     const surfaceMtime = opts.surfaceMtime ?? readSurfaceMtime(opts.runtimeConfigDir);
-    const sig = cacheKey(state.normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime, surfaceMtime);
+    const weightsMtime = opts.weightsMtime ?? readWeightsMtime(opts.weightsPath);
+    const sig = cacheKey(state.normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime, surfaceMtime, weightsMtime);
     state.cache.key_prefix = sig.slice(0, 8);
     state.cache.invalidation_mtimes = {
       mode_map: modeMapMtime,
       manifest: manifestMtime,
       graph: graphMtime,
       surface: surfaceMtime,
+      weights: weightsMtime,
     };
+    // SAF-01: routing_version is a DERIVED observability string (not stored on
+    // disk) — logged in telemetry so a stale-cache diagnosis can correlate a
+    // cache miss/hit with the mode-map/manifest/weights mtimes that produced
+    // the key. Contains no prompt text or secret material.
+    state.routing_version = `${modeMapMtime}:${manifestMtime}:${weightsMtime}`;
     const cache = loadCache(opts.cachePath);
     const cached = cacheLookup(sig, cache);
-    if (cached) {
+    if (cached && !routeTargetsExist(cached, manifest)) {
+      // SAF-02: cached route references a target id/skill/agent that is absent
+      // from the current manifest (removed or renamed since the entry was
+      // written). Do NOT serve the stale entry — fall through to recompute.
+      state.cache.status = 'stale_target_recompute';
+      state.cache.cached_route = cached;
+      state.decision_trace.push('cache:stale_target');
+    } else if (cached) {
       state.tier = cached.tier || 'high';
       state.route = cached;
       state.invoke_kind = cached.invoke_kind;
@@ -2555,7 +2662,11 @@ export function inspectDecision(prompt, options = {}) {
       state.cache.cached_route = cached;
       state.passThroughReason = 'cache_hit_scoring_skipped';
       state.decision_trace.push('cache:hit', 'scoring:skipped');
-      const routeBlock = formatInjection(cached, prompt, sig.slice(0, 8));
+      // SAF-04: cap render counts before formatInjection on the cache-hit path.
+      const capped = capRouteRender(cached);
+      if (capped._render_cap_truncated) state.decision_trace.push('render:cap_truncated');
+      delete capped._render_cap_truncated; // telemetry-only flag, strip before injection
+      const routeBlock = formatInjection(capped, prompt, sig.slice(0, 8));
       const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
       state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
       return finish();
@@ -2656,10 +2767,17 @@ export function inspectDecision(prompt, options = {}) {
     }
 
     if (finalRoute) {
-      state.route = finalRoute;
-      state.invoke_kind = finalRoute.invoke_kind;
-      if (finalRoute.invoke_kind === 'warn') state.passThroughReason = null;
-      const routeBlock = formatInjection(finalRoute, prompt, sig.slice(0, 8));
+      // SAF-04: cap render counts before formatInjection on the fresh-route
+      // path. The uncapped finalRoute was already written to cache above (so
+      // future cache hits hold the full author-priority lists); only the
+      // rendered injection is capped.
+      const capped = capRouteRender(finalRoute);
+      if (capped._render_cap_truncated) state.decision_trace.push('render:cap_truncated');
+      delete capped._render_cap_truncated; // telemetry-only flag, strip before injection
+      state.route = capped;
+      state.invoke_kind = capped.invoke_kind;
+      if (capped.invoke_kind === 'warn') state.passThroughReason = null;
+      const routeBlock = formatInjection(capped, prompt, sig.slice(0, 8));
       const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
       state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
       if (!state.finalInjectedContext && tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
