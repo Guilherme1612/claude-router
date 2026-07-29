@@ -373,6 +373,15 @@ async function readJson(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
 }
 
+export async function finishWatcherShutdown(controller, publish, removeSignalHandlers) {
+  try {
+    await controller.close();
+    await publish('stopped');
+  } finally {
+    removeSignalHandlers();
+  }
+}
+
 export async function runRegistryWatcher(options) {
   const configPath = options.configPath ? resolve(options.configPath) : null;
   const config = options.config || (configPath ? JSON.parse(await readFile(configPath, 'utf8')) : null);
@@ -437,9 +446,7 @@ export async function runRegistryWatcher(options) {
       }
       if (request.action === 'shutdown' || request.action === 'restart') {
         clearInterval(heartbeat); stopping = true;
-        await controller.close();
-        await publish('stopped');
-        removeSignalHandlers();
+        await finishWatcherShutdown(controller, publish, removeSignalHandlers);
         await rm(config.control_path, { force: true });
         if (request.action === 'restart' && configPath) {
           spawn(process.execPath, [fileURLToPath(import.meta.url), 'run', '--config', configPath], {
@@ -460,8 +467,7 @@ export async function runRegistryWatcher(options) {
   const close = async () => {
     if (stopping) return;
     stopping = true; clearTimeout(control); clearInterval(heartbeat);
-    try { await controller.close(); await publish('stopped'); }
-    finally { removeSignalHandlers(); }
+    await finishWatcherShutdown(controller, publish, removeSignalHandlers);
   };
   process.once('SIGTERM', onSigterm);
   process.once('SIGINT', onSigint);

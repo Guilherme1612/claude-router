@@ -4,7 +4,10 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler } from '../src/registry/watcher.mjs';
+import {
+  createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler,
+  finishWatcherShutdown,
+} from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { mapCandidateRegistry } from '../src/registry/map.mjs';
 import { PRODUCTION_GATE_RUNNERS, REQUIRED_ACTIVATION_GATES } from '../src/registry/validate.mjs';
@@ -22,7 +25,17 @@ test('watcher shutdown unregisters both process signal handlers', () => {
   const source = readFileSync(new URL('../src/registry/watcher.mjs', import.meta.url), 'utf8');
   assert.match(source, /process\.off\('SIGTERM', onSigterm\)/);
   assert.match(source, /process\.off\('SIGINT', onSigint\)/);
-  assert.match(source, /finally \{ removeSignalHandlers\(\); \}/);
+  assert.match(source, /finishWatcherShutdown\(controller, publish, removeSignalHandlers\)/);
+});
+
+test('watcher shutdown removes signal handlers when stopped publication fails', async () => {
+  const calls = [];
+  await assert.rejects(finishWatcherShutdown(
+    { async close() { calls.push('close'); } },
+    async () => { calls.push('publish'); throw new Error('status unavailable'); },
+    () => calls.push('remove-listeners'),
+  ), /status unavailable/);
+  assert.deepEqual(calls, ['close', 'publish', 'remove-listeners']);
 });
 
 function hashForTest(value) {
