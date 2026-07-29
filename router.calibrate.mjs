@@ -214,7 +214,7 @@ function affectedSamples(records, thresholds, candidates, key) {
     .map(({ id }) => id);
 }
 
-export function selectThresholds(records, current) {
+export function selectThresholds(records, current, { requireEvidence = true } = {}) {
   const candidates = enumerateThresholdCandidates(records, current);
   let selected = null;
   for (const thresholds of candidates) {
@@ -241,6 +241,9 @@ export function selectThresholds(records, current) {
   selected.supported_boundaries = Object.entries(selected.affected_samples)
     .filter(([, ids]) => ids.length > 0)
     .map(([key]) => key);
+  if (requireEvidence && ['T_high', 'T_low', 'M'].some((key) => selected.affected_samples[key].length === 0)) {
+    throw new Error('threshold selection lacks independent boundary evidence');
+  }
   selected.distance_from_current = ['T_high', 'T_low', 'M']
     .reduce((sum, key) => sum + Math.abs(selected.thresholds[key] - current[key]), 0);
   return selected;
@@ -249,7 +252,7 @@ export function selectThresholds(records, current) {
 export function leaveOneOutThresholds(records, current) {
   const selections = records.map((omitted, index) => ({
     omitted: omitted.id,
-    thresholds: selectThresholds(records.filter((_, recordIndex) => recordIndex !== index), current).thresholds,
+    thresholds: selectThresholds(records.filter((_, recordIndex) => recordIndex !== index), current, { requireEvidence: false }).thresholds,
   }));
   const ranges = {};
   const frequency = {};

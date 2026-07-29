@@ -91,6 +91,15 @@ test('labeled boundaries independently identify T_high, T_low, and M', () => {
   assert.ok(selected.affected_samples.M.length > 0);
 });
 
+test('selection rejects a corpus without independent evidence for every constant', () => {
+  assert.throws(
+    () => C.selectThresholds([
+      { id: 'missing-high-boundary', score: 0.1, margin: 0.1, correct: true, expected_tier: 'medium' },
+    ], current),
+    /lacks independent boundary evidence/,
+  );
+});
+
 test('real Phase 29 corpus is inspected through supplied objects and reselects every constant', () => {
   const manifest = C.loadManifest();
   const modeMap = canonicalModeMap;
