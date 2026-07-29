@@ -7,14 +7,14 @@ const { inspectDecision, loadModeMap, validateRouteTargets } =
   await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
 
 const lifecycle = [
-  ['gsd-ship', 'prepare the branch and pull request for release', 'review the release pull request for regressions'],
-  ['gsd-new-project', 'turn this idea into a scoped project with requirements and a roadmap', 'existing project roadmap'],
-  ['gsd-execute-phase', 'carry out every approved plan in the current phase', 'draft a plan for the phase'],
-  ['gsd-quick', 'make this small repository change with tracked verification', 'design a multi-phase roadmap'],
-  ['gsd-validate-phase', 'fill the missing automated checks for the completed phase', 'manually accept the finished feature'],
-  ['gsd-verify-work', 'walk me through acceptance of what was just built', 'add more unit tests'],
-  ['gsd-resume-work', 'continue from the saved handoff and unfinished session state', 'start a brand new project'],
-  ['gsd-complete-milestone', 'archive the finished release cycle and prepare the next one', 'publish the current pull request'],
+  ['gsd-ship', 'prepare the branch and pull request for release', 'walk me through acceptance of what was just built'],
+  ['gsd-new-project', 'turn this idea into a scoped project with requirements and a roadmap', 'continue from the saved handoff and unfinished session state'],
+  ['gsd-execute-phase', 'carry out every approved plan in the current phase', 'turn this idea into a scoped project with requirements and a roadmap'],
+  ['gsd-quick', 'make this small repository change with tracked verification', 'carry out every approved plan in the current phase'],
+  ['gsd-validate-phase', 'fill the missing automated checks for the completed phase', 'walk me through acceptance of what was just built'],
+  ['gsd-verify-work', 'walk me through acceptance of what was just built', 'fill the missing automated checks for the completed phase'],
+  ['gsd-resume-work', 'continue from the saved handoff and unfinished session state', 'turn this idea into a scoped project with requirements and a roadmap'],
+  ['gsd-complete-milestone', 'archive the finished release cycle and prepare the next one', 'prepare the branch and pull request for release'],
 ];
 
 const design = [
@@ -100,7 +100,7 @@ test('fixture routing is isolated from live manifest and mode-map paths', () => 
   const modeMap = fixtureModeMap();
   const beforeManifest = structuredClone(manifest);
   const beforeModeMap = structuredClone(modeMap);
-  const out = inspectDecision('turn this screenshot into a working responsive page', {
+  const out = inspectDecision('make this small repository change with tracked verification', {
     manifest,
     modeMap,
     manifestPath: '/definitely/not/the/live/manifest.json',
@@ -111,7 +111,7 @@ test('fixture routing is isolated from live manifest and mode-map paths', () => 
     bumpEvolution: false,
   });
 
-  assert.equal(out.selected_route?.id ?? out.selected_route?.mode, 'image-to-code');
+  assert.equal(out.selected_route?.id ?? out.selected_route?.mode, 'gsd-quick');
   assert.deepEqual(manifest, beforeManifest);
   assert.deepEqual(modeMap, beforeModeMap);
 });
