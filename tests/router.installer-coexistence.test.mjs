@@ -3,11 +3,15 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   disableRouter, enableRouter, installRouter, resolveInstallGeneration,
   uninstallRouter, upgradeRouter,
 } from '../src/lifecycle/router-lifecycle.mjs';
 import { stubVerificationRunners, inProcessControllerLauncher } from './helpers/test-mode-seam.mjs';
+
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const BASELINE_BYTES = readFileSync(join(REPO_ROOT, 'coverage-baseline.json'));
 
 // Five-verb coexistence matrix (install, upgrade, reinstall, disable+enable, uninstall) across
 // Claude-only, Codex-only, and together fixtures. The install/upgrade/reinstall verbs route
@@ -184,6 +188,13 @@ test('install verb: fresh install into empty Claude and Codex homes installs the
     assert.equal(existsSync(f.routerPath), true);
     // Codex marker exists (codex installation is manifest-backed).
     assert.equal(existsSync(join(f.codexOwnedRoot, 'installed.json')), true);
+    for (const root of [f.ownedRoot, f.codexOwnedRoot]) {
+      assert.equal(existsSync(join(root, 'modules', 'coverage', 'audit.mjs')), true);
+      assert.equal(existsSync(join(root, 'src', 'coverage', 'audit.mjs')), true);
+      assert.deepEqual(readFileSync(join(root, 'coverage-baseline.json')), BASELINE_BYTES);
+    }
+    assert.equal(existsSync(join(f.ownedRoot, 'coverage-report.json')), true,
+      'onboarding builder must consume the deployed baseline at its default path');
     // Router binding is present and non-router hooks are preserved.
     assert.equal(routerBindingPresent(f), true);
     nonRouterHooksPreserved(f);

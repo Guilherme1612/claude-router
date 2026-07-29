@@ -36,6 +36,8 @@ function withTempDir(fn) {
 
 function runBuilder(root, extraEnv = {}) {
   const out = join(root, '.claude', 'router', 'claude-inventory-manifest.json');
+  const report = extraEnv.ROUTER_COVERAGE_REPORT_PATH
+    || join(root, '.claude', 'router', 'coverage-report.json');
   const env = {
     ROUTER_CLAUDE_HOME: join(root, '.claude'),
     ROUTER_AGENTS_SKILLS_DIR: join(root, '.agents', 'skills'),
@@ -45,7 +47,7 @@ function runBuilder(root, extraEnv = {}) {
     ...extraEnv,
   };
   const r = spawnSync(NODE, [BUILDER], { env, encoding: 'utf8', timeout: 30_000 });
-  return { r, out };
+  return { r, out, report };
 }
 
 test('build-manifest: empty HOME → exit 0, valid schema, all-zero counts', () => {
@@ -146,6 +148,50 @@ test('build-manifest: idempotent re-run produces identical bytes', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('COV-01 build-manifest publishes a deterministic report beside the manifest', () => {
+  const root = freshHome();
+  try {
+    const modeMap = join(root, 'mode-map.json');
+    const baseline = join(root, 'coverage-baseline.json');
+    writeFileSync(modeMap, JSON.stringify({ schema_version: 2, entries: [] }));
+    writeFileSync(baseline, JSON.stringify({ schema_version: 1, entries: [] }));
+    const env = { ROUTER_MODE_MAP_PATH: modeMap, ROUTER_COVERAGE_BASELINE_PATH: baseline };
+
+    const { r: first, out, report } = runBuilder(root, env);
+    assert.equal(first.status, 0, first.stderr);
+    assert.ok(existsSync(out), 'manifest must be published before success');
+    assert.ok(existsSync(report), 'coverage report must be published on every successful build');
+    const firstBytes = readFileSync(report, 'utf8');
+    const parsed = JSON.parse(firstBytes);
+    assert.equal(parsed.schema_version, 1);
+    assert.ok(Array.isArray(parsed.records));
+
+    const { r: second } = runBuilder(root, env);
+    assert.equal(second.status, 0, second.stderr);
+    assert.equal(readFileSync(report, 'utf8'), firstBytes, 'equivalent rebuild report bytes must match');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('COV-01 report and baseline overrides isolate malformed fixture inputs', () => withTempDir(root => {
+  const report = join(root, 'isolated', 'coverage.json');
+  const baseline = join(root, 'malformed-baseline.json');
+  const modeMap = join(root, 'malformed-mode-map.json');
+  writeFileSync(baseline, '{bad');
+  writeFileSync(modeMap, '{bad');
+
+  const { r } = runBuilder(root, {
+    ROUTER_COVERAGE_REPORT_PATH: report,
+    ROUTER_COVERAGE_BASELINE_PATH: baseline,
+    ROUTER_MODE_MAP_PATH: modeMap,
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const parsed = JSON.parse(readFileSync(report, 'utf8'));
+  assert.ok(parsed.baseline_diagnostics.some(item => item.code === 'baseline_malformed'));
+  assert.ok(parsed.forward_diagnostics.some(item => item.code === 'mode_map_malformed'));
+}));
 
 test('SAF-04 mode-map size guard accepts exactly 30000 bytes', () => withTempDir(root => {
   const modeMap = join(root, 'mode-map.json');
