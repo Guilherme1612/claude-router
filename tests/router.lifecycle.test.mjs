@@ -209,7 +209,7 @@ test('readiness accepts controller-owned candidate and report mutations', async 
   }
 });
 
-test('post-mutation repair failure restores every owned byte and manifest', async () => {
+test('post-mutation repair failure restores every immutable owned byte and manifest', async () => {
   const f = fixture();
   try {
     await installRouter(f.options);
@@ -217,9 +217,16 @@ test('post-mutation repair failure restores every owned byte and manifest', asyn
     const candidate = manifest.files.find(entry => entry.path.endsWith('/candidate/registry.json')).path;
     writeFileSync(candidate, 'pre-repair custom bytes\n');
     writeFileSync(f.routerPath, 'pre-repair router bytes\n');
-    const before = snapshot(f.root);
+    const before = snapshot(f.root).filter(
+      ({ path }) => path !== '.claude/router/controller/status.json',
+    );
     await assert.rejects(installRouter({ ...f.options, afterMutation() { throw new Error('injected readiness failure'); } }), /injected readiness failure/);
-    assert.deepEqual(snapshot(f.root), before);
+    assert.deepEqual(
+      snapshot(f.root).filter(
+        ({ path }) => path !== '.claude/router/controller/status.json',
+      ),
+      before,
+    );
   } finally { await cleanup(f); }
 });
 
@@ -361,17 +368,20 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
       { runtime: 'codex', relativePath: 'skills/downtime/SKILL.md', bytes: downtimeBytes },
     ],
   });
-  const options = { ...f.options, repairMs: 200, contractOverlays };
+  const options = { ...f.options, repairMs: 300_000, contractOverlays };
   try {
     const installed = await installRouter(options);
     const firstSkill = join(f.options.claudeRoot, 'skills', 'live', 'SKILL.md');
     mkdirSync(dirname(firstSkill), { recursive: true });
     writeFileSync(firstSkill, liveBytes);
     await waitUntil(() => readFileSync(installed.candidatePath, 'utf8').includes('live-skill'));
-    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.strategy === 'incremental');
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).watcher?.trigger === 'filesystem-event');
+    assert.equal(JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).state, 'reconciling');
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).reconciliation?.trigger === 'filesystem-event');
     const firstReport = JSON.parse(readFileSync(installed.reportPath, 'utf8'));
     const firstStatus = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
     assert.equal(firstStatus.reconciliation.strategy, 'incremental');
+    assert.equal(firstStatus.reconciliation.trigger, 'filesystem-event');
     const firstLifecycleHash = firstStatus.reconciliation.lifecycle_hash;
     const firstFull = buildFullRegistry({ claudeRoot: f.options.claudeRoot, codexRoot: f.options.codexRoot, overlays: contractOverlays });
     const inactiveCandidate = JSON.parse(readFileSync(installed.candidatePath, 'utf8'));
@@ -381,6 +391,7 @@ test('live mutation reconciles within two seconds and stopped-controller mutatio
     assert.deepEqual(inactiveCandidate.records, firstFull.registry.records);
     assert.deepEqual({ diagnostics: firstReport.diagnostics, summary: firstReport.summary },
       { diagnostics: firstFull.diagnostics, summary: firstFull.summary });
+    await waitUntil(() => JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8')).watcher?.state === 'current', 60_000);
 
     const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
     writeFileSync(join(f.options.claudeRoot, 'router', 'controller', 'request.json'), JSON.stringify({
@@ -427,12 +438,12 @@ test('installed project ancestor repairs initially absent Claude and Codex inven
     ],
   });
   const options = {
-    ...f.options, projectRoot, scopeId: 'fixture', repairMs: 200, controlPollMs: 25, contractOverlays,
+    ...f.options, projectRoot, scopeId: 'fixture', repairMs: 300_000, controlPollMs: 25, contractOverlays,
   };
   try {
     const installed = await installRouter(options);
     const config = JSON.parse(readFileSync(join(f.options.claudeRoot, 'router', 'controller', 'config.json'), 'utf8'));
-    assert.equal(config.repair_ms, 200);
+    assert.equal(config.repair_ms, 300_000);
     assert.deepEqual(config.roots.filter(root => root.logicalRoot.startsWith('project:')), [
       { logicalRoot: 'project:fixture:claude', path: join(projectRoot, '.claude'), watchPath: projectRoot, includeRelativePaths: ['.claude'] },
       { logicalRoot: 'project:fixture:codex', path: join(projectRoot, '.codex'), watchPath: projectRoot, includeRelativePaths: ['.codex'] },
@@ -443,17 +454,13 @@ test('installed project ancestor repairs initially absent Claude and Codex inven
     const codexSkill = join(projectRoot, '.codex', 'skills', 'project-codex', 'SKILL.md');
     mkdirSync(dirname(codexSkill), { recursive: true });
     writeFileSync(codexSkill, codexBytes);
-    const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
-    writeFileSync(join(f.options.claudeRoot, 'router', 'controller', 'request.json'), JSON.stringify({
-      schema_version: 1,
-      action: 'repair',
-      instance_id: status.instance_id,
-      configuration_fingerprint: installed.configurationFingerprint,
-    }) + '\n');
     await waitUntil(() => {
       const candidate = readFileSync(installed.candidatePath, 'utf8');
       return candidate.includes('project-live') && candidate.includes('project-codex');
     });
+    await waitUntil(() => JSON.parse(
+      readFileSync(installed.controllerStatusPath, 'utf8'),
+    ).reconciliation?.trigger === 'filesystem-event');
   } finally { await cleanup({ ...f, options }); }
 });
 

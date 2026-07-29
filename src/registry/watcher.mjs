@@ -143,6 +143,7 @@ export function createRegistryWatcher(options) {
   const reconcile = options.reconcile || (async () => {});
   const writeState = options.writeState || (state => saveFingerprintState(options.statePath, state));
   const onReconciled = options.onReconciled;
+  const onDirty = options.onDirty;
   const onError = options.onError || (() => {});
   const watchers = [];
   const dirty = new Set();
@@ -291,6 +292,12 @@ export function createRegistryWatcher(options) {
     if (AUTHORITATIVE_TRIGGERS.has(trigger) || pendingTrigger === 'filesystem-event') pendingTrigger = trigger;
     const now = scheduler.now();
     if (firstDirtyAt === null) firstDirtyAt = now;
+    setOperational('reconciling', {
+      reason_code: 'event_accepted',
+      trigger: pendingTrigger,
+      pending_changes: [...dirty].sort(),
+    });
+    if (onDirty) Promise.resolve(onDirty(snapshotOperational())).catch(report);
     if (inFlight) { rerun = true; return; }
     clearTimer('work');
     const delay = immediate ? 0 : Math.max(0, Math.min(debounceMs, firstDirtyAt + maxLatencyMs - now));
@@ -396,21 +403,33 @@ export async function runRegistryWatcher(options) {
   const heartbeatMs = config.heartbeat_ms ?? 1_000;
   const controlPollMs = config.control_poll_ms ?? 250;
   let stopping = false;
-  const publish = state => atomicJson(config.status_path, {
-    schema_version: 1, state, instance_id: instanceId, pid: process.pid,
+  let controller;
+  const publish = state => {
+    const watcher = controller?.inspect();
+    const publishedState = state === 'ready' && watcher?.state !== 'current' ? watcher?.state || state : state;
+    return atomicJson(config.status_path, {
+    schema_version: 1, state: publishedState, instance_id: instanceId, pid: process.pid,
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
+    ...(watcher ? { watcher: {
+      state: watcher.state, trigger: watcher.trigger, pending_changes: watcher.pending_changes,
+    } } : {}),
     ...(reconcile.lastReconciliation ? { reconciliation: reconcile.lastReconciliation } : {}),
   });
-  const reconcile = createRegistryReconciler(config, config.test_mode === true
-    ? { produceActivationVerification: createTestActivationVerifier(config.verification_runners || {}) }
-    : {});
-  const controller = createRegistryWatcher({
+  };
+  const reconcileDependencies = config.test_mode === true
+    ? { produceActivationVerification: createTestActivationVerifier(config.verification_runners || {}),
+        onPublished: () => publish('ready'),
+      }
+    : { onPublished: () => publish('ready') };
+  const reconcile = createRegistryReconciler(config, reconcileDependencies);
+  controller = createRegistryWatcher({
     roots: config.roots,
     statePath: config.state_path,
     debounceMs: config.debounce_ms,
     maxLatencyMs: config.max_latency_ms,
     repairMs: config.repair_ms,
     reconcile,
+    onDirty: () => publish('ready'),
     onReconciled: () => publish('ready'),
     onError: async error => {
       await atomicJson(config.status_path, {
@@ -509,6 +528,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const evaluateCorpus = dependencies.evaluateCalibrationCorpus || evaluateCalibrationCorpus;
   const createEvidenceStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
   const compatibleFn = dependencies.compatible || compatible;
+  const onPublished = dependencies.onPublished;
   const writeJson = dependencies.writeJson || atomicJson;
   const readActive = dependencies.readActive || (async () => {
     const empty = () => {
@@ -543,7 +563,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   let cumulativeEvents = 0;
   const FULL_REACQUIRE_EVENT_THRESHOLD = 500;
 
-  const reconcile = async ({ diff }) => {
+  const reconcile = async ({ diff, trigger }) => {
     // CR-01: reset `recovered` per reconcile call so the recovery block (and
     // thus the canary path with its 6 REQUIRED_GATES + evidence sufficiency
     // gate) runs on EVERY eligible reconcile, not just the first. Previously
@@ -595,6 +615,16 @@ export function createRegistryReconciler(config, dependencies = {}) {
     };
     await writeJson(config.candidate_path, candidatePublication);
     await writeJson(config.report_path, reportPublication);
+    reconcile.lastReconciliation = {
+      strategy: 'incremental',
+      ...(trigger ? { trigger } : {}),
+      lifecycle_hash: diff.hash || hash(diff),
+      disposition: report.disposition,
+      active_bytes: report.active_bytes,
+      active_fingerprint: report.active_fingerprint,
+      publication_status: 'published',
+    };
+    if (onPublished) await onPublished(reconcile.lastReconciliation);
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
     if (config.activation_root) {
       let recoveryReady = recovered || active.authority_status === 'empty';
@@ -787,11 +817,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
     baseline = next;
     reconcile.lastReconciliation = {
-      strategy: 'incremental',
-      lifecycle_hash: diff.hash || hash(diff),
-      disposition: report.disposition,
-      active_bytes: report.active_bytes,
-      active_fingerprint: report.active_fingerprint,
+      ...reconcile.lastReconciliation,
       ...(config.activation_root ? {
         activation_status: activation.activation_status,
         activation_reason: activation.reason_code || null,

@@ -71,6 +71,11 @@ function setupTempCopy() {
   return { dir, settings, claudeRoot, codexRoot, router, manifest, original };
 }
 
+function cleanupInstalledFixture(fixture) {
+  if (existsSync(fixture.manifest)) runInstaller(fixture, '--uninstall');
+  rmSync(fixture.dir, { recursive: true, force: true });
+}
+
 test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
   const fixture = setupTempCopy();
   const { dir, settings, router, manifest } = fixture;
@@ -124,7 +129,7 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
     assert.deepEqual(post.enabledPlugins, pre.enabledPlugins, 'enabledPlugins unchanged');
     assert.ok(post.statusLine, 'statusLine intact');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupInstalledFixture(fixture);
   }
 });
 
@@ -139,7 +144,7 @@ test('owned uninstall restores pre-router settings semantically', () => {
     assert.equal(existsSync(router), false);
     assert.equal(existsSync(manifest), false);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupInstalledFixture(fixture);
   }
 });
 
@@ -168,7 +173,7 @@ test('installer is idempotent — re-running no-ops with no double entry', () =>
     );
     assert.deepEqual(afterCounts, beforeCounts, 'all event counts unchanged on re-run');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupInstalledFixture(fixture);
   }
 });
 
@@ -189,7 +194,7 @@ test('installer preserves the exact byte format of non-UserPromptSubmit content'
     const remainder = JSON.stringify(postObj, null, 2) + '\n';
     assert.equal(remainder, original, 'non-UserPromptSubmit content byte-identical');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    cleanupInstalledFixture(fixture);
   }
 });
 

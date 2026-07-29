@@ -246,6 +246,7 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
   const lifecycle = { events: [], diagnostics: [], marker: 'authoritative-diff' };
   const refreshCalls = [];
   const writes = [];
+  const published = [];
   let failReport = true;
   const reconcile = createRegistryReconciler({ candidate_path: '/candidate', report_path: '/report' }, {
     acquireRegistry: () => initial,
@@ -260,6 +261,7 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
       writes.push({ path, value });
       if (path === '/report' && failReport) throw new Error('report rejected');
     },
+    onPublished: status => published.push(status),
   });
 
   await assert.rejects(reconcile({ diff: lifecycle }), /report rejected/);
@@ -271,12 +273,14 @@ test('deployed reconciler consumes the real lifecycle diff and advances acquisit
   assert.equal(refreshCalls[0].previous.generation, 0);
   assert.equal(refreshCalls[1].previous.generation, 0, 'failed publication must retain acquisition baseline');
   assert.deepEqual(writes.slice(-2).map(item => item.path), ['/candidate', '/report']);
+  assert.equal(published.length, 1, 'acknowledgement follows both successful publications');
   assert.deepEqual(reconcile.lastReconciliation, {
     strategy: 'incremental',
     lifecycle_hash: hashForTest(lifecycle),
     disposition: 'quarantined',
     active_bytes: `${stableStringify({ schema_version: 1, records: [] })}\n`,
     active_fingerprint: createHash('sha256').update(`${stableStringify({ schema_version: 1, records: [] })}\n`).digest('hex'),
+    publication_status: 'published',
   });
 });
 
