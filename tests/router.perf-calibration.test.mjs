@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 const perfUrl = new URL('../src/evolution/perf-measure.mjs', import.meta.url);
+const latencyHelper = new URL('./helpers/latency-isolated.mjs', import.meta.url);
 
 test('D-13/D-15 calibration corpus is byte-locked and covers all seven classes', async () => {
   const { CALIBRATION_CORPUS, CALIBRATION_CORPUS_FINGERPRINT, CALIBRATION_CORPUS_VERSION } = await import(perfUrl);
@@ -68,4 +71,54 @@ test('REL-01 quality and latency are independent hard gates', async () => {
   assert.equal(wrong.quality.pass, false);
   assert.equal(wrong.latency.pass, true);
   assert.equal(wrong.pass, false);
+});
+
+test('SAF-03 mutation-safety gate passes below both strict ceilings', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  assert.deepEqual(
+    assessMutationSafetyRegression({ performance: { warm: { p95_ms: 39, max_ms: 99 } } }),
+    { pass: true, reason_code: 'mutation_safety_pass', ceilings: { p95_ms: 40, max_ms: 100 } },
+  );
+});
+
+test('SAF-03 mutation-safety gate rejects the 40ms p95 boundary', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  assert.equal(
+    assessMutationSafetyRegression({ performance: { warm: { p95_ms: 40, max_ms: 90 } } }).reason_code,
+    'mutation_safety_p95_exceeded',
+  );
+});
+
+test('SAF-03 mutation-safety gate rejects the 100ms max boundary', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  assert.equal(
+    assessMutationSafetyRegression({ performance: { warm: { p95_ms: 35, max_ms: 100 } } }).reason_code,
+    'mutation_safety_max_exceeded',
+  );
+});
+
+test('SAF-03 mutation-safety result publishes its ceilings', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  assert.deepEqual(assessMutationSafetyRegression({}).ceilings, { p95_ms: 40, max_ms: 100 });
+});
+
+test('SAF-03 mutation-safety gate fails closed when performance is missing', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  assert.equal(assessMutationSafetyRegression({}).pass, false);
+});
+
+test('SAF-03 leaves the stricter 25ms canary gate unchanged', async () => {
+  const { assessCalibration } = await import(perfUrl);
+  const evaluation = { quality: { pass: true }, context_budget: { pass: true } };
+  assert.equal(assessCalibration({ evaluation, performance: { warm: { p95_ms: 25, max_ms: 99 } } }).pass, false);
+});
+
+test('SAF-03 isolated full-corpus route measurement passes mutation-safety ceilings', async () => {
+  const { assessMutationSafetyRegression } = await import(perfUrl);
+  const run = spawnSync(process.execPath, [fileURLToPath(latencyHelper)], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(run.status, 0, run.stderr);
+  const { measured } = JSON.parse(run.stdout);
+  assert.ok(measured.warm.p95_ms < 40, `warm p95 ${measured.warm.p95_ms}ms`);
+  assert.ok(measured.warm.max_ms < 100, `warm max ${measured.warm.max_ms}ms`);
+  assert.equal(assessMutationSafetyRegression({ performance: measured }).pass, true);
 });
