@@ -43,6 +43,7 @@ const COVERAGE_REPORT_PATH = process.env.ROUTER_COVERAGE_REPORT_PATH
   || join(dirname(OUT), 'coverage-report.json');
 const COVERAGE_BASELINE_PATH = process.env.ROUTER_COVERAGE_BASELINE_PATH
   || join(SCRIPT_DIR, 'coverage-baseline.json');
+const STRICT_COVERAGE = process.argv.includes('--strict-coverage');
 export const MODE_MAP_SIZE_CEILING = 30_000;
 
 function readJson(path, fallback) {
@@ -551,6 +552,10 @@ mkdirSync(dirname(COVERAGE_REPORT_PATH), { recursive: true });
 const coverageTmp = `${COVERAGE_REPORT_PATH}.tmp.${process.pid}`;
 writeFileSync(coverageTmp, JSON.stringify(coverage, null, 2));
 renameSync(coverageTmp, COVERAGE_REPORT_PATH);
+if (STRICT_COVERAGE
+  && (coverage.unacknowledged_gaps.length || coverage.forward_diagnostics.length)) {
+  process.exitCode = 1;
+}
 
 console.log(JSON.stringify(manifest.counts, null, 2));
 console.log(`manifest written: ${OUT}`);
