@@ -66,6 +66,7 @@ const isMain = () => {
 const ROUTER_DIR = join(homedir(), '.claude', 'router');
 const MANIFEST = join(ROUTER_DIR, 'claude-inventory-manifest.json');
 const BUILD_SCRIPT = join(ROUTER_DIR, 'build-manifest.mjs');
+const COVERAGE_REPORT = join(ROUTER_DIR, 'coverage-report.json');
 const CACHE = join(ROUTER_DIR, 'cache.json');
 const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
@@ -307,6 +308,8 @@ export const SENTINEL = '<!-- router-inject -->';
 const STALE_MS = 7 * 24 * 3600 * 1000; // 7 days
 const STALE_REMINDER =
   '<!-- router: manifest may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
+const COVERAGE_REMINDER =
+  '<!-- router: coverage report may be stale — run: node ~/.claude/router/build-manifest.mjs -->';
 
 const TRIVIAL = new Set([
   'thanks', 'ok', 'great', 'cool', 'nice', 'yes', 'no', 'done', 'sgtm',
@@ -412,6 +415,23 @@ export function checkFreshness(manifestPath = MANIFEST, buildScriptPath = BUILD_
   }
 }
 
+export function checkCoverageFreshness(
+  manifestPath = MANIFEST,
+  reportPath = COVERAGE_REPORT,
+) {
+  try {
+    if (!existsSync(reportPath)) {
+      return { status: 'missing', reminder: COVERAGE_REMINDER };
+    }
+    if (statSync(reportPath).mtimeMs < statSync(manifestPath).mtimeMs) {
+      return { status: 'stale', reminder: COVERAGE_REMINDER };
+    }
+    return { status: 'fresh' };
+  } catch {
+    return { status: 'error', reminder: COVERAGE_REMINDER };
+  }
+}
+
 // --- stdin reader (caveman pattern: broken pipe -> exit 0, never throw) ---
 
 function readStdin(onDone) {
@@ -459,6 +479,24 @@ export function loadModeMap(path = MODE_MAP) {
   } catch {
     return null;
   }
+}
+
+export function normalizeSignalPattern(raw, schemaVersion = 2) {
+  if (typeof raw === 'string') {
+    const value = raw.toLowerCase().replace(/\s+/g, ' ').trim();
+    return value ? { kind: 'contains', value } : null;
+  }
+  if (Number(schemaVersion) < 3 || !raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = typeof raw.value === 'string'
+    ? raw.value.toLowerCase().replace(/\s+/g, ' ').trim()
+    : '';
+  if (raw.kind !== 'contains' || !value) return null;
+  const collisionGroup = typeof raw.collision_group === 'string' ? raw.collision_group.trim() : '';
+  return {
+    kind: 'contains',
+    value,
+    ...(collisionGroup ? { collision_group: collisionGroup } : {}),
+  };
 }
 
 const INVENTORY_COVERAGE_KEYS = [
@@ -637,16 +675,35 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
   const rows = [];
   const routeIds = new Set((modeMap?.entries || []).map((entry) => stripLeadingSlash(entry?.id)).filter(Boolean));
   const skills = knownSkillTargets(indexes);
+  const collisions = new Map();
+  const schemaVersion = Number(modeMap?.schema_version || 2);
 
   for (const entry of modeMap?.entries || []) {
     const shapeErrors = [];
     if (!entry?.id) shapeErrors.push(['<entry>', 'missing id']);
     if (!entry?.invoke_kind || !ROUTE_INVOKE_KINDS.has(entry.invoke_kind)) shapeErrors.push([entry?.invoke_kind || '<invoke_kind>', 'invalid invoke_kind']);
-    if (!Array.isArray(entry?.signal_patterns) || entry.signal_patterns.length === 0) shapeErrors.push(['signal_patterns', 'must be a non-empty array']);
+    if (!Array.isArray(entry?.signal_patterns)) shapeErrors.push(['signal_patterns', 'must be an array']);
     if (!Array.isArray(entry?.recommended_skills)) shapeErrors.push(['recommended_skills', 'must be an array']);
     if (!Array.isArray(entry?.recommended_agents)) shapeErrors.push(['recommended_agents', 'must be an array']);
     for (const [target, reason] of shapeErrors) rows.push(routeDiagnostic(entry, 'invalid_shape', target, reason));
     if (shapeErrors.length) continue;
+
+    if (entry.signal_patterns.length < 1 || (schemaVersion >= 3 && entry.signal_patterns.length > 6)) {
+      rows.push(routeDiagnostic(entry, 'invalid_pattern_count', 'signal_patterns', 'must contain 1 through 6 patterns'));
+    }
+    entry.signal_patterns.forEach((raw, index) => {
+      const pattern = normalizeSignalPattern(raw, schemaVersion);
+      if (!pattern) {
+        rows.push(routeDiagnostic(entry, 'invalid_pattern', `signal_patterns[${index}]`, 'pattern must normalize to a non-empty contains value'));
+        return;
+      }
+      const key = `${pattern.kind}\0${pattern.value}`;
+      if (!collisions.has(key)) collisions.set(key, []);
+      collisions.get(key).push({
+        entry,
+        group: pattern.collision_group || (typeof entry.collision_group === 'string' ? entry.collision_group.trim() : ''),
+      });
+    });
 
     if (entry.invoke_kind === 'slash') {
       const mode = stripLeadingSlash(entry.mode);
@@ -693,6 +750,15 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
     if (!rows.some((row) => row.id === entry.id)) rows.push(routeDiagnostic(entry, 'ok', null, 'route targets resolve'));
   }
 
+  for (const occurrences of schemaVersion >= 3 ? collisions.values() : []) {
+    if (occurrences.length < 2) continue;
+    const group = occurrences[0].group;
+    if (group && occurrences.every((occurrence) => occurrence.group === group)) continue;
+    for (const occurrence of occurrences) {
+      rows.push(routeDiagnostic(occurrence.entry, 'pattern_collision', 'signal_patterns', 'duplicate patterns require one identical non-empty collision_group'));
+    }
+  }
+
   return rows;
 }
 
@@ -706,7 +772,7 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
 // hit from being served; the caller falls through to recompute on false only).
 // Do NOT call validateRouteTargets on the hot path — it builds diagnostic
 // rows for every entry (prohibition).
-export function routeTargetsExist(route, manifest, indexes) {
+export function routeTargetsExist(route, manifest, modeMap, indexes) {
   try {
     if (!route) return true; // nothing to verify (warn/pass-through/no route)
     const kind = route.invoke_kind;
@@ -725,7 +791,11 @@ export function routeTargetsExist(route, manifest, indexes) {
     // cache entry was written.
     if (kind === 'slash') {
       const mode = stripLeadingSlash(route.mode || route.id || '');
-      if (mode && !idx.commands.has(mode)) return false;
+      const id = stripLeadingSlash(route.id);
+      const routeIds = new Set((modeMap?.entries || []).map((entry) => stripLeadingSlash(entry?.id)).filter(Boolean));
+      const intentionalRouteAlias = mode && mode !== id && routeIds.has(mode);
+      const intentionalSchemaRoute = mode && mode === id && modeMap?.schema_version;
+      if (mode && !idx.commands.has(mode) && !intentionalRouteAlias && !intentionalSchemaRoute) return false;
     }
     for (const target of (route.recommended_skills || [])) {
       const name = stripLeadingSlash(target);
@@ -733,9 +803,7 @@ export function routeTargetsExist(route, manifest, indexes) {
     }
     for (const target of (route.recommended_agents || [])) {
       const name = stripLeadingSlash(target);
-      // An agent in blockedAgents is still a known target (warn routes may
-      // reference it); absence from both sets means the agent was removed.
-      if (!idx.safeAgents.has(name) && !idx.blockedAgents.has(name)) return false;
+      if (!idx.safeAgents.has(name)) return false;
     }
     return true;
   } catch {
@@ -1132,8 +1200,9 @@ function confidenceForProposal(raw, counts) {
 function sanitizePatterns(patterns) {
   if (!Array.isArray(patterns)) return [];
   return patterns
-    .map((p) => redact(String(p || '')).replace(/\s+/g, ' ').trim())
+    .map((p) => normalizeSignalPattern(p, 3))
     .filter(Boolean)
+    .map((p) => redact(p.value))
     .map((p) => p.slice(0, 80))
     .slice(0, 5);
 }
@@ -1383,13 +1452,16 @@ export function buildCorpus(manifest, modeMap = null) {
   // no signal_patterns are appended → identical v1 behavior (159 tests stay green).
   const mmByName = new Map();
   if (modeMap && Array.isArray(modeMap.entries)) {
+    const schemaVersion = Number(modeMap.schema_version || 2);
     for (const me of modeMap.entries) {
       const candidates = new Set();
       if (me.id) candidates.add(String(me.id).toLowerCase());
       if (me.mode) candidates.add(String(me.mode).toLowerCase());
       for (const s of (me.recommended_skills || [])) if (s) candidates.add(String(s).toLowerCase());
       for (const a of (me.recommended_agents || [])) if (a) candidates.add(String(a).toLowerCase());
-      const sp = Array.isArray(me.signal_patterns) ? me.signal_patterns : [];
+      const sp = Array.isArray(me.signal_patterns)
+        ? me.signal_patterns.map((raw) => normalizeSignalPattern(raw, schemaVersion)?.value).filter(Boolean)
+        : [];
       for (const c of candidates) {
         if (!mmByName.has(c)) mmByName.set(c, []);
         mmByName.get(c).push(...sp);
@@ -1447,7 +1519,9 @@ export function buildCorpus(manifest, modeMap = null) {
     for (const e of modeMap.entries) {
       if (!e || e.invoke_kind !== 'warn' || !e.id) continue;
       const name = String(e.id || '');
-      const desc = Array.isArray(e.signal_patterns) ? e.signal_patterns.join(' ') : '';
+      const desc = Array.isArray(e.signal_patterns)
+        ? e.signal_patterns.map((raw) => normalizeSignalPattern(raw, modeMap.schema_version)?.value).filter(Boolean).join(' ')
+        : '';
       const warning = typeof e.warning === 'string' ? e.warning : '';
       const toks = tokenize(`${name} ${name} ${name} ${desc} ${warning}`);
       const tf = new Map();
@@ -2647,7 +2721,7 @@ export function inspectDecision(prompt, options = {}) {
     state.routing_version = `${modeMapMtime}:${manifestMtime}:${weightsMtime}`;
     const cache = loadCache(opts.cachePath);
     const cached = cacheLookup(sig, cache);
-    if (cached && !routeTargetsExist(cached, manifest)) {
+    if (cached && !routeTargetsExist(cached, manifest, modeMap)) {
       // SAF-02: cached route references a target id/skill/agent that is absent
       // from the current manifest (removed or renamed since the entry was
       // written). Do NOT serve the stale entry — fall through to recompute.
@@ -2807,7 +2881,18 @@ function main(payload, { additionalContext = '' } = {}) {
     emitInjection: false,
     includePrompt: false,
   });
-  const composed = [decision.final_injected_context, additionalContext].filter(Boolean).join('\n\n');
+  const coverageFreshness = process.env.ROUTER_TEST_COVERAGE_FRESHNESS
+    ? { status: process.env.ROUTER_TEST_COVERAGE_FRESHNESS, reminder: COVERAGE_REMINDER }
+    : checkCoverageFreshness();
+  const coverageReminder = ['trivial', 'error', 'invalid_prompt']
+    .includes(decision.pass_through_reason)
+    ? ''
+    : coverageFreshness.status === 'fresh' ? '' : coverageFreshness.reminder;
+  const composed = [
+    decision.final_injected_context,
+    additionalContext,
+    coverageReminder,
+  ].filter(Boolean).join('\n\n');
   if (composed) emit(composed);
   return { additionalContext: composed };
 }
