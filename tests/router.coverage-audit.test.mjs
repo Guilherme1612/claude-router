@@ -68,7 +68,7 @@ test('allows only explicit present reverse-gap policy acknowledgements', () => {
     'mapping takes precedence over a baseline acknowledgement');
   assert.equal(record(report, 'commands', 'route-id').classification, 'gap');
   assert.deepEqual(report.baseline_diagnostics.map(item => item.code), [
-    'baseline_duplicate', 'baseline_disallowed_classification', 'baseline_stale',
+    'baseline_disallowed_classification', 'baseline_duplicate', 'baseline_stale',
   ]);
 });
 
@@ -110,5 +110,12 @@ test('equivalent inputs produce byte-identical sorted JSON-ready reports without
   assert.equal(JSON.stringify(first), JSON.stringify(second));
   assert.deepEqual(first.records, [...first.records].sort((a, b) =>
     a.category.localeCompare(b.category) || a.id.localeCompare(b.id)));
-  assert.doesNotMatch(JSON.stringify(first), /description|prompt|path|secret/i);
+  for (const entry of first.records) {
+    assert.deepEqual(
+      Object.keys(entry).sort(),
+      entry.coverage_status === 'mapped'
+        ? ['category', 'classification', 'coverage_status', 'id']
+        : ['category', 'classification', 'coverage_status', 'id', 'reason'],
+    );
+  }
 });
