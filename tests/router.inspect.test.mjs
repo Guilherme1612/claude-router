@@ -178,6 +178,18 @@ test('router inspect JSON: guard demotion exposes mcp_demote and final warning r
 test('router inspect JSON: cache effect distinguishes hit from miss and skipped scoring', () => {
   withTempDir((dir) => {
     const cachePath = join(dir, 'cache.json');
+    // SAF-02: routeTargetsExist validates the cached route against the manifest,
+    // so the fixture manifest must include the command + skill the cached route
+    // references. This keeps the cache-mechanics test self-contained rather
+    // than dependent on the real manifest's exact command inventory.
+    const manifestPath = join(dir, 'manifest.json');
+    writeFileSync(manifestPath, JSON.stringify({
+      commands: [{ name: 'gsd-debug' }],
+      skills: [{ name: 'systematic-debugging' }],
+      plugin_skills: [],
+      agents_store_skills: [],
+      agents: [],
+    }));
     const sig = cacheKey('fix the cached route', [], 1, 2, 0, 0);
     let cache = { schema_version: 1, entries: {}, order: [], size: 0 };
     cache = writeCache(cache, sig, {
@@ -193,10 +205,12 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
 
     const hit = inspectDecision('fix the cached route', {
       cachePath,
+      manifestPath,
       modeMapMtime: 1,
       manifestMtime: 2,
       graphMtime: 0,
       surfaceMtime: 0,
+      weightsMtime: 0,
       mutateCache: false,
       logTelemetry: false,
     });
@@ -209,16 +223,19 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       manifest: 2,
       graph: 0,
       surface: 0,
+      weights: 0,
     });
     assert.equal(hit.pass_through_reason, 'cache_hit_scoring_skipped');
     assert.equal(hit.selected_route.mode, 'gsd-debug');
 
     const miss = inspectDecision('fix the uncached route', {
       cachePath,
+      manifestPath,
       modeMapMtime: 1,
       manifestMtime: 2,
       graphMtime: 0,
       surfaceMtime: 0,
+      weightsMtime: 0,
       mutateCache: false,
       logTelemetry: false,
     });
@@ -229,6 +246,7 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       manifest: 2,
       graph: 0,
       surface: 0,
+      weights: 0,
     });
   });
 });

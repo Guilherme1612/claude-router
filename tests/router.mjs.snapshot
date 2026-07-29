@@ -718,13 +718,14 @@ export function routeTargetsExist(route, manifest, indexes) {
     // true) instead of throwing out of the default-parameter evaluation.
     const idx = indexes || buildTargetIndexes(manifest);
     const skills = knownSkillTargets(idx);
-    // Slash routes: the id/mode must resolve as a manifest command. (Intentional
-    // mode-map aliases / schema routes are a modeMap-level concern; a cached
-    // route's id is a command id, so a miss here means the command was removed
-    // or renamed since the cache entry was written.)
+    // Slash routes: the mode must resolve as a manifest command. This mirrors
+    // validateRouteTargets, which checks entry.mode (not entry.id) against
+    // indexes.commands — entry.id is the mode-map identifier, not necessarily
+    // a command name. A miss means the command was removed or renamed since the
+    // cache entry was written.
     if (kind === 'slash') {
-      const id = stripLeadingSlash(route.id || route.mode || '');
-      if (id && !idx.commands.has(id)) return false;
+      const mode = stripLeadingSlash(route.mode || route.id || '');
+      if (mode && !idx.commands.has(mode)) return false;
     }
     for (const target of (route.recommended_skills || [])) {
       const name = stripLeadingSlash(target);
