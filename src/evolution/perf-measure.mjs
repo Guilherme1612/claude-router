@@ -94,3 +94,13 @@ export function assessCalibration({ evaluation, performance: measured } = {}) {
   const context_budget = evaluation?.context_budget ?? { pass: false, reason_code: 'context_budget_missing' };
   return freeze({ pass: quality.pass === true && context_budget.pass === true && latency.pass, quality, context_budget, latency });
 }
+
+export function assessMutationSafetyRegression({ performance: measured } = {}) {
+  const p95Pass = measured?.warm?.p95_ms < 40;
+  const maxPass = measured?.warm?.max_ms < 100;
+  return freeze({
+    pass: p95Pass && maxPass,
+    reason_code: !p95Pass ? 'mutation_safety_p95_exceeded' : !maxPass ? 'mutation_safety_max_exceeded' : 'mutation_safety_pass',
+    ceilings: { p95_ms: 40, max_ms: 100 },
+  });
+}
