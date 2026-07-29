@@ -118,3 +118,9 @@ test('hot-path: applyWeightBlend micro-benchmark < 1ms on 50-entry normed array'
   const perCall = elapsed / N;
   assert.ok(perCall < 1, `applyWeightBlend per-call cost ${perCall.toFixed(4)}ms >= 1ms budget`);
 });
+
+test('hot-path does not eagerly import the evolution worker module', () => {
+  const source = readFileSync(HOOK, 'utf8');
+  assert.doesNotMatch(source, /^import[\s\S]*?from ['"]\.\/router\.evolve\.mjs['"];$/m);
+  assert.match(source, /await import\(['"]\.\/router\.evolve\.mjs['"]\)/);
+});

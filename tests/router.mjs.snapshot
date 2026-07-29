@@ -27,13 +27,11 @@ import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import {
-  correlateOutcomes,
-  aggregatePerEntry,
-  proposeAdditions,
-  proposeEdits,
-  proposePrunes,
-} from './router.evolve.mjs';
+let correlateOutcomes;
+let aggregatePerEntry;
+let proposeAdditions;
+let proposeEdits;
+let proposePrunes;
 
 // ESM->CJS bridge for the gsd-surface primitive lazy-required from applySurfaceFilter.
 // Resolves relative to this file (router.mjs), not process.cwd() — safe across
@@ -61,6 +59,17 @@ const isMain = () => {
     return false;
   }
 };
+
+const proposalCommands = new Set(['proposals', 'proposal', 'evolve-proposals']);
+if (!isMain() || proposalCommands.has(process.argv[2])) {
+  ({
+    correlateOutcomes,
+    aggregatePerEntry,
+    proposeAdditions,
+    proposeEdits,
+    proposePrunes,
+  } = await import('./router.evolve.mjs'));
+}
 
 // --- Constants (no /Users/guilherme hardcoding — use os.homedir()) ---------
 const ROUTER_DIR = join(homedir(), '.claude', 'router');
