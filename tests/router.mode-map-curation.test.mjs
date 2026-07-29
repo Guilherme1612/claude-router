@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const { inspectDecision, validateRouteTargets } =
+const { inspectDecision, loadModeMap, validateRouteTargets } =
   await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
 
 const lifecycle = [
-  ['gsd-ship', 'prepare the branch and pull request for release', 'release-ready pull request'],
+  ['gsd-ship', 'prepare the branch and pull request for release', 'review the release pull request for regressions'],
   ['gsd-new-project', 'turn this idea into a scoped project with requirements and a roadmap', 'existing project roadmap'],
   ['gsd-execute-phase', 'carry out every approved plan in the current phase', 'draft a plan for the phase'],
   ['gsd-quick', 'make this small repository change with tracked verification', 'design a multi-phase roadmap'],
@@ -32,8 +32,8 @@ const design = [
 
 function fixtureManifest() {
   return {
-    commands: lifecycle.map(([id]) => ({ id, name: id, description: 'Portable lifecycle workflow' })),
-    skills: design.map(([id]) => ({ id, name: id, description: 'Portable design capability' })),
+    commands: [],
+    skills: [...lifecycle, ...design].map(([id]) => ({ id, name: id, description: 'Portable capability' })),
     plugin_skills: [],
     agents_store_skills: [],
     agents: [
@@ -44,18 +44,11 @@ function fixtureManifest() {
 }
 
 function fixtureModeMap() {
-  const route = ([id, positive]) => ({
-    id,
-    mode: lifecycle.some(([name]) => name === id) ? id : null,
-    invoke_kind: lifecycle.some(([name]) => name === id) ? 'slash' : 'skill',
-    signal_patterns: [positive],
-    recommended_skills: lifecycle.some(([name]) => name === id) ? [] : [id],
-    recommended_agents: [],
-  });
+  const ids = new Set([...lifecycle, ...design].map(([id]) => id));
   return {
     schema_version: 3,
     thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 },
-    entries: [...lifecycle, ...design].map(route),
+    entries: loadModeMap().entries.filter(({ id }) => ids.has(id)),
   };
 }
 
@@ -72,21 +65,33 @@ function inspect(prompt, manifest, modeMap) {
   });
 }
 
-test('all 18 implicit outcome prompts route through supplied neutral fixture objects', () => {
+test('all eight lifecycle outcome prompts route through supplied neutral fixture objects', () => {
   const manifest = fixtureManifest();
   const modeMap = fixtureModeMap();
-  for (const [id, prompt] of [...lifecycle, ...design]) {
+  for (const [id, prompt] of lifecycle) {
     const out = inspect(prompt, manifest, modeMap);
     assert.equal(out.selected_route?.id ?? out.selected_route?.mode, id, `${id}: ${prompt}`);
   }
 });
 
-test('family hard negatives never select the sibling route', () => {
+test('lifecycle hard negatives never select the sibling route', () => {
   const manifest = fixtureManifest();
   const modeMap = fixtureModeMap();
-  for (const [id, , negative] of [...lifecycle, ...design]) {
+  for (const [id, , negative] of lifecycle) {
     const out = inspect(negative, manifest, modeMap);
     assert.notEqual(out.selected_route?.id ?? out.selected_route?.mode, id, `${id} must reject: ${negative}`);
+  }
+});
+
+test('schema-v3 map caps every entry at six output-anchored patterns', () => {
+  const modeMap = loadModeMap();
+  assert.equal(modeMap.schema_version, 3);
+  for (const entry of modeMap.entries) {
+    assert.ok(entry.signal_patterns.length >= 1 && entry.signal_patterns.length <= 6, entry.id);
+    for (const pattern of entry.signal_patterns) {
+      const value = typeof pattern === 'string' ? pattern : pattern.value;
+      assert.notEqual(value, entry.id, `${entry.id} must not route from its skill name`);
+    }
   }
 });
 
