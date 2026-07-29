@@ -125,6 +125,13 @@ function typedMappings(modeMap, indexes) {
           reason: 'warn route must not imply Dispatch agent wording',
         });
       }
+      for (const rawTarget of entry.recommended_agents) {
+        const target = cleanId(rawTarget);
+        if (indexes.blockedAgent.has(target)) diagnostics.push({
+          code: 'blocked_agent_target', route, target, category: 'agents',
+          reason: 'warn route must not carry missing-MCP agents as dispatch targets',
+        });
+      }
       continue;
     }
 

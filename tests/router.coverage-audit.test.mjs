@@ -10,7 +10,12 @@ import { auditCoverage } from '../src/coverage/audit.mjs';
 const BUILDER = fileURLToPath(new URL('../build-manifest.mjs', import.meta.url));
 const { validateRouteTargets } = await import(join(homedir(), '.claude', 'hooks', 'router.mjs'));
 
-function runBuilder({ modeMap = { schema_version: 2, entries: [] }, baseline = { schema_version: 1, entries: [] }, strict = false } = {}) {
+function runBuilder({
+  modeMap = { schema_version: 2, entries: [] },
+  baseline = { schema_version: 1, entries: [] },
+  strict = false,
+  blockedAgent = false,
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-coverage-builder-'));
   const claude = join(root, '.claude');
   const manifestPath = join(root, 'manifest.json');
@@ -19,6 +24,11 @@ function runBuilder({ modeMap = { schema_version: 2, entries: [] }, baseline = {
   const baselinePath = join(root, 'coverage-baseline.json');
   const agentsSkills = join(root, 'agents-skills');
   mkdirSync(claude, { recursive: true });
+  if (blockedAgent) {
+    mkdirSync(join(claude, 'agents'), { recursive: true });
+    writeFileSync(join(claude, 'agents', 'blocked-agent.md'),
+      '---\nname: blocked-agent\ndescription: blocked fixture\ntools: mcp__missing__tool\n---\n# Blocked\n');
+  }
   mkdirSync(join(agentsSkills, 'fixture-skill'), { recursive: true });
   writeFileSync(join(agentsSkills, 'fixture-skill', 'SKILL.md'),
     '---\nname: fixture-skill\ndescription: fixture\n---\n# Fixture\n');
@@ -170,6 +180,46 @@ test('matches live routeability for non-global agents-store skills', () => {
   assert.ok(report.forward_diagnostics.some(item =>
     item.code === 'stale_skill_target' && item.target === 'store-only'));
   assert.equal(record(report, 'agents_store_skills', 'store-only').classification, 'gap');
+});
+
+test('warn routes report blocked agents without making them dispatch targets', () => {
+  const route = {
+    schema_version: 2,
+    entries: [{
+      id: 'blocked-warning',
+      invoke_kind: 'warn',
+      signal_patterns: ['blocked agent'],
+      recommended_skills: [],
+      recommended_agents: ['blocked-agent'],
+      warning: 'Agent blocked-agent needs MCP missing',
+    }],
+  };
+  const live = validateRouteTargets(manifest(), route);
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.ok(live.some(item =>
+    item.status === 'blocked_dispatch_agent' && item.target === 'blocked-agent'));
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'blocked_agent_target' && item.target === 'blocked-agent'));
+  assert.equal(record(report, 'agents', 'blocked-agent').classification, 'expected_warn_mcp');
+
+  const initial = runBuilder({ modeMap: route, blockedAgent: true });
+  const baseline = {
+    schema_version: 1,
+    entries: initial.report.unacknowledged_gaps.map(item => ({
+      ...item,
+      classification: 'expected_bm25_only',
+      reason: 'fixture acknowledgement',
+    })),
+  };
+  const strict = runBuilder({ modeMap: route, baseline, blockedAgent: true, strict: true });
+  assert.equal(strict.result.status, 1);
+  assert.ok(strict.report.forward_diagnostics.some(item =>
+    item.code === 'blocked_agent_target' && item.target === 'blocked-agent'));
 });
 
 test('malformed routes emit diagnostics and cannot manufacture mapped coverage', () => {
