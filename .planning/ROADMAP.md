@@ -88,61 +88,6 @@ Full phase details, decisions, and tech debt: [v1.4-ROADMAP](milestones/v1.4-ROA
 
 ## Phase Details
 
-### Phase 27: Mutation Safety Infrastructure
-
-**Goal**: Mutations to the previously-stable mode-map and weights cannot poison cached routes or creep latency — the safety rails exist before any curation ships.
-**Depends on**: Phase 26
-**Requirements**: SAF-01, SAF-02, SAF-03, SAF-04
-**Success Criteria** (what must be TRUE):
-
-  1. When `mode-map.json` or `weights.json` changes (mtime bump), a previously-cached route is recomputed on the next prompt rather than served stale.
-  2. A cached route whose target capability id is absent from the current manifest is never injected — the router recomputes the route instead.
-  3. On the calibration corpus, warm routing p95 stays below 40ms and every measured route stays below 100ms after the full expanded mode-map (regression test re-runnable each subsequent phase).
-  4. `additionalContext` output never exceeds 1 mode + 3 skills + 2 agents + 1 reasoning line (hard drop-and-log boundary), and `mode-map.json` stays below 30KB.
-
-**Plans**: 2 plans
-
-- [x] 27-01-PLAN.md — Hot-path safety guards (SAF-01 cache versioning, SAF-02 stale-target recompute, SAF-04 render cap) in router.mjs
-- [x] 27-02-PLAN.md — Off-hot-path regression gate (SAF-03 p95<40ms/max<100ms) + mode-map 30KB size guard (SAF-04) in perf-measure.mjs and build-manifest.mjs
-
-### Phase 28: Coverage Audit-Guard
-
-**Goal**: Every manifest rebuild produces a classified coverage report that tells the user exactly which unmapped capabilities are intentional and which are real gaps — bi-directionally, CI-gated, and fail-open in the hook.
-**Depends on**: Phase 27
-**Requirements**: COV-01, COV-02, COV-03, COV-04, COV-05
-**Success Criteria** (what must be TRUE):
-
-  1. After `build-manifest.mjs` runs, a `coverage-report.json` exists classifying every manifest skill/command/agent into an `expected_*` category (gap / expected_hook / expected_warn_mcp / expected_bm25_only / expected_phase_internal / expected_scope_project) — not a boolean gap check.
-  2. The audit detects orphans in both directions: mode-map entries pointing at capabilities no longer in the manifest, AND manifest capabilities with no mode-map entry.
-  3. Running `build-manifest.mjs --strict-coverage` exits non-zero only on unacknowledged gaps; items recorded in `coverage-baseline.json` do not fail the CI gate.
-  4. When `coverage-report.json` is missing or older than the manifest, the hook injects a one-line staleness reminder and still passes the prompt through unchanged (fail-open).
-
-**Plans**: 2/2 plans complete
-**Wave 1**
-
-- [x] 28-01-PLAN.md — Pure typed coverage audit, explicit baseline policy, and atomic post-manifest report publication
-
-**Wave 2** *(blocked on Wave 1 completion)*
-
-- [x] 28-02-PLAN.md — Strict coverage CI exit semantics and fail-open hook freshness reminder
-
-### Phase 29: Mode-Map Curation and Signal Patterns Expansion
-
-**Goal**: High-value unmapped gsd-* modes and design skills get mode-map entries with sharp, output-type-anchored signal patterns — validated against a manifest-agnostic fixture, collision-linted, and threshold-calibrated on the expanded set — so the right mode/skill is auto-suggested more often.
-**Depends on**: Phase 28
-**Requirements**: MAP-01, MAP-02, MAP-03, SIG-01, SIG-02, SIG-03, SIG-04
-**Success Criteria** (what must be TRUE):
-
-  1. A user prompt expressing a lifecycle intent (ship, new project, execute phase, quick fix, validate, verify, resume, complete milestone) gets routed to the corresponding gsd-* mode without the user typing the slash.
-  2. A user prompt expressing a design intent (brandkit, minimalist/brutalist UI, image-to-code, imagegen frontend, redesign, stitch taste, excalidraw, gpt-taste) gets the matching design skill suggested.
-  3. All new entries pass `validateRouteTargets`, MCP-missing agents stay in `warn` tier (never auto-dispatched), and a manifest-agnostic synthetic fixture asserts the new entries route correctly on a non-gsd manifest.
-  4. `mode-map.json` schema v3 accepts both plain-string and `{kind,value}` signal patterns, v2 plain-string entries still parse, the 159+ existing tests stay green, and no signal pattern appears in more than one entry unless explicitly declared.
-  5. `T_high` / `T_low` / `M` thresholds are re-derived from the calibration set on the expanded entry list (not left at the v1.3 29-entry values).
-
-**Plans**: TBD
-**UI hint**: yes
-**Research flag**: Consider `/gsd-plan-phase --research-phase 29` — the threshold re-derivation method (isotonic vs Platt vs manual) needs validation against the actual calibration set size (currently 10 tasks, likely too small for isotonic), and collision-lint design needs the full expanded entry set.
-
 ### Phase 30: Foundation — Manifest Fingerprint + Watcher Narrowing
 
 **Goal**: Every semantic inventory change bumps a content-addressed fingerprint epoch that cache and calibration key off, and the watcher stops reconciling on noise — the invalidation spine every v1.5 feature leans on, with no hot-path semantic change.
