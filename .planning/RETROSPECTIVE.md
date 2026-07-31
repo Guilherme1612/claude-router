@@ -138,3 +138,51 @@ v1.3 not yet planned. Run `/gsd-new-milestone`.
 ### Next Milestone
 
 v1.3.1 release-gate hardening (deferred items above). Run `/gsd-new-milestone`.
+
+## v1.4 — Coverage Completeness & Auto-Skill Routing Improvement
+
+**Shipped:** 2026-07-31
+**Phases:** 3 (27–29) | **Plans:** 8 | **Tasks:** 19 | **Tests:** 1188/1188 pass
+
+### What Was Built
+
+- Mutation safety infrastructure (Phase 27): `cacheKey` folds `weightsMtime` as 7th positional component; `routeTargetsExist` guards every cache hit against stale targets; `assessMutationSafetyRegression` enforces warm p95 <40ms / max <100ms; `capRouteRender` + 30KB builder guard cap injection and mode-map size.
+- Coverage audit-guard (Phase 28): deterministic typed coverage report classifying every manifest capability into an `expected_*` taxonomy, bi-directional orphan detection, report-before-failure strict CI gate, fail-open one-line freshness reminder.
+- Mode-map curation + signal patterns (Phase 29): schema-v3 mode-map with 18 lifecycle/design skill routes, output-type-anchored contains patterns (1–6/entry), canonical collision lint with explicit groups, shared v2/v3 normalizer, and thresholds re-derived to 0.591/0.291/0.191 from an expanded 58-record calibration set.
+
+### What Worked
+
+- Requirement-first sequencing paid off: safety rails (27) before mutation, audit (28) before curation, curation+patterns (29) coupled — each phase's success criteria fed the next phase's planning directly.
+- Mutation work stayed fully off the hot path — all v1.4 changes landed in the builder + curated mode-map overlay, keeping `router.mjs` semantically unchanged and 1188/1188 tests green.
+- The portable manifest-agnostic synthetic fixture made curation testable without depending on the live gsd inventory.
+- Nyquist validation ran with the phases this time — all three VALIDATION.md files ended `nyquist_compliant: true`, avoiding the stale-metadata tech-debt that had flagged the v1.4 audit as `tech_debt` on the first pass.
+
+### What Was Inefficient
+
+- First audit pass flagged `tech_debt` because VALIDATION.md metadata lagged final execution evidence; a follow-up reconciliation of the three validation files was needed before the audit could be classified `passed` — validation metadata should be reconciled at phase verification time, not audit time.
+- Live-install lifecycle suite still fails readiness under the real-home environment (10/21) — pre-existing from Phase 26, tracked as deferred but not fixed in v1.4.
+- T_high leave-one-out sensitivity spans 0.301–0.591 — the tuple is safe but the margin is wide; a larger calibration corpus would tighten it.
+
+### Patterns Established
+
+- Safety rail → audit → curation is a reusable sequencing pattern for future mutation work: gate the mutation surface first, make coverage visible, then mutate.
+- A committed hook snapshot (`tests/router.mjs.snapshot`) byte-identical to the installed hook is a strong reproducibility anchor for cross-phase integration checks.
+- Explicit reverse-gap baselines (210 `expected_bm25_only` records) make "intentional unmapped" auditable instead of invisible — but require deterministic maintenance as inventory changes.
+
+### Key Lessons
+
+- Validation metadata that lags execution evidence becomes tech-debt noise at audit time — reconcile at phase verification, not at milestone close.
+- Calibration tuples are only as trustworthy as the corpus they were derived from; document sensitivity spans so future maintainers know how much margin a re-run might shift.
+- Explicit baselines convert subjective "is this gap intentional?" into an auditable diff — worth the maintenance cost.
+
+### Tech Debt Carried Forward
+
+- Reverse-gap baseline maintenance (210 records) as inventory changes — v1.4+.
+- T_high sensitivity re-run when corpus grows — v1.4+.
+- BLOCKER 2: live-install release verification (REL-05/06/07) — v1.3.1.
+- Orphaned temp-dir watchers, router.safety-release live-env failures, watcher-reconcile activation confirmation — v1.3.1.
+- v2 per-prompt source descriptors (Phase 19) — still carried.
+
+### Next Milestone
+
+v1.3.1/v1.5 — release-gate hardening (deferred items above) + maintenance risks from v1.4. Run `/gsd-new-milestone`.
