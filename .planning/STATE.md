@@ -1,20 +1,20 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.4
-milestone_name: Coverage Completeness & Auto-Skill Routing Improvement
-status: Awaiting next milestone
-stopped_at: Roadmap draft ready for review/approval
-last_updated: "2026-07-31T15:57:45.793Z"
+milestone: v1.5
+milestone_name: Framework-Neutral Adaptive Routing
+current_phase: 30
+current_phase_name: Foundation — Manifest Fingerprint + Watcher Narrowing
+status: planning
+stopped_at: context exhaustion at 78% (2026-07-31)
+last_updated: "2026-07-31T20:52:21.352Z"
 last_activity: 2026-07-31
-last_activity_desc: Milestone v1.4 completed and archived
+last_activity_desc: v1.5 roadmap created (Phases 30-35, 22/22 requirements mapped)
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 8
-  completed_plans: 8
-  percent: 100
-current_phase: 29
-current_phase_name: Mode-Map Curation and Signal Patterns Expansion
+  total_phases: 10
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -24,20 +24,22 @@ current_phase_name: Mode-Map Curation and Signal Patterns Expansion
 See: .planning/PROJECT.md (updated 2026-07-31)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** Planning next milestone — v1.4 shipped and archived
+**Current focus:** v1.5 roadmap created — Phase 30 ready to plan
 
 ## Current Position
 
-Phase: Milestone v1.4 complete
-Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-07-31 — Milestone v1.4 completed and archived
+Phase: 30 of 35 (Foundation — Manifest Fingerprint + Watcher Narrowing)
+Plan: — (0 of 0 in current phase)
+Status: Planning — Phase 30 not started
+Last activity: 2026-07-31 — v1.5 roadmap created (Phases 30-35, 22/22 requirements mapped)
+
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Previous milestone plans completed: 31 (v1.3)
+- Previous milestone plans completed: 8 (v1.4, phases 27-29)
 - Current milestone plans completed: 0
 - Current milestone execution time: 0 hours
 
@@ -45,16 +47,16 @@ Last activity: 2026-07-31 — Milestone v1.4 completed and archived
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 27. Mutation Safety Infrastructure | 0 | TBD | - |
-| 28. Coverage Audit-Guard | 0 | TBD | - |
-| 29. Mode-Map Curation and Signal Patterns Expansion | 0 | TBD | - |
-| 27 | 2 | - | - |
-| 28 | 2 | - | - |
-| 29 | 4 | - | - |
+| 30. Manifest Fingerprint + Watcher Narrowing | 0 | TBD | - |
+| 31. Runtime Tagging | 0 | TBD | - |
+| 32. Intent-First Routing | 0 | TBD | - |
+| 33. Shadow-Log Observer | 0 | TBD | - |
+| 34. Per-Install Auto-Calibration | 0 | TBD | - |
+| 35. Release-Gate Cleanup | 0 | TBD | - |
 
 **Recent Trend:**
 
-- Last 5 plans: none (v1.4 not started)
+- Last 5 plans: none (v1.5 not started)
 - Trend: Not started
 
 ## Accumulated Context
@@ -63,11 +65,12 @@ Last activity: 2026-07-31 — Milestone v1.4 completed and archived
 
 Decisions are logged in PROJECT.md Key Decisions table.
 
-- [v1.4 roadmap]: Mutation safety infrastructure (Phase 27) ships before any mode-map/weights mutation — cache versioning and latency gate are prerequisites, not features.
-- [v1.4 roadmap]: Coverage audit-guard (Phase 28) ships before curation — the audit's high_value_unmapped ranking tells Phase 29 which gaps to fill; curating blind risks filling the wrong gaps.
-- [v1.4 roadmap]: Mode-map curation and signal_patterns expansion ship as one coupled phase (Phase 29) — new entries need patterns; patterns need collision lint + threshold re-tune on the expanded set.
-- [v1.4 roadmap]: Evolution weight tuning (FUT-05..07) deferred — highest research flag; signal_patterns expansion is the safer primary lever. See REQUIREMENTS.md Future Requirements.
-- [v1.4 roadmap]: Phase 29 carries a research flag — threshold re-derivation method (isotonic vs Platt vs manual) needs validation against the actual 10-task calibration set; consider `/gsd-plan-phase --research-phase 29`.
+- [v1.5 roadmap]: Fingerprint epoch (Phase 30) ships first — it is the invalidation spine cache + calibration + resolve freshness all key off; watcher noise-narrowing fixes measured reconcile churn before any epoch feature amplifies it.
+- [v1.5 roadmap]: Runtime tagging (Phase 31) precedes shadow-log and calibration — correlation needs the runtime tag; calibration needs the runtime split. Per-runtime resolve (Phase 32) and runtime tagging are independent but both need the fingerprint.
+- [v1.5 roadmap]: Guard-hole closure rides with intent-first routing (Phase 32) and precedes resolve-list shipping — the schema-v4 migration and `routeTargetsExist` rewrite are inseparable from resolve lists; the fingerprint epoch makes resolve freshness safe.
+- [v1.5 roadmap]: Shadow-log observer (Phase 33) ships the three-state schema + measure-only divergence report BEFORE any threshold derives; calibration (Phase 34) is deliberately last because it consumes the epoch, runtime split, resolved names, and outcomes.
+- [v1.5 roadmap]: Release-gate cleanup (Phase 35) is final — it verifies the assembled system end-to-end, including cold-start defaults on a fresh account, closing the standing BLOCKER 2 from v1.3/v1.4.
+- [v1.5 roadmap]: Kept shadow-log and auto-calibration as separate phases (not merged) — research's measure-only-first dependency boundary and the two distinct research flags support the split; granularity "standard" permits 6 phases.
 
 ### Pending Todos
 
@@ -75,30 +78,32 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 27 planning must define the `routing_version` cache-key composition and the calibration-corpus latency regression harness shape.
-- Phase 28 planning must design the `expected_*` taxonomy against the actual manifest field schema (scope, requires_mcp_not_in_manifest, hooks event-bound exclusion).
-- Phase 29 planning must validate the threshold re-derivation method against the 10-task calibration set and design the collision lint over the full expanded entry set.
+- Phase 30 planning must pick the composite-epoch granularity (one global fingerprint vs separate map/manifest/weights epochs) and the exact hash inputs — research flag (see ROADMAP Phase 30).
+- Phase 32 planning must define resolve-list per-runtime ordering + exact tie-handling/confidence-gap rule (near-tie → med), and whether forward-orphan audit semantics extend to resolve lists — research flag.
+- Phase 33 planning must verify PostToolUse slash-command visibility (Skill|Agent|Task only?) and pass a coexistence review — research flag; Stop-hook transcript scan is the deferred fallback.
+- Phase 34 planning must derive the exact threshold mapping formula (Wilson vs Beta/Jeffreys posterior mean; prior strength encoding shipped defaults) — research flag; overfit regression test is the guard.
 
 ## Deferred Items
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| Evolution | FUT-05 tune-weights.mjs (Wilson + decay, disabled-default) | Future — v1.4+ | v1.4 roadmap (highest research flag) |
-| Evolution | FUT-06 counterfactual shadow log + calibration regression gate | Future — v1.4+ | v1.4 roadmap |
-| Evolution | FUT-07 telemetry-driven signal_patterns proposals + escape-hatch metric | Future — v1.4+ | v1.4 roadmap |
-| Advanced Routing | FUT-08 confidence-tier recalibration (isotonic/Platt) | v2 | v1.4 requirements |
-| Advanced Routing | FUT-09 multi-intent / clarification triggers, boundary-aware substring matching | v2 | v1.4 requirements |
-| Release | BLOCKER 2 — live-install release verification stage (REL-05/06/07) | Open — v1.3.1 | v1.3 milestone audit (ship_with_deferred) |
-| Release | Orphaned temp-dir watchers — kill duplicate watcher instances | Open — v1.3.1 | v1.3 milestone close |
-| Release | router.safety-release live-env failures | Open — v1.3.1 | v1.3 milestone close |
-| Activation | Confirm clean watcher reconcile reaches activation_status=activated | Open — v1.3.1 (user shell) | v1.3 milestone close |
+| Evolution | FUT-05 tune-weights.mjs (Wilson + decay, disabled-default) | v2 (needs n≥200) | v1.5 roadmap |
+| Evolution | FUT-06 counterfactual shadow log + calibration regression gate | Partial — v1.5 ships capture (Phase 33); tuning rails v2 | v1.5 roadmap |
+| Evolution | FUT-07 telemetry-driven signal_patterns proposals + escape-hatch metric | v2 | v1.5 roadmap |
+| Advanced Routing | FUT-08 confidence-tier recalibration (isotonic/Platt) | v2 (needs ≥200) | v1.5 requirements |
+| Advanced Routing | FUT-09 multi-intent / clarification triggers, boundary-aware substring matching | v2 | v1.5 requirements |
+| Advanced Routing | FUT-10 per-entry calibration | v2 (needs n≥200) | v1.5 requirements |
+| Advanced Routing | FUT-11 in-turn invocation tap | v2 (only if coexistence review passes) | v1.5 requirements |
+| Release | BLOCKER 2 — live-install release verification (REL-08) | In scope — Phase 35 | v1.5 roadmap |
+| Release | Orphaned watcher instances (REL-10) | In scope — Phase 35 | v1.5 roadmap |
+| Release | router.safety-release live-env failures (REL-10) | In scope — Phase 35 | v1.5 roadmap |
 
 ## Session Continuity
 
-Last session: 2026-07-29 — v1.4 roadmap created
-Stopped at: Roadmap draft ready for review/approval
+Last session: 2026-07-31T20:52:21.344Z
+Stopped at: context exhaustion at 78% (2026-07-31)
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Review/approve the v1.5 roadmap, then start Phase 30 planning: `/gsd-plan-phase 30` (research-phase candidate — composite-epoch granularity).

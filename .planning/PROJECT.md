@@ -8,6 +8,17 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
+## Current Milestone: v1.5 Framework-Neutral Adaptive Routing
+
+**Goal:** Make the router choose the right locally-available capability by intent, not hardcoded framework names; calibrate per install instead of globally; stay consistent across Claude and Codex; react correctly when the inventory changes.
+
+**Target features:**
+- Intent-first routing — mode-map entries carry intent + ranked resolve lists; route resolves to first locally-present capability; close the schema_version guard hole; manifest-driven suppression + next-best fallback; generic fallback tier to native capabilities
+- Inventory-change correctness — calibration AND cache epoch-versioned against the manifest fingerprint; verify watcher covers plugin-cache dirs; document add/update/remove capability lifecycle
+- Per-install auto-calibration — minimal shadow-log outcome capture (suggested vs actually-invoked); per-install threshold derivation from real accepted routes; framework-neutral defaults
+- Per-runtime parity — consistent routing + shared telemetry across Claude and Codex; only active runtime's suggestion injected (no token increase, no LLM calls)
+- Release-gate cleanup — live-install release verification (BLOCKER 2, REL-05/06/07) so v1.5 ships on trusted ground
+
 ## Current State
 
 **v1.4 shipped and verified on 2026-07-31.** Router closes the mode-map coverage gap: cache versioning folds `weightsMtime`, `routeTargetsExist` guards every cache hit against stale targets, and `capRouteRender` hard-caps injection counts before any curation could poison a cached route or creep latency (Phase 27, SAF-01..04); every manifest rebuild produces a typed coverage report classifying every capability into an `expected_*` taxonomy with bi-directional orphan detection, report-before-failure strict CI gating, and a fail-open freshness reminder in the hook (Phase 28, COV-01..05); and the curated schema-v3 mode-map ships 18 lifecycle/design skill routes with output-type-anchored signal patterns, canonical collision lint, and a zero-wrong-high 0.591/0.291/0.191 confidence tuple re-derived from an expanded 58-record calibration set (Phase 29, MAP-01..03, SIG-01..04).
@@ -144,4 +155,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-31 after v1.4 milestone*
+*Last updated: 2026-07-31 after v1.5 milestone start*
