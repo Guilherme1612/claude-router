@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.4 Coverage Completeness & Auto-Skill Routing Improvement (Shipped: 2026-07-31)
+
+**Phases completed:** 3 phases, 8 plans, 19 tasks
+
+**Key accomplishments:**
+
+- SAF-01/02/04 hot-path guards wired: cacheKey folds weightsMtime, routeTargetsExist guards cache hits against stale targets, capRouteRender hard-caps render counts before formatInjection — all observable via routing_version telemetry and decision_trace
+- Deterministic typed coverage auditing with baseline-safe orphan diagnostics and atomic report publication at the manifest build seam
+- Report-before-failure strict coverage gating plus a metadata-only, fail-open freshness reminder in the installed prompt hook
+- Three focused RED suites lock mixed pattern validation, portable 18-target routing, and safety-first threshold calibration before production changes
+- One contains-only v2/v3 normalizer now feeds BM25, validation, proposals, injected inspection fixtures, and build-audit diagnostics
+- Schema-v3 mode-map with 18 portable lifecycle/design skill routes, unique output-anchored evidence, and warning-only missing-MCP safety
+- Production-inspected 58-record calibration with a zero-wrong-high 0.591/0.291/0.191 confidence tuple, deterministic sensitivity evidence, and green installed-runtime release gates
+
+---
+
 ## v1.3 Adaptive Local Capability Steward and Intent-Native Routing (Shipped: 2026-07-28)
 
 **Phases completed:** 6 phases, 31 plans, 57 tasks

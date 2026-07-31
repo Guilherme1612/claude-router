@@ -10,9 +10,23 @@ The user can write the minimum useful prompt and still get the best available wo
 
 ## Current State
 
-**v1.3 shipped and verified on 2026-07-28.** Router is now a framework-neutral, locally adaptive control plane: installed `.claude` and `.codex` capabilities are authoritative local truth (Phase 21) with conservative capability contracts and typed relationship graphs (Phase 22); explicit natural-language intent resolves through authoritative workflow state to one safe installed capability via a four-gate dispatch path — eligible + intent_permits + state_permits + approval_grants (Phase 23); bounded private outcomes drive conservative capability-health observations (Phase 24); advisory stewardship surfaces one high-confidence recommendation with approval-gated, preview-only drafts and no silent mutation (Phase 25); and coherent publication proves the v1.3 tuple publishes byte-identical, atomic, recoverable artifacts across full and incremental paths with a fail-closed dual-runtime release matrix (Phase 26).
+**v1.4 shipped and verified on 2026-07-31.** Router closes the mode-map coverage gap: cache versioning folds `weightsMtime`, `routeTargetsExist` guards every cache hit against stale targets, and `capRouteRender` hard-caps injection counts before any curation could poison a cached route or creep latency (Phase 27, SAF-01..04); every manifest rebuild produces a typed coverage report classifying every capability into an `expected_*` taxonomy with bi-directional orphan detection, report-before-failure strict CI gating, and a fail-open freshness reminder in the hook (Phase 28, COV-01..05); and the curated schema-v3 mode-map ships 18 lifecycle/design skill routes with output-type-anchored signal patterns, canonical collision lint, and a zero-wrong-high 0.591/0.291/0.191 confidence tuple re-derived from an expanded 58-record calibration set (Phase 29, MAP-01..03, SIG-01..04).
 
-**All 6 phases (21–26) verified — 27/27 phase success criteria met, 1102/1102 tests pass.** Milestone audit verdict `ship_with_deferred`: BLOCKER 2 (live-install release verification stage) deferred to v1.3.1 as release-gate hardening, not a phase blocker. PR #1 merged to main (c109a16). v1.3.1 follow-ups open: live-install release gate, orphaned temp-dir watchers, router.safety-release live-env failures, and watcher-reconcile activation confirmation (see STATE.md Deferred Items).
+**All 3 phases (27–29) verified passed — 16/16 requirements satisfied, 101/101 milestone-focused tests pass, integration checker PASS, Nyquist fully compliant.** Milestone audit verdict `passed`. Remaining items are bounded maintenance risks (reverse-gap baseline maintenance, T_high sensitivity re-run on corpus change) plus pre-existing Phase 26 environment issues (lifecycle readiness timeout on real-home checkout, reinstall-verb teardown race, flaky perf suites under load, manifest hook-count drift). Evolution weight tuning (FUT-05..07) remains deferred — `signal_patterns` expansion was the safer primary lever and shipped.
+
+## Last Milestone: v1.4 Coverage Completeness & Auto-Skill Routing Improvement (SHIPPED 2026-07-31)
+
+**Goal:** No manifest skill/command/agent goes unnoticed by the router, and the right skill is auto-suggested more often — dropping rework from mis-routed tasks further.
+
+**Target features:**
+- Coverage audit-guard — automated check that flags any manifest skill/command/agent with no mode-map entry; rerun on manifest rebuild to prevent drift
+- Curate high-value unmapped modes — add mode-map entries for unmapped gsd-* workflow modes (ship, new-project, execute-phase, quick, validate-phase, verify-work, resume-work, complete-milestone, etc.) and design skills (brandkit, minimalist-ui, industrial-brutalist-ui, image-to-code, imagegen-frontend-*, redesign-existing-projects, stitch-design-taste, excalidraw-diagram, gpt-taste)
+- Signal_patterns expansion — broaden trigger keywords on existing and new mode-map entries so prompt signals match canonical modes more reliably
+- Evolution tuning — telemetry-driven weights adjustment so repeated/similar prompts route sharper over time
+
+**Delivered:** Mutation safety infrastructure (SAF-01..04), deterministic coverage audit-guard (COV-01..05), and mode-map curation + signal-pattern expansion (MAP-01..03, SIG-01..04) — 8 plans, 19 tasks, all verified. Audit verdict `passed`. See [v1.4-MILESTONE-AUDIT](milestones/v1.4-MILESTONE-AUDIT.md).
+
+**Next milestone goals:** address remaining tech debt — deterministic reverse-gap baseline maintenance, T_high sensitivity re-run on corpus change, and the deferred v1.3.1 release-gate hardening items (BLOCKER 2 live-install release verification, orphaned temp-dir watchers, router.safety-release live-env failures, watcher-reconcile activation confirmation). Start with `/gsd-new-milestone` after fresh requirements.
 
 ## Last Milestone: v1.3 Adaptive Local Capability Steward and Intent-Native Routing (SHIPPED 2026-07-28)
 
@@ -58,10 +72,14 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Analyze bounded local outcome signals to recommend missing, unhealthy, stale, or reusable capabilities — v1.3 (Phase 24)
 - ✓ Surface only high-confidence startup observations and one prioritized `/router suggestion` — v1.3 (Phase 25)
 - ✓ Preserve prompt-time determinism, latency, privacy, and guarded mutation controls — v1.3 (Phase 26, warm p95 <25ms, max route <100ms, context 194B <2048B)
+- ✓ Mutation safety infrastructure — cache versioning folds mode-map/manifest/weights mtimes, stale cached targets never served, warm p95 <40ms / every route <100ms, injection render + mode-map size caps — v1.4 (Phase 27, SAF-01..04)
+- ✓ Coverage audit-guard — atomic post-manifest typed coverage report, bi-directional orphan detection, strict CI failure with explicit baseline, fail-open one-line stale reminder — v1.4 (Phase 28, COV-01..05)
+- ✓ Mode-map curation — 18 lifecycle/design routes with live+synthetic validation and missing-MCP warning-only safety — v1.4 (Phase 29, MAP-01..03)
+- ✓ Signal patterns expansion — output-type-anchored patterns (1-6/entry), schema v3 contains semantics, canonical collision lint with explicit groups, thresholds re-derived to 0.591/0.291/0.191 — v1.4 (Phase 29, SIG-01..04)
 
 ### Active
 
-(None — v1.3 requirements shipped. v1.3.1 release-gate hardening items are tracked in STATE.md Deferred Items; fresh requirements will be defined via `/gsd-new-milestone`.)
+(None — next milestone requirements to be defined via the new-milestone workflow.)
 
 ### Out of Scope
 
@@ -102,6 +120,11 @@ The approved design and implementation plan are:
 | Treat each user's installed `.claude` and `.codex` capabilities as authoritative | Router must work with personalized and unknown future setups | — Pending |
 | Resolve natural-language actions through inferred contracts, not hard-coded command names | Equivalent workflows may use different commands, agents, or frameworks | — Pending |
 | Allow automatic dispatch only for explicit execute intent after state and safety checks | Convenience must not turn explanations, examples, negations, or uncertainty into actions | — Pending |
+| Ship mutation safety rails before any mode-map/weights mutation | Cache poisoning and latency creep must be impossible before curation ships | ✓ Good |
+| Ship coverage audit-guard before curation | The audit's high_value_unmapped ranking tells curation which gaps to fill | ✓ Good |
+| Couple mode-map curation with signal_patterns expansion in one phase | New entries need patterns; patterns need collision lint + threshold re-tune on the expanded set | ✓ Good |
+| Defer evolution weight tuning (FUT-05..07) | Highest research flag; signal_patterns expansion is the safer primary lever | ✓ Good |
+| Keep all v1.4 mutation work off the hot path (builder + curated mode-map overlay) | Hot path stays semantically unchanged; fail-open, <100ms, no-API-call intact | ✓ Good |
 
 ## Evolution
 
@@ -121,4 +144,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-28 after v1.3 milestone ship*
+*Last updated: 2026-07-31 after v1.4 milestone*
