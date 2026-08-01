@@ -190,7 +190,7 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       agents_store_skills: [],
       agents: [],
     }));
-    const sig = cacheKey('fix the cached route', [], 1, 2, 0, 0);
+    const sig = cacheKey('fix the cached route', [], 'fp');
     let cache = { schema_version: 1, entries: {}, order: [], size: 0 };
     cache = writeCache(cache, sig, {
       id: 'debug',
@@ -206,11 +206,7 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
     const hit = inspectDecision('fix the cached route', {
       cachePath,
       manifestPath,
-      modeMapMtime: 1,
-      manifestMtime: 2,
-      graphMtime: 0,
-      surfaceMtime: 0,
-      weightsMtime: 0,
+      manifestFingerprint: 'fp',
       mutateCache: false,
       logTelemetry: false,
     });
@@ -218,36 +214,20 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
     assert.equal(hit.cache.key_prefix, sig.slice(0, 8));
     assert.equal(hit.cache.scoring_skipped, true);
     assert.equal(hit.cache.cached_route.mode, 'gsd-debug');
-    assert.deepEqual(hit.cache.invalidation_mtimes, {
-      mode_map: 1,
-      manifest: 2,
-      graph: 0,
-      surface: 0,
-      weights: 0,
-    });
+    assert.deepEqual(hit.cache.invalidation_epoch, { manifest_fingerprint: 'fp' });
     assert.equal(hit.pass_through_reason, 'cache_hit_scoring_skipped');
     assert.equal(hit.selected_route.mode, 'gsd-debug');
 
     const miss = inspectDecision('fix the uncached route', {
       cachePath,
       manifestPath,
-      modeMapMtime: 1,
-      manifestMtime: 2,
-      graphMtime: 0,
-      surfaceMtime: 0,
-      weightsMtime: 0,
+      manifestFingerprint: 'fp',
       mutateCache: false,
       logTelemetry: false,
     });
     assert.equal(miss.cache.status, 'miss');
     assert.equal(miss.cache.scoring_skipped, false);
-    assert.deepEqual(miss.cache.invalidation_mtimes, {
-      mode_map: 1,
-      manifest: 2,
-      graph: 0,
-      surface: 0,
-      weights: 0,
-    });
+    assert.deepEqual(miss.cache.invalidation_epoch, { manifest_fingerprint: 'fp' });
   });
 });
 

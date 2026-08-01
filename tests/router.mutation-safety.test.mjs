@@ -1,10 +1,11 @@
 // Phase 27 / Plan 01 (TDD): Mutation-safety hot-path guards in router.mjs.
-// SAF-01: cacheKey folds weightsMtime (7th positional component).
+// SAF-01: cacheKey folds the manifest fingerprint epoch (INVC-02), replacing the
+//   weights-mtime 7th positional component.
 // SAF-02: routeTargetsExist guards cache hits against stale targets.
 // SAF-04: capRouteRender hard count cap (1 mode / 3 skills / 2 agents) before formatInjection.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -39,18 +40,17 @@ function fakeManifest({ commands = [], skills = [], pluginSkills = [], agentsSto
   };
 }
 
-// --- SAF-01: cacheKey folds weightsMtime as 7th positional component ---
+// --- SAF-01: cacheKey folds the manifest fingerprint epoch (INVC-02) ---
 
-test('SAF-01: cacheKey changing weightsMtime produces a different key (weights-mtime invalidation)', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000, 0, 0, 5000);
-  const b = cacheKey('fix bug', ['fix'], 1000, 2000, 0, 0, 5001);
+test('SAF-01: cacheKey changing manifestFingerprint produces a different key (epoch invalidation)', () => {
+  const a = cacheKey('fix bug', ['fix'], 'a');
+  const b = cacheKey('fix bug', ['fix'], 'b');
   assert.notEqual(a, b);
 });
 
-test('SAF-01 Pitfall 2: non-zero weightsMtime produces a different key from the default-0 key', () => {
-  const defaultKey = cacheKey('fix bug', ['fix'], 1000, 2000, 0, 0);
-  const realKey = cacheKey('fix bug', ['fix'], 1000, 2000, 0, 0, 5000);
-  assert.notEqual(defaultKey, realKey);
+test('SAF-01: omitted fingerprint folds the deterministic default 0 key (fail-open)', () => {
+  assert.equal(cacheKey('fix bug', ['fix']), cacheKey('fix bug', ['fix'], '0'));
+  assert.notEqual(cacheKey('fix bug', ['fix']), cacheKey('fix bug', ['fix'], 'a'));
 });
 
 // --- SAF-02: routeTargetsExist guards cache hits against stale targets ---
@@ -236,11 +236,14 @@ test('SAF-04: _render_cap_truncated is stripped from the injected route before f
   assert.ok(!/_render_cap_truncated/.test(out), 'internal flag leaked into injection output');
 });
 
-test('SAF-01 integration: a weights mtime change prevents the old cached route from being served', () => withTempDir(dir => {
+test('SAF-01 integration: a fingerprint mismatch prevents the old cached route from being served', () => withTempDir(dir => {
   const cachePath = join(dir, 'cache.json');
   const manifestPath = join(dir, 'manifest.json');
-  writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
-  const staleSig = cacheKey('fix cached bug', [], 1, 2, 0, 0, 10);
+  const manifest = fakeManifest({ commands: ['gsd-debug'] });
+  manifest.manifest_fingerprint = 'current-fp';
+  writeFileSync(manifestPath, JSON.stringify(manifest));
+  // Stale entry written under a DIFFERENT (stale) fingerprint epoch.
+  const staleSig = cacheKey('fix cached bug', [], 'stale-fp');
   const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, staleSig, {
     id: 'debug',
     mode: 'gsd-debug',
@@ -255,11 +258,7 @@ test('SAF-01 integration: a weights mtime change prevents the old cached route f
   const out = inspectDecision('fix cached bug', {
     cachePath,
     manifestPath,
-    modeMapMtime: 1,
-    manifestMtime: 2,
-    graphMtime: 0,
-    surfaceMtime: 0,
-    weightsMtime: 11,
+    manifestFingerprint: 'current-fp',
     mutateCache: false,
     logTelemetry: false,
   });
@@ -267,13 +266,30 @@ test('SAF-01 integration: a weights mtime change prevents the old cached route f
   assert.equal(out.cache.status, 'miss');
   assert.equal(out.cache.scoring_skipped, false);
   assert.doesNotMatch(out.final_injected_context, /POISONED-CACHE-ENTRY/);
+  assert.equal(out.routing_version, 'current-fp');
+}));
+
+test('SAF-01 default-fallback: no fingerprint option and no manifest_fingerprint → deterministic 0 key, no throw, routing_version 0', () => withTempDir(dir => {
+  const cachePath = join(dir, 'cache.json');
+  const manifestPath = join(dir, 'manifest.json');
+  // Manifest WITHOUT a manifest_fingerprint key; no manifestFingerprint option.
+  writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
+  const out = inspectDecision('fix uncached bug', {
+    cachePath,
+    manifestPath,
+    mutateCache: false,
+    logTelemetry: false,
+  });
+  assert.ok(out, 'inspectDecision must not throw without a fingerprint');
+  assert.equal(out.routing_version, '0');
+  assert.equal(out.cache.status, 'miss');
 }));
 
 test('SAF-02 integration: a poisoned cached target is recomputed and never injected', () => withTempDir(dir => {
   const cachePath = join(dir, 'cache.json');
   const manifestPath = join(dir, 'manifest.json');
   writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
-  const sig = cacheKey('fix poisoned route', [], 1, 2, 0, 0, 0);
+  const sig = cacheKey('fix poisoned route', [], 'same-fp');
   const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
     id: 'debug',
     mode: 'gsd-debug',
@@ -287,11 +303,7 @@ test('SAF-02 integration: a poisoned cached target is recomputed and never injec
   const out = inspectDecision('fix poisoned route', {
     cachePath,
     manifestPath,
-    modeMapMtime: 1,
-    manifestMtime: 2,
-    graphMtime: 0,
-    surfaceMtime: 0,
-    weightsMtime: 0,
+    manifestFingerprint: 'same-fp',
     mutateCache: false,
     logTelemetry: false,
   });
@@ -308,7 +320,7 @@ test('SAF-04 integration: an oversized cached route is capped by the production 
   const skills = ['s1', 's2', 's3', 's4'];
   const agents = ['a1', 'a2', 'a3'];
   writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'], skills, agents })));
-  const sig = cacheKey('fix oversized route', [], 1, 2, 0, 0, 0);
+  const sig = cacheKey('fix oversized route', [], 'same-fp');
   const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
     id: 'debug',
     mode: 'gsd-debug',
@@ -322,11 +334,7 @@ test('SAF-04 integration: an oversized cached route is capped by the production 
   const out = inspectDecision('fix oversized route', {
     cachePath,
     manifestPath,
-    modeMapMtime: 1,
-    manifestMtime: 2,
-    graphMtime: 0,
-    surfaceMtime: 0,
-    weightsMtime: 0,
+    manifestFingerprint: 'same-fp',
     mutateCache: false,
     logTelemetry: false,
   });

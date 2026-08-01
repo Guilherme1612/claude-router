@@ -4,7 +4,7 @@
 // is used for ok-path tests; synthetic temp dirs drive edge cases.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, rmSync, writeFileSync, appendFileSync, statSync, existsSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync, appendFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -142,35 +142,25 @@ test('composeWithCap: route alone over cap → returns route (no graph present, 
   assert.equal(out, bigRoute);
 });
 
-// --- cacheKey: graphMtime fold --------------------------------------------
+// --- cacheKey: manifest fingerprint epoch fold (INVC-02) --------------------
+// The old graphMtime/surfaceMtime/weightsMtime fold was removed by Plan 30-01;
+// the key now folds the manifest fingerprint epoch.
 
-test('cacheKey: same inputs + same graphMtime → same key', () => {
-  const a = cacheKey('hello world', ['k1', 'k2'], 100, 200, 300);
-  const b = cacheKey('hello world', ['k1', 'k2'], 100, 200, 300);
+test('cacheKey: same inputs + same fingerprint → same key', () => {
+  const a = cacheKey('hello world', ['k1', 'k2'], 'fp');
+  const b = cacheKey('hello world', ['k1', 'k2'], 'fp');
   assert.equal(a, b);
 });
 
-test('cacheKey: different graphMtime → different key', () => {
-  const a = cacheKey('hello world', ['k1'], 100, 200, 300);
-  const b = cacheKey('hello world', ['k1'], 100, 200, 301);
-  assert.notEqual(a, b, 'graphMtime must invalidate the key when graph.json rebuilds');
+test('cacheKey: different manifestFingerprint → different key (epoch invalidation)', () => {
+  const a = cacheKey('hello world', ['k1'], 'a');
+  const b = cacheKey('hello world', ['k1'], 'b');
+  assert.notEqual(a, b, 'a fingerprint change must invalidate the key');
 });
 
-test('cacheKey: graphMtime defaults to 0 when omitted (backward-compatible with Phase-1 callers)', () => {
-  const a = cacheKey('hello world', ['k1'], 100, 200);
-  const b = cacheKey('hello world', ['k1'], 100, 200, 0);
-  assert.equal(a, b, 'omitted arg must equal explicit 0');
-});
-
-test('cacheKey: real graph mtime folds into the signature', () => {
-  if (!existsSync(REAL_GRAPH_PATH)) {
-    // Skip if the real graph is missing — the test environment is the limit.
-    return;
-  }
-  const mtime = statSync(REAL_GRAPH_PATH).mtimeMs;
-  const withReal = cacheKey('how does the router decide', [], 1, 1, mtime);
-  const withZero = cacheKey('how does the router decide', [], 1, 1, 0);
-  assert.notEqual(withReal, withZero, 'folding the real graph mtime must produce a different key than the zero default');
+test('cacheKey: omitted fingerprint defaults to the deterministic 0 key (fail-open)', () => {
+  assert.equal(cacheKey('hello world', ['k1']), cacheKey('hello world', ['k1'], '0'));
+  assert.notEqual(cacheKey('hello world', ['k1']), cacheKey('hello world', ['k1'], 'a'));
 });
 
 // --- end-to-end fail-open: forced throw in graphifyHeuristic --------------
