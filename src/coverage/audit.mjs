@@ -139,12 +139,25 @@ function typedMappings(modeMap, indexes) {
     const mode = cleanId(entry?.mode);
     if (entry?.invoke_kind === 'slash') {
       const alias = mode && mode !== route && routeIds.has(mode);
-      const schemaRoute = mode && mode === route && Boolean(modeMap.schema_version);
+      // Guard-hole closure (T-32-09): a slash route is intentional only when its mode is a
+      // present manifest command OR an explicit resolve-list member resolves to one. The
+      // blanket `mode === route && Boolean(schema_version)` pass is removed so schema_version
+      // truthiness no longer exempts slash routes in the audit.
+      const resolveRoute = mode && (entry.resolve || []).some(member => indexes.command.has(cleanId(member?.name)));
       if (indexes.command.has(mode)) mapped.command.add(mode);
-      else if (!alias && !schemaRoute) diagnostics.push({
+      else if (!alias && !resolveRoute) diagnostics.push({
         code: 'stale_target', route, target: mode || '<mode>', category: 'commands',
         reason: 'slash mode must match a manifest command or intentional mode-map route id',
       });
+      // T-32-10: resolve-list members absent from the active manifest are reported as
+      // forward-orphan / stale diagnostics — never silently dropped.
+      for (const member of entry.resolve || []) {
+        const name = cleanId(member?.name);
+        if (name && !indexes.command.has(name)) diagnostics.push({
+          code: 'stale_target', route, target: name, category: 'commands',
+          reason: 'resolve member is absent from the manifest command inventory',
+        });
+      }
     }
 
     for (const rawTarget of entry.recommended_skills) {
