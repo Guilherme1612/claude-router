@@ -703,7 +703,7 @@ export function auditInventoryCoverage(manifest, modeMap) {
 function namesFromEntries(entries, predicate = () => true) {
   return new Set((entries || [])
     .filter(predicate)
-    .map((entry) => stripLeadingSlash(entry?.name || entry?.id))
+    .map((entry) => stripLeadingSlash(typeof entry === 'string' ? entry : (entry?.name || entry?.id)))
     .filter(Boolean));
 }
 
@@ -721,6 +721,10 @@ export function buildTargetIndexes(manifest) {
     blockedAgents: namesFromEntries(manifest?.agents, blockedAgent),
   };
 }
+
+// ROUTE-04 generic native-capability fallback. A fixed, capability-agnostic constant so a
+// fabricated command/framework name is impossible; references only native capabilities.
+const GENERIC_NATIVE_FALLBACK = 'Run a native capability from your available toolset if one matches.';
 
 // Resolve-first route decision (Phase 32). Builds a framework-neutral candidate
 // set purely from `entry.mode` (weight 1.0) + `entry.resolve[]` (their weights),
@@ -759,7 +763,17 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
     const present = [...candidates.values()]
       .filter((candidate) => commands.has(candidate.name))
       .sort((a, b) => b.weight - a.weight || String(a.name).localeCompare(String(b.name)));
-    if (present.length === 0) return null;
+    if (present.length === 0) {
+      // ROUTE-04: a high-confidence intent with an EMPTY resolve set (no mode candidate
+      // and no resolve member present) emits at most ONE generic native-capability
+      // fallback line. The line is the fixed GENERIC_NATIVE_FALLBACK constant — never
+      // derived from the entry id or any resolve candidate, so a fabricated capability
+      // name is impossible. Only fires on a confident tier; otherwise stays silent.
+      if (opts?.tier === 'high') {
+        return { suggested_slash: null, tier: 'high', weight: null, fallback_lines: [GENERIC_NATIVE_FALLBACK] };
+      }
+      return null; // non-high-confidence empty resolve is silent (never a dead injection)
+    }
     const top = present[0];
     const tier = opts?.tier === 'high' && top.weight >= 0.8 ? 'high' : 'med';
     return { suggested_slash: top.name, tier, weight: top.weight };
@@ -831,6 +845,20 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
       const intentionalResolveRoute = mode && Boolean(resolveSlashRoute(entry, indexes));
       if (!mode || (!indexes.commands.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute)) {
         rows.push(routeDiagnostic(entry, 'stale_target', mode || '<mode>', 'slash mode must match a manifest command or intentional mode-map route id'));
+      }
+      // T-32-10 forward-orphan: when a slash route is otherwise resolvable (its mode is a
+      // present command, or a resolve member resolves to one), resolve-list members that are
+      // ABSENT from the active manifest's command inventory are flagged (quarantined), never
+      // silently dropped. A fully-unresolvable route is reported once by its mode and does
+      // not additionally flag each member, so it stays a single stale_target.
+      const routeResolvable = Boolean(indexes.commands.has(mode)) || Boolean(intentionalResolveRoute);
+      if (routeResolvable) {
+        for (const member of entry.resolve || []) {
+          const name = stripLeadingSlash(member?.name);
+          if (name && !indexes.commands.has(name)) {
+            rows.push(routeDiagnostic(entry, 'stale_target', name, 'resolve member is absent from the manifest command inventory'));
+          }
+        }
       }
     }
 
