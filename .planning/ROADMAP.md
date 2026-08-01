@@ -132,9 +132,19 @@ Plans:
   2. Every telemetry and cache record carries a `runtime` tag; a route cached under one runtime is never served to the other (no cross-runtime cache reuse).
   3. A single telemetry stream shows rows from both Claude and Codex sessions, each with its correct runtime tag and no duplicate writers; the `runtime`/`epoch` fields land via a deliberate `OUTCOME_FIELDS` policy-version bump, never a silent schema add.
 
-**Plans**: TBD
+**Plans**: 3 plans
 
-*Code-verified: remove hardcoded `RUNTIME_CONFIG_DIR = join(homedir(), '.claude')` (router.mjs:100); reuse `process.argv[1]` (currently only in the `isMain()` guard, router.mjs:57). `~/.codex/router/installed.json` marker already exists — fallback is present, never read. cacheKey has NO runtime partition today → a Codex session can be served a Claude-derived route; cache key folds a runtime tag. `OUTCOME_FIELDS` frozen at 14 fields (src/health/outcome-schema.mjs:33-38, enforced by tests/router.health.outcome-schema.test.mjs:68-71) — the policy-version bump to add `runtime` MUST update that test explicitly.*
+Plans:
+**Wave 1**
+
+- [ ] 31-01-PLAN.md — Wave 0 RED test infra (runtime-tagging spec, outcome-schema 16-field enforcement, cache divergence, mirror-desync guard)
+- [ ] 31-02-PLAN.md — Wave 1 tracer: runtime detection + runtime-conditional ROUTER_DIR/HOOKS_DIR/children rewire + builder runtime pin (PARITY-01)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 31-03-PLAN.md — Wave 2 TDD: cache-key runtime identity + telemetry runtime field + deliberate OUTCOME_FIELDS 14→16 policy bump (PARITY-02)
+
+*Code-verified: remove hardcoded `RUNTIME_CONFIG_DIR = join(homedir(), '.claude')` (router.mjs:100); ROUTER_DIR:75 and HOOKS_DIR:90 ALSO hardcode `.claude` directly (bypass RUNTIME_CONFIG_DIR) and MUST be rewired to the runtime-conditional base or a Codex session still writes to ~/.claude. reuse `process.argv[1]` (currently only in the `isMain()` guard, router.mjs:57). `~/.codex/router/installed.json` marker already exists — fallback is present, never read. cacheKey has NO runtime partition today → a Codex session can be served a Claude-derived route; cache key folds a runtime tag as identity. `OUTCOME_FIELDS` frozen at 14 fields (src/health/outcome-schema.mjs:33-38, enforced by tests/router.health.outcome-schema.test.mjs:68-71) — the policy-version bump to add `runtime`/`epoch` MUST update that test explicitly. PARITY-03/PARITY-04 (D-07/D-08 resolve-layer) deferred to Phase 32 (resolve-first hot path absent until Phase 32).*
 
 ### Phase 32: Intent-First Routing (mode-map schema v4 + guard-hole closure)
 
