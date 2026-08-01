@@ -101,7 +101,7 @@ Full phase details, decisions, and tech debt: [v1.4-ROADMAP](milestones/v1.4-ROA
   4. Calibration data is epoch-keyed by the fingerprint: a fingerprint mismatch means mode-map default thresholds (0.591/0.291/0.191) win, never stale per-install thresholds.
   5. The full add/update/remove capability lifecycle (watcher → rebuild → coverage audit → recompute → re-calibrate) is documented and test-verified end-to-end.
 
-**Plans**: 2/3 plans executed
+**Plans**: 3/3 plans executed
 
 ```
 Plans:
@@ -115,7 +115,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 30-03-PLAN.md — Calibration epoch-keying + lifecycle documentation (INVC-03, INVC-05)
+- [x] 30-03-PLAN.md — Calibration epoch-keying + lifecycle documentation (INVC-03, INVC-05)
 
 ```
 
@@ -227,7 +227,7 @@ Phases execute in numeric order: 27 → 28 → 29 (v1.4), then 30 → 31 → 32 
 | 27. Mutation Safety Infrastructure | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 28. Coverage Audit-Guard | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 29. Mode-Map Curation and Signal Patterns Expansion | v1.4 | 4/4 | Complete    | 2026-07-29 |
-| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 2/3 | In Progress|  |
+| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 3/3 | In Progress|  |
 | 31. Runtime Tagging | v1.5 | 0/0 | Not started | - |
 | 32. Intent-First Routing | v1.5 | 0/0 | Not started | - |
 | 33. Shadow-Log Observer | v1.5 | 0/0 | Not started | - |

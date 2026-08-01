@@ -4,17 +4,17 @@ milestone: v1.5
 milestone_name: Framework-Neutral Adaptive Routing
 current_phase: 30
 current_phase_name: foundation-manifest-fingerprint-watcher-narrowing
-status: executing
-stopped_at: Completed 30-02-PLAN.md
-last_updated: "2026-08-01T09:32:29.264Z"
+status: verifying
+stopped_at: Completed 30-03-PLAN.md
+last_updated: "2026-08-01T09:44:46.070Z"
 last_activity: 2026-08-01
 last_activity_desc: Phase 30 execution started
 progress:
   total_phases: 7
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 3
-  completed_plans: 2
-  percent: 0
+  completed_plans: 3
+  percent: 14
 ---
 
 # Project State
@@ -30,10 +30,10 @@ See: .planning/PROJECT.md (updated 2026-07-31)
 
 Phase: 30 (foundation-manifest-fingerprint-watcher-narrowing) — EXECUTING
 Plan: 3 of 3
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-01 — Phase 30 execution started
 
-Progress: [███░░░░░░░] 33%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -64,6 +64,7 @@ Progress: [███░░░░░░░] 33%
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 30-foundation-manifest-fingerprint-watcher-narrowing P2 | 12 | 2 tasks | 3 files |
+| Phase 30 P3 | 14 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -79,6 +80,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [v1.5 roadmap]: Kept shadow-log and auto-calibration as separate phases (not merged) — research's measure-only-first dependency boundary and the two distinct research flags support the split; granularity "standard" permits 6 phases.
 - [Phase ?]: Watcher roots ignore sqlite/WAL + plugin-catalog caches via prefix-specific ignoredRelativePaths; bare 'plugins' prefix never used so installed_plugins.json stays the authoritative add/remove signal
 - [Phase ?]: manifest_fingerprint excludes timestamps: computeCompositeEpoch hashes only name/marketplace/version/scope of installed plugins
+- [Phase ?]: Calibration is epoch-keyed: fingerprint-matched calibration.json wins; mismatch/absent/corrupt -> mode-map defaults 0.591/0.291/0.191 (fail-open, never throws)
+- [Phase ?]: Hardcoded startup threshold fallback bumped from 0.6/0.3/0.2 to the roadmap defaults 0.591/0.291/0.191 so the named defaults are the literal defaults
+- [Phase ?]: Capability lifecycle (watcher -> rebuild -> coverage audit -> recompute -> re-calibrate) documented in docs/inventory-lifecycle.md and test-verified in the add direction (remove direction proven by 30-02)
 
 ### Pending Todos
 
@@ -108,8 +112,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-01T09:32:29.255Z
-Stopped at: Completed 30-02-PLAN.md
+Last session: 2026-08-01T09:44:29.917Z
+Stopped at: Completed 30-03-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
