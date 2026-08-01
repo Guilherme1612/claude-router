@@ -711,14 +711,19 @@ export function buildTargetIndexes(manifest) {
   const safeAgent = (entry) => !hasMissingMcp(entry);
   const blockedAgent = (entry) => hasMissingMcp(entry);
   const globalAgentsStore = (entry) => String(entry?.scope || '') === 'global';
+  const runtimeSlice = (manifest?.runtime_commands || {})[RUNTIME];
+  const commandEntries = Array.isArray(runtimeSlice) && runtimeSlice.length > 0
+    ? runtimeSlice
+    : manifest?.commands;
   return {
-    commands: namesFromEntries(manifest?.commands),
+    commands: namesFromEntries(commandEntries),
     skills: namesFromEntries(manifest?.skills),
     globalSkills: namesFromEntries(manifest?.skills),
     pluginSkills: namesFromEntries(manifest?.plugin_skills),
     globalAgentsStoreSkills: namesFromEntries(manifest?.agents_store_skills, globalAgentsStore),
     safeAgents: namesFromEntries(manifest?.agents, safeAgent),
     blockedAgents: namesFromEntries(manifest?.agents, blockedAgent),
+    runtime: RUNTIME,
   };
 }
 
