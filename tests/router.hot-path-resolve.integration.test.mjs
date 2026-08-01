@@ -42,12 +42,12 @@ function manifestFor(runtime) {
   };
 }
 
-function inspect(runtime, manifest, prompt = 'debug this issue', modeMap = MODE_MAP) {
+function inspect(runtime, manifest, prompt = 'debug this issue', modeMap = MODE_MAP, extraOptions = {}) {
   const code = [
     `const m = await import(${JSON.stringify(pathToFileURL(HOOK).href)});`,
     `const manifest = ${JSON.stringify(manifest)};`,
     `const modeMap = ${JSON.stringify(modeMap)};`,
-    `const out = m.inspectDecision(${JSON.stringify(prompt)}, { manifest, modeMap, weights: null, mutateCache: false, logTelemetry: false, emitInjection: false, includePrompt: false });`,
+    `const out = m.inspectDecision(${JSON.stringify(prompt)}, { manifest, modeMap, weights: null, mutateCache: false, logTelemetry: false, emitInjection: false, includePrompt: false, ...${JSON.stringify(extraOptions)} });`,
     'process.stdout.write(JSON.stringify(out));',
   ].join('\n');
   const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
@@ -115,6 +115,27 @@ test('real hot path suppresses a slash when no active runtime candidate resolves
   assert.equal(result.value.final_injected_context, '');
   assert.equal(result.value.selected_route, null);
   assert.notEqual(result.value.pass_through_reason, 'error');
+});
+
+test('resolver failure on the inspectDecision hot path fails open without a fabricated slash', () => {
+  const malformedModeMap = {
+    ...MODE_MAP,
+    entries: [{ ...ROLE, resolve: { malformed: true } }],
+  };
+  const result = inspect(
+    'claude',
+    manifestFor('claude'),
+    'debug this issue',
+    malformedModeMap,
+    { cachePath: '/dev/null' },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.value, result.stdout);
+  assert.equal(result.value.final_injected_context, '');
+  assert.equal(result.value.selected_route, null);
+  assert.equal(result.value.pass_through_reason, 'resolve_unavailable');
+  assert.notEqual(result.value.selected_tier, 'error');
+  assert.doesNotMatch(result.value.final_injected_context, /Run \/gsd-debug/);
 });
 
 test('resolver keeps declared order for equal-weight resolve members', () => {
