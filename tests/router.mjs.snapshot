@@ -71,8 +71,34 @@ if (!isMain() || proposalCommands.has(process.argv[2])) {
   } = await import('./router.evolve.mjs'));
 }
 
+// --- Runtime detection (PARITY-01 / D-01 / D-02 / D-04) --------------------
+// detectRuntime() runs ONCE at module load and caches into RUNTIME (D-01) —
+// zero hot-path IO, zero per-prompt branching. Precedence: (1) ROUTER_RUNTIME
+// env override wins when exactly 'claude'|'codex' (D-04); (2) else a codex
+// marker (CODEX_HOME set, or argv[1] path under .codex/) → 'codex'; (3) else
+// default 'claude' (deterministic fail-open). Out-of-enum ROUTER_RUNTIME
+// clamps to 'claude' (T-31-01) — an unbounded string never reaches path
+// construction. Uses only process.env/process.argv string checks already in
+// scope at module load — NO IO, NO existsSync.
+export function detectRuntime() {
+  try {
+    const override = process.env.ROUTER_RUNTIME;
+    if (override === 'claude' || override === 'codex') return override;
+    if (process.env.CODEX_HOME || String(process.argv[1] || '').includes('.codex/')) return 'codex';
+    return 'claude';
+  } catch {
+    return 'claude';
+  }
+}
+export const RUNTIME = detectRuntime();
+// D-03: ONE runtime-conditional root is the single source of truth for the
+// profile dir. claude → ~/.claude, codex → ~/.codex. All data paths derive
+// from RUNTIME_CONFIG_DIR, so tagging the root isolates data per runtime.
+const runtimeBaseDir = (runtime) => join(homedir(), '.' + runtime);
+
 // --- Constants (no /Users/guilherme hardcoding — use os.homedir()) ---------
-const ROUTER_DIR = join(homedir(), '.claude', 'router');
+export const RUNTIME_CONFIG_DIR = runtimeBaseDir(RUNTIME);
+const ROUTER_DIR = join(RUNTIME_CONFIG_DIR, 'router');
 const MANIFEST = join(ROUTER_DIR, 'claude-inventory-manifest.json');
 const BUILD_SCRIPT = join(ROUTER_DIR, 'build-manifest.mjs');
 const COVERAGE_REPORT = join(ROUTER_DIR, 'coverage-report.json');
@@ -87,7 +113,7 @@ const CALIBRATION_PATH = join(ROUTER_DIR, 'calibration.json');
 // Phase 3 / EVO-02/EVO-03 evolution worker plumbing.
 const EVOLUTION_STATE = join(ROUTER_DIR, 'evolution-state.json');
 const TRIGGER = join(ROUTER_DIR, '.evolve-trigger');
-const HOOKS_DIR = join(homedir(), '.claude', 'hooks');
+const HOOKS_DIR = join(RUNTIME_CONFIG_DIR, 'hooks');
 const WORKER_PATH = join(HOOKS_DIR, 'router.evolve.mjs');
 const EVOLVE_TRIGGER_N = 200;
 
@@ -101,7 +127,6 @@ const EVOLVE_TRIGGER_N = 200;
 // fail (RESEARCH Pitfall 3) because ~/.claude/hooks/router.mjs has no
 // node_modules in its resolution chain. Absolute-path require is the runtime
 // pattern used by gsd-surface itself in production.
-const RUNTIME_CONFIG_DIR = join(homedir(), '.claude');
 const SURFACE_FILE = join(RUNTIME_CONFIG_DIR, '.gsd-surface.json');
 const GSD_CORE_DIR = join(RUNTIME_CONFIG_DIR, 'gsd-core', 'bin', 'lib');
 
