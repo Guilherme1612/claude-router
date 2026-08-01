@@ -743,7 +743,18 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
     if (manifestOrIndexes && manifestOrIndexes.commands instanceof Set) {
       commands = manifestOrIndexes.commands;
     } else {
-      commands = new Set((manifestOrIndexes?.commands || []).map((c) => {
+      // PARITY-03 runtime-conditional presence: prefer the ACTIVE runtime's
+      // runtime-tagged command slice (runtime_commands[RUNTIME], phase 31/26
+      // shape) so a capability present only under one runtime is invisible to
+      // the other and never leaked into a foreign suggestion. Falls back to the
+      // plain .commands array when no runtime slice exists (pre-runtime
+      // manifest). RUNTIME is the module-level active-runtime enum clamp
+      // (unset/ambiguous defaults to claude) — never a foreign capability set.
+      const runtimeSlice = (manifestOrIndexes?.runtime_commands || {})[RUNTIME];
+      const source = Array.isArray(runtimeSlice)
+        ? runtimeSlice
+        : (manifestOrIndexes?.commands || []);
+      commands = new Set(source.map((c) => {
         if (typeof c === 'string') return stripLeadingSlash(c);
         return stripLeadingSlash(c?.name || c?.id);
       }).filter(Boolean));
@@ -760,23 +771,38 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
       const weight = typeof candidate?.weight === 'number' ? candidate.weight : 1.0;
       addCandidate(candidate?.name, weight);
     }
+    // T-32-15 / ROUTE-05: resolve-list members ABSENT from the active runtime's
+    // present inventory are quarantined (flagged), never injected. Only the
+    // active runtime's candidates are ever in play (PARITY-03).
+    const quarantined = [...candidates.values()]
+      .filter((candidate) => !commands.has(candidate.name))
+      .map((candidate) => candidate.name);
     const present = [...candidates.values()]
       .filter((candidate) => commands.has(candidate.name))
       .sort((a, b) => b.weight - a.weight || String(a.name).localeCompare(String(b.name)));
     if (present.length === 0) {
+      // ROUTE-04: a high-confidence intent with an EMPTY resolve set (no mode candidate
       // ROUTE-04: a high-confidence intent with an EMPTY resolve set (no mode candidate
       // and no resolve member present) emits at most ONE generic native-capability
       // fallback line. The line is the fixed GENERIC_NATIVE_FALLBACK constant — never
       // derived from the entry id or any resolve candidate, so a fabricated capability
       // name is impossible. Only fires on a confident tier; otherwise stays silent.
       if (opts?.tier === 'high') {
-        return { suggested_slash: null, tier: 'high', weight: null, fallback_lines: [GENERIC_NATIVE_FALLBACK] };
+        return { suggested_slash: null, tier: 'high', weight: null, fallback_lines: [GENERIC_NATIVE_FALLBACK], quarantined, provenance: [{ runtime: RUNTIME }] };
       }
       return null; // non-high-confidence empty resolve is silent (never a dead injection)
     }
     const top = present[0];
-    const tier = opts?.tier === 'high' && top.weight >= 0.8 ? 'high' : 'med';
-    return { suggested_slash: top.name, tier, weight: top.weight };
+    // ROUTE-05 tie-lint: a near-tie (any other present candidate within 0.05 of the
+    // top) is never shipped at a confident tier — downgrade high -> med.
+    const second = present[1];
+    const nearTie = second !== undefined && Math.abs(top.weight - second.weight) <= 0.05;
+    let tier = opts?.tier === 'high' && top.weight >= 0.8 ? 'high' : 'med';
+    if (nearTie && tier === 'high') tier = 'med';
+    // PARITY-04: provenance attributes the resolved suggestion to the ACTIVE runtime
+    // alone, so cross-runtime attribution holds (only the active runtime's suggestion
+    // is injected).
+    return { suggested_slash: top.name, tier, weight: top.weight, quarantined, provenance: [{ runtime: RUNTIME }] };
   } catch {
     return null; // fail-open: never throw on the hot path
   }
