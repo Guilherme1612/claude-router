@@ -13,6 +13,7 @@ const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const mod = await import(HOOK);
 const {
   cacheKey,
+  contentHash,
   routeTargetsExist,
   capRouteRender,
   formatInjection,
@@ -20,6 +21,12 @@ const {
   writeCache,
   saveCache,
 } = mod;
+
+// WR-01: the cache key folds LIVE content hashes of mode-map and weights, so a
+// seeded hit/stale-target entry must fold the SAME hashes (and inspectDecision
+// must receive the same modeMap/weights objects).
+const CACHE_FIXTURE_MODE_MAP = { entries: [], thresholds: { T_high: 0.591, T_low: 0.291, M: 0.191 } };
+const CACHE_FIXTURE_WEIGHTS = { blend: 0.15, weights: {} };
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-mutation-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -289,7 +296,8 @@ test('SAF-02 integration: a poisoned cached target is recomputed and never injec
   const cachePath = join(dir, 'cache.json');
   const manifestPath = join(dir, 'manifest.json');
   writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'] })));
-  const sig = cacheKey('fix poisoned route', [], 'same-fp');
+  const sig = cacheKey('fix poisoned route', [], 'same-fp',
+    contentHash(CACHE_FIXTURE_MODE_MAP), contentHash(CACHE_FIXTURE_WEIGHTS));
   const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
     id: 'debug',
     mode: 'gsd-debug',
@@ -304,6 +312,8 @@ test('SAF-02 integration: a poisoned cached target is recomputed and never injec
     cachePath,
     manifestPath,
     manifestFingerprint: 'same-fp',
+    modeMap: CACHE_FIXTURE_MODE_MAP,
+    weights: CACHE_FIXTURE_WEIGHTS,
     mutateCache: false,
     logTelemetry: false,
   });
@@ -320,7 +330,8 @@ test('SAF-04 integration: an oversized cached route is capped by the production 
   const skills = ['s1', 's2', 's3', 's4'];
   const agents = ['a1', 'a2', 'a3'];
   writeFileSync(manifestPath, JSON.stringify(fakeManifest({ commands: ['gsd-debug'], skills, agents })));
-  const sig = cacheKey('fix oversized route', [], 'same-fp');
+  const sig = cacheKey('fix oversized route', [], 'same-fp',
+    contentHash(CACHE_FIXTURE_MODE_MAP), contentHash(CACHE_FIXTURE_WEIGHTS));
   const cache = writeCache({ schema_version: 1, entries: {}, order: [], size: 0 }, sig, {
     id: 'debug',
     mode: 'gsd-debug',
@@ -335,6 +346,8 @@ test('SAF-04 integration: an oversized cached route is capped by the production 
     cachePath,
     manifestPath,
     manifestFingerprint: 'same-fp',
+    modeMap: CACHE_FIXTURE_MODE_MAP,
+    weights: CACHE_FIXTURE_WEIGHTS,
     mutateCache: false,
     logTelemetry: false,
   });

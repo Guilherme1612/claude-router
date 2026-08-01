@@ -22,10 +22,17 @@ const {
   inspectDecision,
   explainLastDecision,
   cacheKey,
+  contentHash,
   writeCache,
   saveCache,
   promptSignature,
 } = mod;
+
+// WR-01: the cache key now folds LIVE content hashes of mode-map and weights, so
+// a seeded hit must fold the SAME hashes (and inspectDecision must be given the
+// same modeMap/weights objects) or the seeded entry becomes a miss.
+const CACHE_FIXTURE_MODE_MAP = { entries: [], thresholds: { T_high: 0.591, T_low: 0.291, M: 0.191 } };
+const CACHE_FIXTURE_WEIGHTS = { blend: 0.15, weights: {} };
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-inspect-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -190,7 +197,8 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       agents_store_skills: [],
       agents: [],
     }));
-    const sig = cacheKey('fix the cached route', [], 'fp');
+    const sig = cacheKey('fix the cached route', [], 'fp',
+      contentHash(CACHE_FIXTURE_MODE_MAP), contentHash(CACHE_FIXTURE_WEIGHTS));
     let cache = { schema_version: 1, entries: {}, order: [], size: 0 };
     cache = writeCache(cache, sig, {
       id: 'debug',
@@ -207,6 +215,8 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       cachePath,
       manifestPath,
       manifestFingerprint: 'fp',
+      modeMap: CACHE_FIXTURE_MODE_MAP,
+      weights: CACHE_FIXTURE_WEIGHTS,
       mutateCache: false,
       logTelemetry: false,
     });
@@ -222,6 +232,8 @@ test('router inspect JSON: cache effect distinguishes hit from miss and skipped 
       cachePath,
       manifestPath,
       manifestFingerprint: 'fp',
+      modeMap: CACHE_FIXTURE_MODE_MAP,
+      weights: CACHE_FIXTURE_WEIGHTS,
       mutateCache: false,
       logTelemetry: false,
     });

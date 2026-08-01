@@ -1671,18 +1671,51 @@ export function cacheLookup(sig, cache) {
   return e && e.route ? e.route : null;
 }
 
-// Cache key (RTE-07 / SAF-01 / INVC-02). sha256(normalizedPrompt + "|" +
-// intentKeywords.join(" ") + "|" + manifestFingerprint). The fingerprint is the
-// manifest content-address epoch (manifest.manifest_fingerprint), replacing the
-// old mtime fold: a no-op rebuild keeps the key identical (cache not
-// invalidated), while any semantic inventory change bumps the fingerprint ->
-// key -> previously-cached route recomputed. Defaults to '0' so a missing
-// fingerprint still yields a deterministic key and never throws.
-export function cacheKey(normalizedPrompt, intentKeywords, manifestFingerprint = '0') {
+// Cache key (RTE-07 / SAF-01 / INVC-02 / WR-01 / WR-02). sha256(normalizedPrompt
+// + "|" + intentKeywords.join(" ") + "|" + manifestFingerprint [+ "|" + liveHash]).
+// The fingerprint is the manifest content-address epoch
+// (manifest.manifest_fingerprint), replacing the old live mtime fold: a no-op
+// rebuild keeps the key identical (cache not invalidated), while any semantic
+// inventory change bumps the fingerprint -> key -> previously-cached route
+// recomputed.
+//
+// WR-01/WR-02: mode-map.json, weights.json, and project graph.json changes do
+// NOT trigger a manifest rebuild (the watcher ignores the router/ dir that holds
+// mode-map/weights, and graph is project-side). To preserve invalidation for
+// those edits WITHOUT re-introducing a raw absolute mtime into the semantic
+// fingerprint, the key additionally folds LIVE CONTENT HASHES (not mtimes) of
+// the loaded mode-map, weights, and graph when present. A content change
+// invalidates; a no-op read returns an identical hash (deterministic); the
+// manifest fingerprint still governs no-op-rebuild stability. Fail-open
+// defaults: omitted/'' hashes leave the key byte-identical to the
+// fingerprint-only form, and a missing fingerprint defaults to '0'.
+export function cacheKey(normalizedPrompt, intentKeywords, manifestFingerprint = '0',
+  modeMapHash = '', weightsHash = '', graphHash = '') {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
-  const joined = [np, ik, manifestFingerprint].join('|');
-  return createHash('sha256').update(joined).digest('hex');
+  const parts = [np, ik, manifestFingerprint];
+  const live = [modeMapHash, weightsHash, graphHash].filter(Boolean).join('|');
+  if (live) parts.push(live);
+  return createHash('sha256').update(parts.join('|')).digest('hex');
+}
+
+// Deterministic, content-addressed object serialization (key order independent),
+// used by contentHash so a mode-map/weights/graph edit that only reorders object
+// keys still yields the same hash (a no-op semantically) while a real content
+// change yields a different one.
+function stableStringify(value) {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`;
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+}
+
+// WR-01/WR-02: content-addressed hash of a live routing input (mode-map, weights,
+// graph). '' for null/undefined so the caller can skip the fold. NEVER an mtime —
+// determinism preserved, cache invalidated only on true content change.
+export function contentHash(value) {
+  if (value == null) return '';
+  return createHash('sha256').update(stableStringify(value), 'utf8').digest('hex');
 }
 
 // Read graph.json mtime for cwd (best-effort; returns 0 on any failure or
@@ -1836,6 +1869,8 @@ export function graphifyHeuristic(prompt, cwd) {
     symbols: result.symbols,
     elapsed_ms: result.elapsed_ms,
     boostIds: result.boostIds,
+    // WR-02: propagated so cacheKey can fold the graph content signature.
+    content_hash: result.content_hash,
   };
 }
 
@@ -1971,6 +2006,10 @@ export function graphifyQuery(prompt, cwd, k = 8) {
       graph_status: 'ok',
       elapsed_ms: elapsed(),
       boostIds,
+      // WR-02: content-addressed signature of graph.json so cacheKey can fold it
+      // (graph build -> new content -> new key -> stale graph-boosted route
+      // recomputed) WITHOUT re-introducing a raw absolute mtime.
+      content_hash: createHash('sha256').update(raw, 'utf8').digest('hex'),
     };
   } catch {
     return {
@@ -2738,7 +2777,15 @@ export function inspectDecision(prompt, options = {}) {
     // no-op rebuild keeps the key (cache preserved) while any semantic inventory
     // change bumps it (stale route recomputed). Fail-open default is '0'.
     const manifestFingerprint = opts.manifestFingerprint ?? manifest.manifest_fingerprint ?? '0';
-    const sig = cacheKey(state.normalizedPrompt, [], manifestFingerprint);
+    // WR-01/WR-02: fold LIVE content hashes (NOT mtimes) of the loaded mode-map,
+    // weights, and graph into the key. These inputs are read fresh every decision
+    // and do not trigger a manifest rebuild on edit (watcher ignores router/;
+    // graph is project-side), so without this fold an edit would serve stale
+    // cached routes. Content-addressed => deterministic + fail-open ('' skips).
+    const modeMapHash = contentHash(modeMap);
+    const weightsHash = contentHash(weights);
+    const graphHash = (graph && graph.content_hash) || '';
+    const sig = cacheKey(state.normalizedPrompt, [], manifestFingerprint, modeMapHash, weightsHash, graphHash);
     state.cache.key_prefix = sig.slice(0, 8);
     state.cache.invalidation_epoch = { manifest_fingerprint: manifestFingerprint };
     // SAF-01: routing_version is a DERIVED observability string (not stored on

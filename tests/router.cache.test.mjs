@@ -12,7 +12,7 @@ import { homedir } from 'node:os';
 
 const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
 const mod = await import(HOOK);
-const { cacheKey, cacheLookup, writeCache, loadCache, saveCache } = mod;
+const { cacheKey, contentHash, cacheLookup, writeCache, loadCache, saveCache } = mod;
 
 function withTempDir(fn) {
   const dir = join(tmpdir(), `router-cache-${process.pid}-${Math.random().toString(36).slice(2)}`);
@@ -181,4 +181,40 @@ test('only High-tier routes are cached (Medium/Low not cached) — contract chec
   // a different (medium-tier) prompt has a different key → miss (not cached)
   const medSig = cacheKey('redesign the dashboard', ['redesign'], 'fp');
   assert.equal(cacheLookup(medSig, cache), null);
+});
+
+// --- WR-01 / WR-02: live content-hash fold restores edit-invalidation ----------
+
+test('WR-01: mode-map content change invalidates the key under an unchanged manifest fingerprint', () => {
+  const fp = 'same-manifest-fingerprint';
+  const modeA = { entries: [], thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 } };
+  const modeB = { entries: [], thresholds: { T_high: 0.7, T_low: 0.25, M: 0.15 } };
+  const keyA = cacheKey('help me', [], fp, contentHash(modeA), 'w');
+  const keySameA = cacheKey('help me', [], fp, contentHash(modeA), 'w');
+  const keyB = cacheKey('help me', [], fp, contentHash(modeB), 'w');
+  assert.equal(keyA, keySameA, 'identical mode-map content -> identical key (no spurious invalidation)');
+  assert.notEqual(keyA, keyB, 'a mode-map content edit must invalidate the cached route despite an unchanged fingerprint');
+  // Omitted/'' live hashes leave the key fingerprint-only (back-compat determinism).
+  assert.equal(cacheKey('help me', [], fp, '', ''), cacheKey('help me', [], fp, ''));
+});
+
+test('WR-01: weights content change invalidates the key under an unchanged manifest fingerprint', () => {
+  const fp = 'same-manifest-fingerprint';
+  const wA = { blend: 0.15, weights: { a: 1 } };
+  const wB = { blend: 0.15, weights: { a: 2 } };
+  const keyA = cacheKey('route me', [], fp, contentHash({ entries: [] }), contentHash(wA));
+  const keyB = cacheKey('route me', [], fp, contentHash({ entries: [] }), contentHash(wB));
+  assert.notEqual(keyA, keyB, 'a weights edit must invalidate the cached route'),
+  // digest is hex64
+  assert.match(keyA, /^[0-9a-f]{64}$/);
+});
+
+test('WR-02: graph.json content change invalidates the key (content hash, not mtime)', () => {
+  const fp = 'same-manifest-fingerprint';
+  const graphA = { nodes: [{ id: 'src/a.js' }] };
+  const graphB = { nodes: [{ id: 'src/a.js' }, { id: 'src/b.js' }] };
+  const keyA = cacheKey('how does the graph work', [], fp, '', '', contentHash(graphA));
+  const keyB = cacheKey('how does the graph work', [], fp, '', '', contentHash(graphB));
+  assert.equal(contentHash(graphA), contentHash(structuredClone(graphA)), 'content hash must be deterministic');
+  assert.notEqual(keyA, keyB, 'a graph rebuild (content change) must invalidate graph-aware routes');
 });
