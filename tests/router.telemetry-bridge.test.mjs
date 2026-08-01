@@ -121,11 +121,12 @@ test('Task1.6 bridge never emits a field outside the FIELDS set', async () => {
   const { validateEvidenceEnvelope } = await import(evidenceUrl);
   const result = telemetryRecordToEvidence(baseTelemetryRecord());
   assert.equal(result.status, 'accepted');
-  // The emitted signal must contain exactly the 11 allowlisted fields
+  // The emitted signal must contain exactly the 13 allowlisted fields
+  // (Phase-31 bump: +runtime, +epoch forwarded from the hook's telemetry tag).
   const allowed = new Set([
     'timestamp_ms', 'route_id', 'confidence_band', 'guard_codes', 'reason_code',
     'fixture_class', 'latency_us', 'candidate_version', 'policy_version', 'verdict',
-    'prompt_signature',
+    'prompt_signature', 'runtime', 'epoch',
   ]);
   assert.deepEqual(new Set(Object.keys(result.signal)), allowed);
   // An envelope with an extra field is denied by validateEvidenceEnvelope

@@ -37,7 +37,7 @@ import { refreshSuggestionPointer } from '../steward/refresh.mjs';
 
 export { HALF_LIFE_MS, MAX_RETENTION_MS };
 
-export const HEALTH_POLICY_VERSION = 'health-policy-v1';
+export const HEALTH_POLICY_VERSION = 'health-policy-v2';
 
 // Default evidence window for the 'abandoned' derivation — 24h (HALF_LIFE_MS),
 // capped at MAX_RETENTION_MS (7d) per the plan.

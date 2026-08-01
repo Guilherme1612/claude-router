@@ -30,11 +30,18 @@ const FRAMEWORK_PREFIXES = Object.freeze(['gsd-', 'gstack-', 'codex-']);
 
 // HLTH-04 allowlist. This set is final for v1 — adding a field later requires a
 // policy_version bump and a migration (plan reversibility: costly).
+//
+// PHASE-31 POLICY-VERSION BUMP (ROADMAP criterion 3 / D-06 consumer): this is a
+// DELIBERATE 14 -> 16 expansion (+runtime, +epoch) so a runtime-tagged telemetry
+// line survives ingest into the evidence allowlist. The bump is atomic with its
+// size-16 enforcement test in tests/router.health.outcome-schema.test.mjs and
+// with the HEALTH_POLICY_VERSION bump in src/health/observe.mjs ('health-policy-v1'
+// -> 'health-policy-v2') — it is NEVER a silent schema add.
 export const OUTCOME_FIELDS = Object.freeze(new Set([
   'timestamp_ms', 'capability_id', 'outcome_kind', 'prompt_signature',
   'route_id', 'confidence_band', 'guard_codes', 'reason_code',
   'evidence_window_ms', 'sample_size', 'opportunity_count', 'freshness',
-  'policy_version', 'fingerprint',
+  'policy_version', 'fingerprint', 'runtime', 'epoch',
 ]));
 
 // HLTH-03: the bounded outcome schema distinguishes exactly 9 dispositions.

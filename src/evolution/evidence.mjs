@@ -6,7 +6,7 @@ import { join } from 'node:path';
 const FIELDS = new Set([
   'timestamp_ms', 'route_id', 'confidence_band', 'guard_codes', 'reason_code',
   'fixture_class', 'latency_us', 'candidate_version', 'policy_version', 'verdict',
-  'prompt_signature',
+  'prompt_signature', 'runtime', 'epoch',
 ]);
 const CONFIDENCE_BANDS = new Set(['high', 'medium', 'low', 'trivial', 'user_explicit', 'stale', 'manifest_missing', 'reentry_skipped', 'deny_filtered']);
 const FIXTURE_CLASSES = new Set(['minimal-prompt', 'explicit-override', 'stale-context', 'ambiguity', 'terminal-state', 'dependency', 'context-budget']);

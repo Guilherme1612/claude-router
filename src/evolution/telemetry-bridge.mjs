@@ -72,6 +72,13 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
     policy_version: POLICY_VERSION,
     verdict: 'success', // v1: telemetry outcome is null; regression detected by calibration gates
     prompt_signature: record.prompt_signature ?? null,
+    // D-06 / PARITY-02 (Phase-31 bump): forward the hook's runtime tag (+epoch
+    // indicator) so a runtime-tagged telemetry line survives ingest. The
+    // validateEvidenceEnvelope FIELDS allowlist was bumped 11 -> 13 in lockstep
+    // (evidence.mjs) so these two fields pass rather than being rejected with
+    // forbidden_evidence_field.
+    runtime: record.runtime ? String(record.runtime) : null,
+    epoch: record.epoch !== undefined && record.epoch !== null ? String(record.epoch) : null,
   };
   return validateEvidenceEnvelope(envelope);
 }
