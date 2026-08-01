@@ -63,6 +63,27 @@ function inspect(runtime, manifest, prompt = 'debug this issue', modeMap = MODE_
   return { status: result.status, stdout, stderr: (result.stderr || '').trim(), value };
 }
 
+function resolve(runtime, entry, commands) {
+  const manifest = {
+    commands: [],
+    runtime_commands: { claude: [], codex: [], [runtime]: commands },
+  };
+  const code = [
+    `const m = await import(${JSON.stringify(pathToFileURL(HOOK).href)});`,
+    `const entry = ${JSON.stringify(entry)};`,
+    `const manifest = ${JSON.stringify(manifest)};`,
+    'process.stdout.write(JSON.stringify(m.resolveSlashRoute(entry, manifest, { tier: \'high\' })));',
+  ].join('\n');
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', code], {
+    env: { ...process.env, ROUTER_RUNTIME: runtime },
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  let value = null;
+  try { value = JSON.parse((result.stdout || '').trim()); } catch {}
+  return { status: result.status, stderr: (result.stderr || '').trim(), value };
+}
+
 test('real hot path emits the Claude-local resolved slash', () => {
   const result = inspect('claude', manifestFor('claude'));
   assert.equal(result.status, 0, result.stderr);
@@ -94,4 +115,37 @@ test('real hot path suppresses a slash when no active runtime candidate resolves
   assert.equal(result.value.final_injected_context, '');
   assert.equal(result.value.selected_route, null);
   assert.notEqual(result.value.pass_through_reason, 'error');
+});
+
+test('resolver keeps declared order for equal-weight resolve members', () => {
+  const result = resolve('claude', {
+    mode: 'entry-mode',
+    resolve: [
+      { name: 'b', weight: 0.9 },
+      { name: 'a', weight: 0.9 },
+    ],
+  }, ['b', 'a']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.value.suggested_slash, 'b');
+});
+
+test('resolver still sorts differing weights before declared order', () => {
+  const result = resolve('claude', {
+    mode: 'entry-mode',
+    resolve: [
+      { name: 'b', weight: 0.8 },
+      { name: 'a', weight: 0.9 },
+    ],
+  }, ['b', 'a']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.value.suggested_slash, 'a');
+});
+
+test('resolver keeps the mode candidate primary over lower-weight resolve members', () => {
+  const result = resolve('claude', {
+    mode: 'entry-mode',
+    resolve: [{ name: 'b', weight: 0.99 }],
+  }, ['entry-mode', 'b']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.value.suggested_slash, 'entry-mode');
 });
