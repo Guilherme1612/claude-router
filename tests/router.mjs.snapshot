@@ -784,7 +784,10 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
       .map((candidate) => candidate.name);
     const present = [...candidates.values()]
       .filter((candidate) => commands.has(candidate.name))
-      .sort((a, b) => b.weight - a.weight || String(a.name).localeCompare(String(b.name)));
+      // ROUTE-01 ranked-list contract: weight desc, then declared authoring
+      // order. ES2019+ Array#sort is stable, and candidates comes from the
+      // insertion-ordered mode + resolve list Map.
+      .sort((a, b) => b.weight - a.weight);
     if (present.length === 0) {
       // ROUTE-04: a high-confidence intent with an EMPTY resolve set (no mode candidate
       // ROUTE-04: a high-confidence intent with an EMPTY resolve set (no mode candidate
