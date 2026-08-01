@@ -2490,6 +2490,15 @@ export function formatInjection(route, prompt = '', sigHash = '') {
   const kind = route.invoke_kind;
   if (!kind) return '';
 
+  // ROUTE-04: render the resolver's fixed native fallback at most once. It has
+  // no slash mode, so a fabricated framework command cannot reach the model.
+  if (Array.isArray(route.fallback_lines) && route.fallback_lines.length) {
+    const lines = route.fallback_lines.slice(0, 1).filter(Boolean);
+    if (!lines.length) return '';
+    const fallbackReason = 'No framework-specific slash resolved; use a native capability if available.';
+    return '\n\n' + assembleBlock({ ...route, mode: '' }, sigHash, fallbackReason, lines);
+  }
+
   // warn kind (any tier): MCP-missing warning, no dispatch.
   if (kind === 'warn') {
     const reasoning = buildReasoning(route);
@@ -2630,6 +2639,8 @@ function routeToInspectShape(state) {
     thresholds: state.thresholds || { T_high: null, T_low: null, M: null },
     selected_tier: state.tier || null,
     selected_route: route,
+    resolved_slash: state.resolvedSlash || null,
+    resolve_quarantined: state.resolveQuarantined || [],
     guards_fired: state.guards_fired || [],
     cache: state.cache || { status: 'miss', key_prefix: '', scoring_skipped: false },
     graphify: state.graphify || { status: 'not_triggered', queried: false, symbols: [] },
@@ -2733,6 +2744,8 @@ export function telemetryEntryFromState(decision, startNs) {
     // to the runtime that produced it. Additive observability field; append-only
     // JSONL via logTelemetry; no prompt text.
     runtime: RUNTIME,
+    resolved_slash: decision.resolvedSlash || null,
+    resolve_quarantined: decision.resolveQuarantined || [],
   };
 }
 
@@ -2790,6 +2803,8 @@ export function inspectDecision(prompt, options = {}) {
     decision_trace: ['start'],
     finalInjectedContext: '',
     passThroughReason: null,
+    resolvedSlash: null,
+    resolveQuarantined: [],
     surface_status: 'unconfigured',
     surface_disabled_count: 0,
     cwd: opts.cwd,
@@ -3024,7 +3039,7 @@ export function inspectDecision(prompt, options = {}) {
     }
 
     const mmEntry = modeMapEntryForName(modeMap, topName);
-    const route = {
+    let route = {
       id: mmEntry ? mmEntry.id || null : null,
       mode: mmEntry ? mmEntry.mode : null,
       invoke_kind: mmEntry ? mmEntry.invoke_kind : null,
@@ -3036,8 +3051,35 @@ export function inspectDecision(prompt, options = {}) {
       weight_applied: typeof top.weight_applied === 'number' ? top.weight_applied : null,
       scores: blended.slice(0, 3).map((s) => ({ name: s.name, norm: s.norm })),
     };
+    if (route.invoke_kind === 'slash') {
+      const resolved = resolveSlashRoute(mmEntry, manifest, { tier });
+      state.resolvedSlash = resolved?.suggested_slash || null;
+      state.resolveQuarantined = Array.isArray(resolved?.quarantined)
+        ? resolved.quarantined.slice()
+        : [];
+      if (resolved?.suggested_slash) {
+        route.mode = resolved.suggested_slash;
+        route.tier = resolved.tier || route.tier;
+        route.resolved_slash = resolved.suggested_slash;
+        route.resolve_quarantined = state.resolveQuarantined;
+        state.tier = route.tier;
+        state.decision_trace.push(`resolve:slash:${resolved.suggested_slash}`);
+      } else if (Array.isArray(resolved?.fallback_lines) && resolved.fallback_lines.length) {
+        route.mode = null;
+        route.tier = resolved.tier || route.tier;
+        route.fallback_lines = resolved.fallback_lines.slice(0, 1);
+        route.resolve_quarantined = state.resolveQuarantined;
+        state.tier = route.tier;
+        state.decision_trace.push('resolve:fallback:native');
+      } else {
+        route = null;
+        state.tier = 'low';
+        state.passThroughReason = 'resolve_unavailable';
+        state.decision_trace.push('resolve:slash:unavailable');
+      }
+    }
     state.route = route;
-    state.invoke_kind = route.invoke_kind;
+    state.invoke_kind = route ? route.invoke_kind : null;
     state.guard_debug.original_route = route;
 
     const guarded = applyGuards(route, prompt, manifest, modeMap, {
@@ -3061,7 +3103,7 @@ export function inspectDecision(prompt, options = {}) {
     }
     if (guarded.guards_fired.length) state.decision_trace.push('guard:demoted_or_filtered');
 
-    if (tier === 'high' && finalRoute && finalRoute.invoke_kind !== 'warn' && opts.mutateCache) {
+    if (finalRoute && finalRoute.tier === 'high' && finalRoute.invoke_kind !== 'warn' && opts.mutateCache) {
       writeCache(cache, sig, finalRoute);
       try { saveCache(cache, opts.cachePath); } catch {}
     }
@@ -3080,7 +3122,7 @@ export function inspectDecision(prompt, options = {}) {
       const routeBlock = formatInjection(capped, prompt, sig.slice(0, 8));
       const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
       state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
-      if (!state.finalInjectedContext && tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
+      if (!state.finalInjectedContext && state.tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
     } else {
       state.route = null;
       state.invoke_kind = null;

@@ -42,11 +42,11 @@ function manifestFor(runtime) {
   };
 }
 
-function inspect(runtime, manifest, prompt = 'debug this issue') {
+function inspect(runtime, manifest, prompt = 'debug this issue', modeMap = MODE_MAP) {
   const code = [
     `const m = await import(${JSON.stringify(pathToFileURL(HOOK).href)});`,
     `const manifest = ${JSON.stringify(manifest)};`,
-    `const modeMap = ${JSON.stringify(MODE_MAP)};`,
+    `const modeMap = ${JSON.stringify(modeMap)};`,
     `const out = m.inspectDecision(${JSON.stringify(prompt)}, { manifest, modeMap, weights: null, mutateCache: false, logTelemetry: false, emitInjection: false, includePrompt: false });`,
     'process.stdout.write(JSON.stringify(out));',
   ].join('\n');
@@ -85,7 +85,10 @@ test('real hot path emits the Codex-local resolved slash and quarantines Claude-
 test('real hot path suppresses a slash when no active runtime candidate resolves', () => {
   const manifest = manifestFor('claude');
   manifest.runtime_commands.claude = [];
-  const result = inspect('claude', manifest);
+  const result = inspect('claude', manifest, 'debug this issue', {
+    ...MODE_MAP,
+    thresholds: { T_high: 1.1, T_low: 0.3, M: 0.2 },
+  });
   assert.equal(result.status, 0, result.stderr);
   assert.ok(result.value, result.stdout);
   assert.equal(result.value.final_injected_context, '');
