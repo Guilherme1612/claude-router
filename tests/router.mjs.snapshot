@@ -80,6 +80,10 @@ const CACHE = join(ROUTER_DIR, 'cache.json');
 const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
 const WEIGHTS = join(ROUTER_DIR, 'weights.json');
+// INVC-03: per-install calibration FILE (created by Phase 34). The hook only
+// ever reads it epoch-gated — a matching manifest_fingerprint wins, and any
+// mismatch/absence/corruption falls back to mode-map defaults. Never mutated.
+const CALIBRATION_PATH = join(ROUTER_DIR, 'calibration.json');
 // Phase 3 / EVO-02/EVO-03 evolution worker plumbing.
 const EVOLUTION_STATE = join(ROUTER_DIR, 'evolution-state.json');
 const TRIGGER = join(ROUTER_DIR, '.evolve-trigger');
@@ -487,6 +491,37 @@ export function loadModeMap(path = MODE_MAP) {
     return JSON.parse(readFileSync(path, 'utf8'));
   } catch {
     return null;
+  }
+}
+
+// INVC-03: epoch-gated calibration read. Shape mirrors the best-effort
+// try/catch-return-default stat pattern. NEVER throws, NEVER mutates.
+//   - manifestFingerprint === calibration.manifest_fingerprint AND
+//     calibration.thresholds is a plain object → { matched: true, thresholds }
+//   - otherwise (mismatch | absent | corrupt/parse error) →
+//     { matched: false, thresholds: null } so mode-map defaults win.
+export function loadEpochCalibration(manifestFingerprint, { calibrationPath = CALIBRATION_PATH } = {}) {
+  try {
+    if (!calibrationPath || !existsSync(calibrationPath)) return { matched: false, thresholds: null };
+    const parsed = JSON.parse(readFileSync(calibrationPath, 'utf8'));
+    if (
+      parsed
+      && typeof parsed === 'object'
+      && !Array.isArray(parsed)
+      && parsed.manifest_fingerprint === manifestFingerprint
+      && parsed.thresholds
+      && typeof parsed.thresholds === 'object'
+      && !Array.isArray(parsed.thresholds)
+      && typeof parsed.thresholds.T_high === 'number'
+      && typeof parsed.thresholds.T_low === 'number'
+      && typeof parsed.thresholds.M === 'number'
+    ) {
+      return { matched: true, thresholds: parsed.thresholds };
+    }
+    return { matched: false, thresholds: null };
+  } catch {
+    // corrupt/unreadable → fail-open: defaults win, never a hot-path throw.
+    return { matched: false, thresholds: null };
   }
 }
 
@@ -2656,7 +2691,18 @@ export function inspectDecision(prompt, options = {}) {
       state.decision_trace.push('pass_through:manifest_missing');
       return finish();
     }
-    state.thresholds = modeMap.thresholds || { T_high: 0.6, T_low: 0.3, M: 0.2 };
+    // INVC-03: epoch-guarded threshold consult. Runs AFTER manifest is loaded
+    // (fingerprint known). A calibration file whose manifest_fingerprint matches
+    // wins; mismatch/absent/corrupt → mode-map defaults (0.591/0.291/0.191) win,
+    // never stale per-install thresholds. Read-only — routes through
+    // loadEpochCalibration which never mutates the calibration file.
+    const epochCal = loadEpochCalibration(
+      opts.manifestFingerprint ?? manifest.manifest_fingerprint ?? '0',
+      { calibrationPath: opts.calibrationPath },
+    );
+    state.thresholds = epochCal.matched
+      ? epochCal.thresholds
+      : (modeMap.thresholds || { T_high: 0.591, T_low: 0.291, M: 0.191 });
     state.score_debug.T_low = state.thresholds.T_low;
     state.score_debug.T_high = state.thresholds.T_high;
     state.score_debug.M = state.thresholds.M;

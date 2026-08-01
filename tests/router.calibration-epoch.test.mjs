@@ -6,7 +6,7 @@
 //   - corrupt:  malformed calibration JSON → mode-map defaults win, no throw
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, readFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -42,7 +42,8 @@ function baseManifest(fingerprint = 'fp-1') {
 const modeMap = { thresholds: DEFAULT_T };
 
 // Run inspectDecision with a temp calibration file of the given kind.
-// Returns { out, calibrationPath } so tests can also assert non-mutation.
+// Returns { out, onDisk } — onDisk is the calibration file's content captured
+// while the temp dir is still alive (so non-mutation can be asserted).
 function decisionFor(kind) {
   return withTempDir((dir) => {
     const calibrationPath = join(dir, 'calibration.json');
@@ -61,7 +62,11 @@ function decisionFor(kind) {
       mutateCache: false,
       logTelemetry: false,
     });
-    return { out, calibrationPath };
+    let onDisk = null;
+    if (existsSync(calibrationPath)) {
+      try { onDisk = JSON.parse(readFileSync(calibrationPath, 'utf8')); } catch { onDisk = readFileSync(calibrationPath, 'utf8'); }
+    }
+    return { out, onDisk };
   });
 }
 
@@ -74,8 +79,7 @@ test('INVC-03 match: calibration with matching manifest_fingerprint yields per-i
 });
 
 test('INVC-03 match: the calibration file is not mutated by the read', () => {
-  const { out, calibrationPath } = decisionFor('match');
-  const onDisk = JSON.parse(readFileSync(calibrationPath, 'utf8'));
+  const { onDisk } = decisionFor('match');
   assert.deepEqual(onDisk, { manifest_fingerprint: 'fp-1', thresholds: CAL_T });
 });
 
