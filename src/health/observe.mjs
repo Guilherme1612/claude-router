@@ -84,6 +84,13 @@ export function deriveSelectedOutcome(telemetryRecord, { stableCapabilityIdFn } 
     opportunity_count: 1,
     freshness: 'fresh',
     policy_version: HEALTH_POLICY_VERSION,
+    // WR-01: forward the runtime tag (written by telemetryEntryFromState) so a
+    // runtime-tagged telemetry line survives ingest into the correlated-outcome
+    // store that feeds evolution weights. epoch is forward-compat scaffolding —
+    // forwarded if present, else null. Additive; does not change the existing
+    // outcome shape.
+    runtime: telemetryRecord.runtime ?? null,
+    epoch: telemetryRecord.epoch ?? null,
   };
   const fingerprint = createHash('sha256').update(stableStringify(canonicalRecord), 'utf8').digest('hex');
   const fullRecord = { ...canonicalRecord, fingerprint };
@@ -230,6 +237,10 @@ function buildOutcomeRecord({ telemetryRecord, capabilityId, outcome_kind, reaso
     opportunity_count: 1,
     freshness: 'fresh',
     policy_version: HEALTH_POLICY_VERSION,
+    // WR-01: forward the runtime tag (see deriveSelectedOutcome) so the runtime
+    // attribution survives into the outcome store via the full-observer path too.
+    runtime: telemetryRecord.runtime ?? null,
+    epoch: telemetryRecord.epoch ?? null,
   };
   const fingerprint = createHash('sha256').update(stableStringify(canonicalRecord), 'utf8').digest('hex');
   return validateOutcomeEnvelope({ ...canonicalRecord, fingerprint });
@@ -397,6 +408,8 @@ export function ingestTelemetryEvidence({
           route_id: record.route_id,
           confidence_tier: record.confidence_tier,
           guards_fired: Array.isArray(record.guards_fired) ? record.guards_fired : [],
+          runtime: record.runtime ?? null,
+          epoch: record.epoch ?? null,
         },
         capabilityId,
         recordIndex: i,
