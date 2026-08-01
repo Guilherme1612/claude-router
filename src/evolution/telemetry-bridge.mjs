@@ -78,6 +78,11 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
     // (evidence.mjs) so these two fields pass rather than being rejected with
     // forbidden_evidence_field.
     runtime: record.runtime ? String(record.runtime) : null,
+    // IN-01: epoch is reserved forward-compat scaffolding. No producer writes it
+    // today (telemetryEntryFromState emits runtime, not epoch), so the bridge
+    // forwards null rather than fabricating a value. The schema field stays — the
+    // OUTCOME_FIELDS/FIELDS bumps are deliberate and enforcement-tested — until a
+    // real producer (e.g. the Phase-30 manifest fingerprint) backfills it.
     epoch: record.epoch !== undefined && record.epoch !== null ? String(record.epoch) : null,
   };
   return validateEvidenceEnvelope(envelope);
