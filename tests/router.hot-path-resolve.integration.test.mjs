@@ -149,3 +149,15 @@ test('resolver keeps the mode candidate primary over lower-weight resolve member
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.value.suggested_slash, 'entry-mode');
 });
+
+test('real hot path downgrades a resolver near-tie to med without a slash command line', () => {
+  const manifest = manifestFor('claude');
+  manifest.runtime_commands.claude = ['gsd-debug', 'systematic-debugging'];
+  const result = inspect('claude', manifest);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.value, result.stdout);
+  assert.equal(result.value.selected_tier, 'med');
+  assert.equal(result.value.selected_route.tier, 'med');
+  assert.match(result.value.final_injected_context, /Recommended: \/gsd-debug/);
+  assert.doesNotMatch(result.value.final_injected_context, /Run \/gsd-debug/);
+});
