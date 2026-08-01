@@ -26,6 +26,7 @@ import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { auditCoverage } from './src/coverage/audit.mjs';
 import { computeCompositeEpoch } from './src/registry/fingerprint.mjs';
+import { commandInventory, lintModeMap } from './scripts/resolve-tie-lint.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -70,6 +71,19 @@ export const MODE_MAP_SIZE_CEILING = 30_000;
 function readJson(path, fallback) {
   if (!existsSync(path)) return fallback;
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
+}
+
+function stripLeadingSlash(name = '') {
+  return String(name).replace(/^\/+/, '');
+}
+
+function entryResolvable(entryId, commands, modeMap) {
+  const entry = (modeMap?.entries || []).find((candidate) =>
+    (candidate?.id || candidate?.mode || '<no-id>') === entryId);
+  if (!entry) return false;
+  return commands.has(stripLeadingSlash(entry.mode))
+    || (Array.isArray(entry.resolve)
+      && entry.resolve.some(member => commands.has(stripLeadingSlash(member?.name))));
 }
 
 // .skill-lock.json maps skill name -> {source, sourceUrl, ...}
@@ -600,12 +614,23 @@ const coverage = auditCoverage({
   baseline: readJson(COVERAGE_BASELINE_PATH, null),
   routeDiagnostics,
 });
+const tieLint = lintModeMap(coverageModeMap, manifest);
+for (const violation of tieLint.violations) {
+  console.error(`[${violation.type}] ${violation.entry}${violation.target ? ` -> ${violation.target}` : ''}: ${violation.detail}`);
+}
+const commands = commandInventory(manifest);
+const blockingViolations = tieLint.violations.filter(violation =>
+  violation.type === 'near_tie'
+  || !(violation.type === 'stale_target'
+    && entryResolvable(violation.entry, commands, coverageModeMap)));
 mkdirSync(dirname(COVERAGE_REPORT_PATH), { recursive: true });
 const coverageTmp = `${COVERAGE_REPORT_PATH}.tmp.${process.pid}`;
 writeFileSync(coverageTmp, JSON.stringify(coverage, null, 2));
 renameSync(coverageTmp, COVERAGE_REPORT_PATH);
 if (STRICT_COVERAGE
-  && (coverage.unacknowledged_gaps.length || coverage.forward_diagnostics.length)) {
+  && (coverage.unacknowledged_gaps.length
+    || coverage.forward_diagnostics.length
+    || blockingViolations.length)) {
   process.exitCode = 1;
 }
 
