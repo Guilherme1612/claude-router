@@ -136,6 +136,29 @@ test('Task1.6 bridge never emits a field outside the FIELDS set', async () => {
   assert.equal(denied.reason_code, 'forbidden_evidence_field');
 });
 
+test('WR-02 evidence: runtime/epoch bound at the evidence trust boundary', async () => {
+  const { telemetryRecordToEvidence } = await import(bridgeUrl);
+  // runtime is a short enum ('claude'|'codex'); a long or non-enum value is denied.
+  const longRuntime = telemetryRecordToEvidence(baseTelemetryRecord({ runtime: 'x'.repeat(129) }));
+  assert.equal(longRuntime.status, 'denied');
+  assert.equal(longRuntime.reason_code, 'field_too_long');
+  const badRuntime = telemetryRecordToEvidence(baseTelemetryRecord({ runtime: 'not-a-runtime' }));
+  assert.equal(badRuntime.status, 'denied');
+  assert.equal(badRuntime.reason_code, 'invalid_runtime');
+  // epoch (forward-compat scaffolding) is bounded to a short token: >128 chars
+  // hits the generic length guard, a moderately-long token fails the bounded check.
+  const longEpoch = telemetryRecordToEvidence(baseTelemetryRecord({ epoch: 'x'.repeat(129) }));
+  assert.equal(longEpoch.status, 'denied');
+  assert.equal(longEpoch.reason_code, 'field_too_long');
+  const midEpoch = telemetryRecordToEvidence(baseTelemetryRecord({ epoch: 'x'.repeat(100) }));
+  assert.equal(midEpoch.status, 'denied');
+  assert.equal(midEpoch.reason_code, 'invalid_epoch');
+  // Valid enum runtime is accepted and forwarded.
+  const valid = telemetryRecordToEvidence(baseTelemetryRecord({ runtime: 'codex', epoch: null }));
+  assert.equal(valid.status, 'accepted');
+  assert.equal(valid.signal.runtime, 'codex');
+});
+
 test('Task1.7 latency_ms → latency_us unit conversion (×1000)', async () => {
   const { telemetryRecordToEvidence } = await import(bridgeUrl);
   const result = telemetryRecordToEvidence(baseTelemetryRecord({ latency_ms: 12 }));

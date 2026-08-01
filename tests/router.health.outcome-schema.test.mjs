@@ -158,3 +158,16 @@ test('HLTH-04: invalid_guard_codes rejects non-array / over-long codes', () => {
   const tooMany = Array.from({ length: 17 }, (_, i) => `g${i}`);
   assert.equal(validateOutcomeEnvelope(baseRecord({ guard_codes: tooMany })).reason_code, 'invalid_guard_codes');
 });
+
+test('WR-02: runtime/epoch bound at the outcome trust boundary', () => {
+  // Over-length values hit the generic field_too_long guard (same hardening the
+  // other string fields get).
+  assert.equal(validateOutcomeEnvelope(baseRecord({ runtime: 'x'.repeat(129) })).reason_code, 'field_too_long');
+  assert.equal(validateOutcomeEnvelope(baseRecord({ epoch: 'x'.repeat(129) })).reason_code, 'field_too_long');
+  // runtime is a short enum ('claude'|'codex'); any other string is rejected.
+  assert.equal(validateOutcomeEnvelope(baseRecord({ runtime: 'not-a-runtime' })).reason_code, 'invalid_runtime');
+  // Valid enum runtime + null/absent epoch stay accepted (additive, not broken).
+  assert.equal(validateOutcomeEnvelope(baseRecord({ runtime: 'claude', epoch: null })).status, 'accepted');
+  assert.equal(validateOutcomeEnvelope(baseRecord({ runtime: 'codex', epoch: null })).status, 'accepted');
+  assert.equal(validateOutcomeEnvelope(baseRecord()).status, 'accepted');
+});
