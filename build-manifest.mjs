@@ -38,15 +38,33 @@ const PROJECT_SKILL_DIRS = (process.env.ROUTER_PROJECT_SKILL_DIRS || '')
   .split(':').map(s => s.trim()).filter(Boolean);
 const PROJECT_MCP_JSON = process.env.ROUTER_PROJECT_MCP_JSON || '';
 const PROJECT_CONFIG_PATH = process.env.ROUTER_PROJECT_CONFIG_PATH || '';
-const OUT = process.env.ROUTER_MANIFEST_OUT || join(SCRIPT_DIR, 'claude-inventory-manifest.json');
-const MODE_MAP_PATH = process.env.ROUTER_MODE_MAP_PATH || join(CLAUDE, 'router', 'mode-map.json');
-const WEIGHTS_PATH = process.env.ROUTER_WEIGHTS_PATH || join(CLAUDE, 'router', 'weights.json');
+// D-04: runtime pin. Defaults to 'claude'; ROUTER_RUNTIME=codex pins the codex
+// home as the builder's config/home root so the manifest, mode-map, and hook
+// path resolve under ~/.codex for a Codex install (lockstep with the hook's
+// runtime-conditional RUNTIME_CONFIG_DIR). Additive + fail-open: unset or
+// 'claude' leaves every default path byte-for-byte identical to today. The full
+// Codex inventory walk is NOT implemented (deferred) — this only retargets the
+// existing writer's config root, it does not walk ~/.codex.
+const RUNTIME = process.env.ROUTER_RUNTIME === 'codex' ? 'codex' : 'claude';
+const CODEX_HOME = process.env.ROUTER_CODEX_HOME || join(HOME, '.codex');
+// CONFIG_HOME is the runtime-pinned config root: CLAUDE when claude (unchanged
+// default), CODEX_HOME when ROUTER_RUNTIME=codex.
+const CONFIG_HOME = RUNTIME === 'codex' ? CODEX_HOME : CLAUDE;
+const OUT = process.env.ROUTER_MANIFEST_OUT
+  || (RUNTIME === 'codex'
+    ? join(CODEX_HOME, 'router', 'claude-inventory-manifest.json')
+    : join(SCRIPT_DIR, 'claude-inventory-manifest.json'));
+const MODE_MAP_PATH = process.env.ROUTER_MODE_MAP_PATH || join(CONFIG_HOME, 'router', 'mode-map.json');
+const WEIGHTS_PATH = process.env.ROUTER_WEIGHTS_PATH || join(CONFIG_HOME, 'router', 'weights.json');
 const COVERAGE_REPORT_PATH = process.env.ROUTER_COVERAGE_REPORT_PATH
   || join(dirname(OUT), 'coverage-report.json');
 const COVERAGE_BASELINE_PATH = process.env.ROUTER_COVERAGE_BASELINE_PATH
   || join(SCRIPT_DIR, 'coverage-baseline.json');
 const STRICT_COVERAGE = process.argv.includes('--strict-coverage');
-const ROUTER_HOOK_PATH = process.env.ROUTER_HOOK_PATH || join(HOME, '.claude', 'hooks', 'router.mjs');
+const ROUTER_HOOK_PATH = process.env.ROUTER_HOOK_PATH
+  || (RUNTIME === 'codex'
+    ? join(CODEX_HOME, 'hooks', 'router.mjs')
+    : join(HOME, '.claude', 'hooks', 'router.mjs'));
 export const MODE_MAP_SIZE_CEILING = 30_000;
 
 function readJson(path, fallback) {
