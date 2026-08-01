@@ -65,10 +65,10 @@ test('HLTH-03: validateOutcomeEnvelope rejects an invalid outcome_kind with inva
   assert.equal(verdict.reason_code, 'invalid_outcome_kind');
 });
 
-test('HLTH-01: OUTCOME_FIELDS allowlist is frozen and final (14 fields)', () => {
+test('HLTH-01: OUTCOME_FIELDS allowlist is frozen and final (16 fields)', () => {
   assert.ok(Object.isFrozen(OUTCOME_FIELDS));
-  assert.equal(OUTCOME_FIELDS.size, 14);
-  for (const f of ['timestamp_ms', 'capability_id', 'outcome_kind', 'prompt_signature', 'route_id', 'confidence_band', 'guard_codes', 'reason_code', 'evidence_window_ms', 'sample_size', 'opportunity_count', 'freshness', 'policy_version', 'fingerprint']) {
+  assert.equal(OUTCOME_FIELDS.size, 16);
+  for (const f of ['timestamp_ms', 'capability_id', 'outcome_kind', 'prompt_signature', 'route_id', 'confidence_band', 'guard_codes', 'reason_code', 'evidence_window_ms', 'sample_size', 'opportunity_count', 'freshness', 'policy_version', 'fingerprint', 'runtime', 'epoch']) {
     assert.ok(OUTCOME_FIELDS.has(f), `FIELDS missing ${f}`);
   }
 });
