@@ -18,7 +18,7 @@ const TOP_KEYS = [
   'agents', 'hooks', 'commands', 'mcp_servers', 'unwired_mcp_refs',
   'plugins_enabled', 'installed_plugins', 'plugin_manifests', 'marketplaces',
   'project_config', 'plugin_hooks', 'settings', 'claude_md', 'counts',
-  'registry_scope', 'generated_at_runtime_note',
+  'registry_scope', 'generated_at_runtime_note', 'manifest_fingerprint',
 ];
 
 function freshHome() {
@@ -144,6 +144,50 @@ test('build-manifest: idempotent re-run produces identical bytes', () => {
     assert.equal(r2.status, 0, `second run exited ${r2.status}: ${r2.stderr}`);
     const bytes2 = readFileSync(out, 'utf8');
     assert.equal(bytes1, bytes2, 'idempotent re-run must produce identical bytes');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('INVC-01 build-manifest: identical rebuild emits an identical manifest_fingerprint (determinism)', () => {
+  const root = freshHome();
+  try {
+    const { r: r1, out } = runBuilder(root);
+    assert.equal(r1.status, 0, `first run exited ${r1.status}: ${r1.stderr}`);
+    const fp1 = JSON.parse(readFileSync(out, 'utf8')).manifest_fingerprint;
+    const { r: r2 } = runBuilder(root);
+    assert.equal(r2.status, 0, `second run exited ${r2.status}: ${r2.stderr}`);
+    const fp2 = JSON.parse(readFileSync(out, 'utf8')).manifest_fingerprint;
+    assert.ok(fp1 && typeof fp1 === 'string' && /^[0-9a-f]{64}$/.test(fp1),
+      'fingerprint must be a sha256 hex digest');
+    assert.equal(fp1, fp2, 'identical rebuild must emit an identical fingerprint');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('INVC-01 build-manifest: adding a skill changes manifest_fingerprint (sensitivity)', () => {
+  const root = freshHome();
+  try {
+    const before = JSON.parse(readFileSync(runBuilder(root).out, 'utf8')).manifest_fingerprint;
+    mkdirSync(join(root, '.claude', 'skills', 'newskill'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'skills', 'newskill', 'SKILL.md'),
+      '---\nname: newskill\ndescription: a new skill\n---\nobjective');
+    const after = JSON.parse(readFileSync(runBuilder(root).out, 'utf8')).manifest_fingerprint;
+    assert.notEqual(before, after, 'adding a skill must bump the fingerprint');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('INVC-01 build-manifest: unrelated noise file does NOT change manifest_fingerprint (noise-stability)', () => {
+  const root = freshHome();
+  try {
+    const before = JSON.parse(readFileSync(runBuilder(root).out, 'utf8')).manifest_fingerprint;
+    mkdirSync(join(root, '.claude', 'context-mode', 'content'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'context-mode', 'content', 'scratch.db'), 'noise');
+    const after = JSON.parse(readFileSync(runBuilder(root).out, 'utf8')).manifest_fingerprint;
+    assert.equal(before, after, 'an unrelated noise file must not change the fingerprint');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -1,10 +1,11 @@
 // Task 2 (RED→GREEN): LRU intent-signature cache for router.mjs (RTE-06/07/§8).
-// Key folds modeMapMtime + manifestMtime (invalidates on either change);
-// atomic temp+rename writes; only High-tier decisive routes cached; LRU evicts
-// at 256 entries; cache hit returns the stored route and skips BM25.
+// Key folds the manifest fingerprint epoch (INVC-02) — a no-op rebuild keeps the
+// key, any semantic inventory change bumps it; atomic temp+rename writes; only
+// High-tier decisive routes cached; LRU evicts at 256 entries; cache hit returns
+// the stored route and skips BM25.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { homedir } from 'node:os';
@@ -20,46 +21,39 @@ function withTempDir(fn) {
 }
 
 test('cacheKey: deterministic for same inputs', () => {
-  const a = cacheKey('fix bug', ['fix', 'bug'], 1000, 2000);
-  const b = cacheKey('fix bug', ['fix', 'bug'], 1000, 2000);
+  const a = cacheKey('fix bug', ['fix', 'bug'], 'fp');
+  const b = cacheKey('fix bug', ['fix', 'bug'], 'fp');
   assert.equal(a, b);
 });
 
-test('cacheKey: changing modeMapMtime produces a different key (RTE-07 invalidation)', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000);
-  const b = cacheKey('fix bug', ['fix'], 1001, 2000);
+test('cacheKey: changing manifestFingerprint produces a different key (INVC epoch invalidation)', () => {
+  const a = cacheKey('fix bug', ['fix'], 'a');
+  const b = cacheKey('fix bug', ['fix'], 'b');
   assert.notEqual(a, b);
 });
 
-test('cacheKey: changing manifestMtime produces a different key (RTE-07 invalidation)', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000);
-  const b = cacheKey('fix bug', ['fix'], 1000, 2001);
-  assert.notEqual(a, b);
+test('cacheKey: identical fingerprint yields an identical key', () => {
+  const a = cacheKey('fix bug', ['fix'], 'fp');
+  const b = cacheKey('fix bug', ['fix'], 'fp');
+  assert.equal(a, b);
 });
 
-test('cacheKey: changing surfaceMtime produces a different key (surface profile invalidation)', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000);
-  const b = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4001);
-  assert.notEqual(a, b);
-});
-
-// SAF-01: cacheKey folds weightsMtime (7th positional arg) so a weights.json
-// edit invalidates stale cached routes. Parallel to the surfaceMtime test above.
-test('cacheKey: changing weightsMtime produces a different key (SAF-01 weights-mtime invalidation)', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5000);
-  const b = cacheKey('fix bug', ['fix'], 1000, 2000, 3000, 4000, 5001);
-  assert.notEqual(a, b);
+// SAF-01 / INVC-02: an omitted fingerprint folds the deterministic default '0'
+// key (fail-open) — never throws and never collides with a real fingerprint key.
+test('cacheKey: omitted fingerprint defaults to the deterministic 0 key', () => {
+  assert.equal(cacheKey('fix bug', ['fix']), cacheKey('fix bug', ['fix'], '0'));
+  assert.notEqual(cacheKey('fix bug', ['fix']), cacheKey('fix bug', ['fix'], 'a'));
 });
 
 test('cacheKey: changing normalizedPrompt produces a different key', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000);
-  const b = cacheKey('ship pr', ['fix'], 1000, 2000);
+  const a = cacheKey('fix bug', ['fix'], 'fp');
+  const b = cacheKey('ship pr', ['fix'], 'fp');
   assert.notEqual(a, b);
 });
 
 test('cacheKey: changing intentKeywords produces a different key', () => {
-  const a = cacheKey('fix bug', ['fix'], 1000, 2000);
-  const b = cacheKey('fix bug', ['fix', 'bug'], 1000, 2000);
+  const a = cacheKey('fix bug', ['fix'], 'fp');
+  const b = cacheKey('fix bug', ['fix', 'bug'], 'fp');
   assert.notEqual(a, b);
 });
 
@@ -164,7 +158,7 @@ test('integration: cache hit returns stored route and skips BM25 (simulated)', (
   withTempDir((dir) => {
     const path = join(dir, 'cache.json');
     const route = { mode: 'gsd-debug', invoke_kind: 'slash', tier: 'high' };
-    const sig = cacheKey('fix the flaky test', ['fix', 'flaky', 'test'], 1700, 1900);
+    const sig = cacheKey('fix the flaky test', ['fix', 'flaky', 'test'], 'fp');
     let cache = loadCache(path);
     assert.equal(cacheLookup(sig, cache), null); // miss
     cache = writeCache(cache, sig, route);
@@ -181,10 +175,10 @@ test('only High-tier routes are cached (Medium/Low not cached) — contract chec
   // writeCache when tier === 'high'. We simulate by writing a high-tier route
   // and confirming a medium-tier prompt (different key) would miss.
   let cache = { entries: {}, order: [], size: 0 };
-  const highSig = cacheKey('fix flaky test', ['fix'], 1, 2);
+  const highSig = cacheKey('fix flaky test', ['fix'], 'fp');
   cache = writeCache(cache, highSig, { mode: 'gsd-debug', tier: 'high' });
   assert.ok(cacheLookup(highSig, cache));
   // a different (medium-tier) prompt has a different key → miss (not cached)
-  const medSig = cacheKey('redesign the dashboard', ['redesign'], 1, 2);
+  const medSig = cacheKey('redesign the dashboard', ['redesign'], 'fp');
   assert.equal(cacheLookup(medSig, cache), null);
 });

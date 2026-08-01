@@ -11,6 +11,33 @@ function hash(value) {
   return createHash('sha256').update(stableStringify(value), 'utf8').digest('hex');
 }
 
+// Composite content-address epoch (v1.5 INVC-01/INVC-02). One global sha256 over
+// the semantic routing inputs that determine a route: capability identities
+// (manifest entries), installed_plugins identities, the mode-map, and the
+// weights. Timestamps, entry paths, counts, registry_scope, and
+// generated_at_runtime_note are EXCLUDED by design: a no-op rebuild emits an
+// identical fingerprint (cache not invalidated), while adding/editing a skill,
+// agent, command, plugin, mode-map, or weights bumps it (stale route recomputed).
+export function computeCompositeEpoch({ entries = [], installedPlugins = [], modeMap = null, weights = null } = {}) {
+  const semantic = (entries || []).map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const { path, ...rest } = entry;
+    return rest;
+  });
+  const pluginIds = (installedPlugins || []).map((p) => ({
+    name: p && p.name ? p.name : '',
+    marketplace: p && p.marketplace ? p.marketplace : '',
+    version: p && p.version ? p.version : '',
+    scope: p && p.scope ? p.scope : '',
+  }));
+  return hash({
+    entries: semantic,
+    installedPlugins: pluginIds,
+    modeMap: modeMap ?? null,
+    weights: weights ?? null,
+  });
+}
+
 function portablePath(value) {
   if (typeof value !== 'string' || !value || isAbsolute(value) || /^[A-Za-z]:[\\/]/.test(value)) return null;
   const normalized = posix.normalize(value.replaceAll('\\', '/'));

@@ -25,6 +25,7 @@ import { join, dirname, basename, extname } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { auditCoverage } from './src/coverage/audit.mjs';
+import { computeCompositeEpoch } from './src/registry/fingerprint.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -39,6 +40,7 @@ const PROJECT_MCP_JSON = process.env.ROUTER_PROJECT_MCP_JSON || '';
 const PROJECT_CONFIG_PATH = process.env.ROUTER_PROJECT_CONFIG_PATH || '';
 const OUT = process.env.ROUTER_MANIFEST_OUT || join(SCRIPT_DIR, 'claude-inventory-manifest.json');
 const MODE_MAP_PATH = process.env.ROUTER_MODE_MAP_PATH || join(CLAUDE, 'router', 'mode-map.json');
+const WEIGHTS_PATH = process.env.ROUTER_WEIGHTS_PATH || join(CLAUDE, 'router', 'weights.json');
 const COVERAGE_REPORT_PATH = process.env.ROUTER_COVERAGE_REPORT_PATH
   || join(dirname(OUT), 'coverage-report.json');
 const COVERAGE_BASELINE_PATH = process.env.ROUTER_COVERAGE_BASELINE_PATH
@@ -538,13 +540,30 @@ function fileStatSize(p) {
   try { return statSync(p).size; } catch { return 0; }
 }
 
+// Composite fingerprint epoch (INVC-01): content-sha256 over semantic routing
+// inputs only (timestamps/paths/counts excluded) so identical rebuilds emit an
+// identical fingerprint and a no-op rebuild does not invalidate the route cache.
+const coverageModeMap = readJson(MODE_MAP_PATH, null);
+manifest.manifest_fingerprint = computeCompositeEpoch({
+  entries: [
+    ...manifest.skills,
+    ...manifest.plugin_skills,
+    ...manifest.agents_store_skills,
+    ...manifest.project_scoped_skills,
+    ...manifest.agents,
+    ...manifest.commands,
+  ],
+  installedPlugins: manifest.installed_plugins,
+  modeMap: coverageModeMap,
+  weights: readJson(WEIGHTS_PATH, null),
+});
+
 // Atomic write (tmp + rename).
 mkdirSync(dirname(OUT), { recursive: true });
 const tmp = `${OUT}.tmp.${process.pid}`;
 writeFileSync(tmp, JSON.stringify(manifest, null, 2));
 renameSync(tmp, OUT);
 
-const coverageModeMap = readJson(MODE_MAP_PATH, null);
 let routeDiagnostics = [];
 try {
   const { validateRouteTargets } = await import(ROUTER_HOOK_PATH);
@@ -573,6 +592,7 @@ if (STRICT_COVERAGE
 }
 
 console.log(JSON.stringify(manifest.counts, null, 2));
+console.log(`manifest_fingerprint: ${manifest.manifest_fingerprint}`);
 console.log(`manifest written: ${OUT}`);
 console.log(`coverage report written: ${COVERAGE_REPORT_PATH}`);
 console.log(`size: ${fileStatSize(OUT)} bytes`);

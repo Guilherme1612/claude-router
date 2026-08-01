@@ -1636,16 +1636,17 @@ export function cacheLookup(sig, cache) {
   return e && e.route ? e.route : null;
 }
 
-// Cache key (RTE-07 / SAF-01). sha256(normalizedPrompt + "|" + intentKeywords.join(" ")
-// + "|" + modeMapMtime + "|" + manifestMtime + "|" + graphMtime + "|" + surfaceMtime
-// + "|" + weightsMtime). Folding mtimes means a mode-map edit, manifest rebuild,
-// graph.json rebuild for cwd, surface profile change, OR weights.json edit
-// invalidates stale entries (key changes). graphMtime/surfaceMtime/weightsMtime
-// default to 0 to keep older callers backward-compatible.
-export function cacheKey(normalizedPrompt, intentKeywords, modeMapMtime, manifestMtime, graphMtime = 0, surfaceMtime = 0, weightsMtime = 0) {
+// Cache key (RTE-07 / SAF-01 / INVC-02). sha256(normalizedPrompt + "|" +
+// intentKeywords.join(" ") + "|" + manifestFingerprint). The fingerprint is the
+// manifest content-address epoch (manifest.manifest_fingerprint), replacing the
+// old mtime fold: a no-op rebuild keeps the key identical (cache not
+// invalidated), while any semantic inventory change bumps the fingerprint ->
+// key -> previously-cached route recomputed. Defaults to '0' so a missing
+// fingerprint still yields a deterministic key and never throws.
+export function cacheKey(normalizedPrompt, intentKeywords, manifestFingerprint = '0') {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
-  const joined = [np, ik, modeMapMtime, manifestMtime, graphMtime, surfaceMtime, weightsMtime].join('|');
+  const joined = [np, ik, manifestFingerprint].join('|');
   return createHash('sha256').update(joined).digest('hex');
 }
 
@@ -1658,32 +1659,6 @@ function readGraphMtime(cwd) {
     const p = join(dir, 'graphify-out', 'graph.json');
     if (!existsSync(p)) return 0;
     return statSync(p).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-// Read .gsd-surface.json mtime for the active runtime config dir (best-effort;
-// returns 0 when the surface profile is missing). Used to fold surface profile
-// changes into the persistent route-cache key.
-function readSurfaceMtime(runtimeConfigDir = RUNTIME_CONFIG_DIR) {
-  try {
-    const p = join(runtimeConfigDir, '.gsd-surface.json');
-    if (!existsSync(p)) return 0;
-    return statSync(p).mtimeMs;
-  } catch {
-    return 0;
-  }
-}
-
-// Read weights.json mtime (best-effort; returns 0 when the file is missing or
-// stat fails). Used to fold weights edits into the cache key (SAF-01) so a
-// Phase 28/29 weights mutation invalidates stale cached routes. Mirrors
-// readSurfaceMtime — WEIGHTS is a single fixed file, not cwd-dependent.
-function readWeightsMtime(weightsPath = WEIGHTS) {
-  try {
-    if (!existsSync(weightsPath)) return 0;
-    return statSync(weightsPath).mtimeMs;
   } catch {
     return 0;
   }
@@ -2702,8 +2677,6 @@ export function inspectDecision(prompt, options = {}) {
       return finish();
     }
 
-    const manifestMtime = opts.manifestMtime ?? (Object.hasOwn(opts, 'manifest') ? 0 : statSync(opts.manifestPath).mtimeMs);
-    const modeMapMtime = opts.modeMapMtime ?? (Object.hasOwn(opts, 'modeMap') ? 0 : statSync(opts.modeMapPath).mtimeMs);
     const graph = graphifyHeuristic(prompt, opts.cwd);
     const graphMtime = opts.graphMtime ?? readGraphMtime(opts.cwd);
     state.graphify = {
@@ -2715,22 +2688,18 @@ export function inspectDecision(prompt, options = {}) {
       elapsed_ms: graph.elapsed_ms || 0,
       graph_mtime: graphMtime,
     };
-    const surfaceMtime = opts.surfaceMtime ?? readSurfaceMtime(opts.runtimeConfigDir);
-    const weightsMtime = opts.weightsMtime ?? readWeightsMtime(opts.weightsPath);
-    const sig = cacheKey(state.normalizedPrompt, [], modeMapMtime, manifestMtime, graphMtime, surfaceMtime, weightsMtime);
+    // INVC-02: cache key folds the manifest fingerprint epoch, not mtimes, so a
+    // no-op rebuild keeps the key (cache preserved) while any semantic inventory
+    // change bumps it (stale route recomputed). Fail-open default is '0'.
+    const manifestFingerprint = opts.manifestFingerprint ?? manifest.manifest_fingerprint ?? '0';
+    const sig = cacheKey(state.normalizedPrompt, [], manifestFingerprint);
     state.cache.key_prefix = sig.slice(0, 8);
-    state.cache.invalidation_mtimes = {
-      mode_map: modeMapMtime,
-      manifest: manifestMtime,
-      graph: graphMtime,
-      surface: surfaceMtime,
-      weights: weightsMtime,
-    };
+    state.cache.invalidation_epoch = { manifest_fingerprint: manifestFingerprint };
     // SAF-01: routing_version is a DERIVED observability string (not stored on
-    // disk) — logged in telemetry so a stale-cache diagnosis can correlate a
-    // cache miss/hit with the mode-map/manifest/weights mtimes that produced
-    // the key. Contains no prompt text or secret material.
-    state.routing_version = `${modeMapMtime}:${manifestMtime}:${weightsMtime}`;
+    // disk) exposing the fingerprint epoch — logged in telemetry so a stale-cache
+    // diagnosis can correlate a cache miss/hit with the epoch that produced the
+    // key. Contains no prompt text or secret material.
+    state.routing_version = manifestFingerprint;
     const cache = loadCache(opts.cachePath);
     const cached = cacheLookup(sig, cache);
     if (cached && !routeTargetsExist(cached, manifest, modeMap)) {
