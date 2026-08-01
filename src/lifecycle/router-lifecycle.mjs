@@ -428,8 +428,36 @@ export async function installRouter(options) {
     codex_root: p.codexRoot,
     ...(options.projectRoot ? { project_root: resolve(options.projectRoot), scope_id: options.scopeId || 'project' } : {}),
     roots: [
-      { logicalRoot: 'claude_global', path: p.claudeRoot, ignoredRelativePaths: ['router'] },
-      { logicalRoot: 'codex_home', path: p.codexRoot, ignoredRelativePaths: ['router'] },
+      {
+        logicalRoot: 'claude_global',
+        path: p.claudeRoot,
+        // Noise ignore prefixes (INVC-04): sqlite content/session DBs + WAL/SHM,
+        // plugin-catalog/marketplace caches. Prefix-specific so
+        // plugins/installed_plugins.json (the authoritative add/remove signal)
+        // stays visible to the watcher — a bare 'plugins' prefix is never used.
+        ignoredRelativePaths: [
+          'router',
+          'context-mode',
+          'plugins/plugin-catalog-cache.json',
+          'plugins/known_marketplaces.json',
+          'plugins/cache',
+          'plugins/data',
+          'plugins/marketplaces',
+        ],
+      },
+      {
+        logicalRoot: 'codex_home',
+        path: p.codexRoot,
+        ignoredRelativePaths: [
+          'router',
+          'context-mode',
+          'plugins/plugin-catalog-cache.json',
+          'plugins/known_marketplaces.json',
+          'plugins/cache',
+          'plugins/data',
+          'plugins/marketplaces',
+        ],
+      },
       ...(options.projectRoot ? [
         { logicalRoot: `project:${options.scopeId || 'project'}:claude`, path: join(resolve(options.projectRoot), '.claude'), watchPath: resolve(options.projectRoot), includeRelativePaths: ['.claude'] },
         { logicalRoot: `project:${options.scopeId || 'project'}:codex`, path: join(resolve(options.projectRoot), '.codex'), watchPath: resolve(options.projectRoot), includeRelativePaths: ['.codex'] },

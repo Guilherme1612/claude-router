@@ -558,3 +558,63 @@ test('ancestor watch routes project prefixes and filename-less hints without unr
   assert.deepEqual(reconciled.pop(), ['project:fixture:claude', 'project:fixture:codex']);
   await controller.close();
 });
+
+test('noise events never dirty roots while installed_plugins.json does (INVC-04 noise + authoritative plugin signal)', async () => {
+  // Match the claude_global root shape emitted by router-lifecycle.mjs (INVC-04):
+  // prefix-specific ignore list that excludes sqlite/WAL + plugin-catalog caches
+  // but deliberately keeps plugins/installed_plugins.json visible.
+  const NOISE_IGNORES = [
+    'router',
+    'context-mode',
+    'plugins/plugin-catalog-cache.json',
+    'plugins/known_marketplaces.json',
+    'plugins/cache',
+    'plugins/data',
+    'plugins/marketplaces',
+  ];
+  const scheduler = clock();
+  let callback;
+  const reconciled = [];
+  const controller = createRegistryWatcher({
+    roots: [
+      { logicalRoot: 'claude_global', path: '/virtual/claude', ignoredRelativePaths: NOISE_IGNORES },
+    ],
+    scheduler, debounceMs: 1, repairMs: 10_000,
+    watchFactory(path, _options, handler) { callback = handler; return { close() {} }; },
+    readState: async () => ({ clean_scan_required: true }),
+    scan: async () => ({ schema_version: 1, roots: ['claude_global'], entries: [], diagnostics: [], hash: 'scan' }),
+    diff: () => ({ events: [], diagnostics: [] }),
+    reconcile: async context => { reconciled.push(context.roots); },
+    writeState: async () => {},
+  });
+  await controller.ready;
+  reconciled.length = 0;
+
+  // Each noise path must NOT mark claude_global dirty.
+  for (const noise of [
+    'context-mode/content/foo.db',
+    'context-mode/sessions/x.db-wal',
+    'context-mode/sessions/x.db-shm',
+    'plugins/plugin-catalog-cache.json',
+    'plugins/known_marketplaces.json',
+    'plugins/cache/context-mode/x/y/1.0.0/file',
+    'plugins/data/whatever',
+    'plugins/marketplaces/github.com/somewhere/catalog.json',
+    'router/cache.json',
+  ]) {
+    callback('change', noise); await scheduler.advance(1);
+    assert.deepEqual(reconciled, [], `noise event must not dirty roots: ${noise}`);
+    reconciled.length = 0;
+  }
+
+  // installed_plugins.json is the authoritative add/remove signal — MUST mark dirty.
+  callback('change', 'plugins/installed_plugins.json'); await scheduler.advance(1);
+  assert.deepEqual(reconciled.pop(), ['claude_global']);
+  assert.deepEqual(reconciled, [], 'no further reconciles after installed_plugins.json');
+
+  // The ignore list must be prefix-specific and exact — never cover installed_plugins.json.
+  assert.deepEqual(NOISE_IGNORES, ['router', 'context-mode', 'plugins/plugin-catalog-cache.json', 'plugins/known_marketplaces.json', 'plugins/cache', 'plugins/data', 'plugins/marketplaces']);
+  assert.equal(NOISE_IGNORES.includes('plugins'), false, 'bare plugins prefix must never be ignored');
+
+  await controller.close();
+});
