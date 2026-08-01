@@ -722,6 +722,52 @@ export function buildTargetIndexes(manifest) {
   };
 }
 
+// Resolve-first route decision (Phase 32). Builds a framework-neutral candidate
+// set purely from `entry.mode` (weight 1.0) + `entry.resolve[]` (their weights),
+// dedups by stripped name, filters to candidates PRESENT in the active runtime's
+// command inventory, and returns the highest-weighted present candidate — or null
+// when nothing resolves (silent / stale, never a dead injection). No framework
+// prefix is ever hardcoded: the candidate set comes only from the entry. Pure and
+// fail-open (any throw returns null) so it is safe on the warm hot path.
+//
+// Accepts either the raw manifest (`.commands` array) or a buildTargetIndexes()
+// result (`.commands` Set) as the presence source.
+export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
+  try {
+    if (!entry) return null;
+    let commands;
+    if (manifestOrIndexes && manifestOrIndexes.commands instanceof Set) {
+      commands = manifestOrIndexes.commands;
+    } else {
+      commands = new Set((manifestOrIndexes?.commands || []).map((c) => {
+        if (typeof c === 'string') return stripLeadingSlash(c);
+        return stripLeadingSlash(c?.name || c?.id);
+      }).filter(Boolean));
+    }
+    const candidates = new Map();
+    const addCandidate = (name, weight) => {
+      const stripped = name == null ? '' : stripLeadingSlash(String(name));
+      if (!stripped) return;
+      const prev = candidates.get(stripped);
+      if (prev === undefined || weight > prev.weight) candidates.set(stripped, { name: stripped, weight });
+    };
+    addCandidate(entry.mode, 1.0);
+    for (const candidate of (entry.resolve || [])) {
+      const weight = typeof candidate?.weight === 'number' ? candidate.weight : 1.0;
+      addCandidate(candidate?.name, weight);
+    }
+    const present = [...candidates.values()]
+      .filter((candidate) => commands.has(candidate.name))
+      .sort((a, b) => b.weight - a.weight || String(a.name).localeCompare(String(b.name)));
+    if (present.length === 0) return null;
+    const top = present[0];
+    const tier = opts?.tier === 'high' && top.weight >= 0.8 ? 'high' : 'med';
+    return { suggested_slash: top.name, tier, weight: top.weight };
+  } catch {
+    return null; // fail-open: never throw on the hot path
+  }
+}
+
 function knownSkillTargets(indexes) {
   return new Set([
     ...indexes.globalSkills,
@@ -778,8 +824,12 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
       const mode = stripLeadingSlash(entry.mode);
       const id = stripLeadingSlash(entry.id);
       const intentionalRouteAlias = mode && mode !== id && routeIds.has(mode);
-      const intentionalSchemaRoute = mode && mode === id && modeMap?.schema_version;
-      if (!mode || (!indexes.commands.has(mode) && !intentionalRouteAlias && !intentionalSchemaRoute)) {
+      // Guard-hole closure (T-32-05): a slash route is intentional only when mode is
+      // a present manifest command OR a resolve-list member resolves to one. The
+      // blanket `mode === id && schema_version` pass is removed — schema_version
+      // truthiness no longer makes any slash route intentional.
+      const intentionalResolveRoute = mode && Boolean(resolveSlashRoute(entry, indexes));
+      if (!mode || (!indexes.commands.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute)) {
         rows.push(routeDiagnostic(entry, 'stale_target', mode || '<mode>', 'slash mode must match a manifest command or intentional mode-map route id'));
       }
     }
