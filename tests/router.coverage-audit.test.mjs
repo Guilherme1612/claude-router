@@ -436,17 +436,14 @@ test('strict builder fails on forward diagnostics while stale acknowledgements r
 
 // --- Phase 32 Plan 32-01 Task 2 — schema_version-SET resolve-member guard (ROUTE-05) --
 
-// The schema_version guard hole lives in THREE sites (router.mjs:721/806 AND audit.mjs:142).
-// audit.mjs:142's `schemaRoute = mode && mode === route && Boolean(modeMap.schema_version)`
-// treats id===mode entries under a SET schema_version as mapped/valid even when their
-// resolve-list members are absent from the manifest. This RED test locks that closure:
-// the audit guard must report an ABSENT resolve member as a forward-orphan / stale diagnostic.
+// The audit must preserve the absent resolve member as a visible, non-blocking quarantine
+// when another resolve candidate is present, while leaving fully stale routes blocking.
 
-test('schema_version-SET resolve member absent from manifest is reported strictly as forward-orphan/stale', () => {
+test('schema_version-SET resolve member absent from manifest is reported as non-blocking quarantine', () => {
   const resolveManifest = {
     ...manifest(),
-    commands: ['build', 'route-id', 'resolve-mode'], // 'resolve-mode' mode IS present;
-  };                                                  // 'absent-capability' resolve member is NOT
+    commands: [{ id: 'build' }, { id: 'route-id' }, { id: 'resolve-mode' }],
+  };
   const route = {
     schema_version: 4, // SET, per the roadmap note the hole is only exercised when set
     entries: [{
@@ -471,20 +468,23 @@ test('schema_version-SET resolve member absent from manifest is reported strictl
     routeDiagnostics: live,
   });
 
-  // Today neither the live validator nor the audit guard inspects entry.resolve at all —
-  // the absent member sails through because its (present) mode satisfies the schemaRoute
-  // branch. Both assertions below must FAIL (RED) until 32-03 closes the resolve-list guard.
   assert.ok(
     live.some(item => item.status === 'stale_target' && item.target === 'absent-capability'),
     'live validator must flag the absent resolve member as stale_target',
   );
   assert.ok(
-    report.forward_diagnostics.some(item => item.code === 'stale_target' && item.target === 'absent-capability'),
-    'audit guard must report the absent resolve member as a forward-orphan/stale diagnostic',
+    Array.isArray(report.quarantined_diagnostics)
+      && report.quarantined_diagnostics.some(item =>
+        item.code === 'quarantined_fallback' && item.target === 'absent-capability'),
+    'audit must retain an absent optional member as a quarantine diagnostic',
+  );
+  assert.ok(
+    !report.forward_diagnostics.some(item => item.target === 'absent-capability'),
+    'a resolvable route fallback must not remain a blocking forward diagnostic',
   );
 });
 
-test('schema_version-SET builder report also surfaces the absent resolve member as stale', () => {
+test('schema_version-SET builder report surfaces an absent resolvable fallback without failing strict coverage', () => {
   const modeMap = {
     schema_version: 4, // SET — the guard hole is only exercised when schema_version is set
     entries: [{
@@ -503,7 +503,68 @@ test('schema_version-SET builder report also surfaces the absent resolve member 
   const { result, report } = runBuilder({ modeMap });
   assert.equal(result.status, 0, 'non-strict builder exits 0 even while surfacing diagnostics');
   assert.ok(
-    report.forward_diagnostics.some(item => item.code === 'stale_target' && item.target === 'absent-capability'),
-    `audit-guard report must flag the absent resolve member (got ${JSON.stringify(report.forward_diagnostics.map(i => i.target))})`,
+    Array.isArray(report.quarantined_diagnostics)
+      && report.quarantined_diagnostics.some(item =>
+        item.code === 'quarantined_fallback' && item.target === 'absent-capability'),
+    `audit report must quarantine the absent fallback (got ${JSON.stringify(report.quarantined_diagnostics)})`,
   );
+  assert.ok(
+    !report.forward_diagnostics.some(item => item.target === 'absent-capability'),
+    'the non-blocking fallback must stay out of strict-failure diagnostics',
+  );
+});
+
+test('a resolve member can make a route resolvable even when its mode is absent', () => {
+  const route = {
+    schema_version: 4,
+    entries: [{
+      id: 'resolve-only-route',
+      invoke_kind: 'slash',
+      mode: 'missing-mode',
+      resolve: [
+        { name: 'build', weight: 1.0 },
+        { name: 'ghost-capability', weight: 0.5 },
+      ],
+      signal_patterns: ['resolve only'],
+      recommended_skills: [],
+      recommended_agents: [],
+    }],
+  };
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.ok(!report.forward_diagnostics.some(item => item.target === 'missing-mode'));
+  assert.ok(Array.isArray(report.quarantined_diagnostics)
+    && report.quarantined_diagnostics.some(item =>
+      item.code === 'quarantined_fallback' && item.target === 'ghost-capability'));
+});
+
+test('a route with no present mode or resolve member remains blocking stale_target', () => {
+  const route = {
+    schema_version: 4,
+    entries: [{
+      id: 'stale-route',
+      invoke_kind: 'slash',
+      mode: 'missing-mode',
+      resolve: [{ name: 'ghost-capability', weight: 1.0 }],
+      signal_patterns: ['stale'],
+      recommended_skills: [],
+      recommended_agents: [],
+    }],
+  };
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'stale_target' && item.target === 'missing-mode'));
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'stale_target' && item.target === 'ghost-capability'));
+  assert.equal(Array.isArray(report.quarantined_diagnostics)
+    ? report.quarantined_diagnostics.length : -1, 0);
 });
