@@ -111,3 +111,63 @@ test('resolve-heavy: resolve-first hot path stays within budget (warm p95 < 40ms
   assert.ok(p95 < 40, `resolve warm p95 ${p95.toFixed(3)}ms >= 40ms (times=${times.map(x=>x.toFixed(2)).join(',')})`);
   assert.ok(max < BUDGET_MS, `resolve max ${max.toFixed(3)}ms >= ${BUDGET_MS}ms`);
 });
+
+test('e2e: inspectDecision resolve-first hot path reaches render within budget', () => {
+  const runtimeManifest = {
+    commands: [{ name: 'gsd-debug', description: 'debug this issue' }],
+    runtime_commands: {
+      claude: ['gsd-debug'],
+      codex: ['systematic-debugging'],
+    },
+    skills: [],
+    plugin_skills: [],
+    agents_store_skills: [],
+    agents: [],
+  };
+  const modeMap = {
+    schema_version: 4,
+    thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 },
+    entries: [],
+  };
+  const ITERATIONS = 30;
+  const WARMUP = 5;
+  const code = [
+    `const m = await import(${JSON.stringify(pathToFileURL(HOOK).href)});`,
+    `const { mkdtempSync, rmSync } = await import('node:fs');`,
+    `const { tmpdir } = await import('node:os');`,
+    `const { join } = await import('node:path');`,
+    `const manifest = ${JSON.stringify(runtimeManifest)};`,
+    `const modeMap = ${JSON.stringify(modeMap)};`,
+    `const cacheDir = mkdtempSync(join(tmpdir(), 'router-perf-'));`,
+    `const cachePath = join(cacheDir, 'cache.json');`,
+    `try {`,
+    `  const times = [];`,
+    `  for (let i = 0; i < ${WARMUP}; i++) m.inspectDecision('debug this issue', { manifest, modeMap, weights: null, cachePath, cwd: cacheDir, mutateCache: true, logTelemetry: false, emitInjection: false, includePrompt: false });`,
+    `  for (let i = 0; i < ${ITERATIONS}; i++) {`,
+    `    const start = performance.now();`,
+    `    const out = m.inspectDecision('debug this issue', { manifest, modeMap, weights: null, cachePath, cwd: cacheDir, mutateCache: true, logTelemetry: false, emitInjection: false, includePrompt: false });`,
+    `    times.push(performance.now() - start);`,
+    `    if (!out?.selected_route || out.selected_route.resolved_slash !== 'gsd-debug' || !out.final_injected_context?.trim()) throw new Error('resolve-first hot path did not reach route render');`,
+    `    if (out.cache.status !== 'hit') throw new Error('warm hot path did not use the cache');`,
+    `  }`,
+    `  process.stderr.write('__router_e2e_rendered=1');`,
+    `  process.stdout.write(JSON.stringify(times));`,
+    `} finally { rmSync(cacheDir, { recursive: true, force: true }); }`,
+  ].join('\n');
+  const r = spawnSync(NODE, ['--input-type=module', '-e', code], {
+    env: { ...process.env, ROUTER_RUNTIME: 'claude' },
+    encoding: 'utf8',
+    timeout: 15000,
+  });
+  assert.equal(r.status, 0, `e2e hot-path probe must exit 0 (${r.stderr})`);
+  assert.match(r.stderr, /__router_e2e_rendered=1/, 'probe must prove route rendering was reached');
+  let times;
+  try { times = JSON.parse(r.stdout.trim()); } catch { assert.fail(`stdout must be pure timing JSON, got: ${JSON.stringify(r.stdout)}`); }
+  assert.equal(r.stdout.trim(), JSON.stringify(times), 'stdout carries only the timing JSON — no dead stdout');
+  assert.ok(times.length >= 20, `expected >= 20 warm iterations, got ${times.length}`);
+  const sorted = [...times].sort((a, b) => a - b);
+  const p95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
+  const max = sorted[sorted.length - 1];
+  assert.ok(p95 < 40, `e2e hot-path warm p95 ${p95.toFixed(3)}ms >= 40ms (times=${times.map(x => x.toFixed(2)).join(',')})`);
+  assert.ok(max < BUDGET_MS, `e2e hot-path max ${max.toFixed(3)}ms >= ${BUDGET_MS}ms`);
+});
