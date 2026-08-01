@@ -12,6 +12,11 @@ const CONFIDENCE_BANDS = new Set(['high', 'medium', 'low', 'trivial', 'user_expl
 const FIXTURE_CLASSES = new Set(['minimal-prompt', 'explicit-override', 'stale-context', 'ambiguity', 'terminal-state', 'dependency', 'context-budget']);
 const VERDICTS = new Set(['success', 'regression']);
 const PRIVACY_GUARDS = new Set(['privacy_guard', 'deny_filtered', 'secret_detected', 'content_detected']);
+// WR-02: runtime is a short enum like confidence_band — only the two router
+// runtimes are valid. A non-enum runtime is treated as untrusted input and
+// rejected at the trust boundary (same privacy-guard rationale as the adjacent
+// string fields).
+const RUNTIMES = new Set(['claude', 'codex']);
 // D-05/D-06: path-safe token — '/' is excluded so `project_id` (and every other
 // bounded token consumed by `pathFor`) cannot escape the evidence root via
 // `path.join` normalizing '..' segments. All consumers are flat identifiers
@@ -43,6 +48,15 @@ export function validateEvidenceEnvelope(input) {
   if (!Number.isSafeInteger(input.latency_us) || input.latency_us < 0 || input.latency_us > 10_000_000) return deny('invalid_latency');
   if (!boundedToken(input.candidate_version, 128) || !boundedToken(input.policy_version, 128)) return deny('invalid_version');
   if (!VERDICTS.has(input.verdict)) return deny('invalid_verdict');
+  // WR-02: runtime/epoch run under the same bounded hardening as the adjacent
+  // string fields. runtime is a short enum (claude|codex); epoch is
+  // forward-compat scaffolding constrained to a bounded token. null/absent
+  // (the current epoch producer state) passes through unchanged.
+  for (const field of ['runtime', 'epoch']) {
+    if (typeof input[field] === 'string' && input[field].length > 128) return deny('field_too_long');
+  }
+  if (input.runtime !== null && input.runtime !== undefined && !RUNTIMES.has(input.runtime)) return deny('invalid_runtime');
+  if (input.epoch !== null && input.epoch !== undefined && !boundedToken(input.epoch, 64)) return deny('invalid_epoch');
 
   const privacyDenied = input.confidence_band === 'deny_filtered'
     || input.guard_codes.some((code) => PRIVACY_GUARDS.has(code));

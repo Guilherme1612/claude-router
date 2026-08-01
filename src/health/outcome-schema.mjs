@@ -28,6 +28,11 @@ const PRIVACY_GUARDS = new Set(['privacy_guard', 'deny_filtered', 'secret_detect
 // framework-neutral but a stale caller could still pass record.name here.
 const FRAMEWORK_PREFIXES = Object.freeze(['gsd-', 'gstack-', 'codex-']);
 
+// WR-02: runtime is a short enum like confidence_band — only the two router
+// runtimes are valid. Matching the privacy-guard rationale, a non-enum runtime
+// is treated as untrusted input and rejected at the trust boundary.
+const RUNTIMES = new Set(['claude', 'codex']);
+
 // HLTH-04 allowlist. This set is final for v1 — adding a field later requires a
 // policy_version bump and a migration (plan reversibility: costly).
 //
@@ -104,11 +109,17 @@ export function validateOutcomeEnvelope(input) {
   // a 129-char capability_id is reported as field_too_long (length violation)
   // rather than invalid_capability_id (which is reserved for format /
   // framework-prefix violations).
-  for (const field of ['capability_id', 'route_id', 'reason_code', 'freshness', 'policy_version', 'fingerprint']) {
+  for (const field of ['capability_id', 'route_id', 'reason_code', 'freshness', 'policy_version', 'fingerprint', 'runtime', 'epoch']) {
     if (stringFieldTooLong(input[field])) return deny('field_too_long');
   }
   // confidence_band is a short enum-like token; bound it too.
   if (typeof input.confidence_band === 'string' && input.confidence_band.length > 64) return deny('field_too_long');
+  // WR-02: runtime/epoch join the other string fields under the hardened
+  // bounded checks. runtime is a short enum (claude|codex); epoch is
+  // forward-compat scaffolding constrained to a bounded token. null/absent
+  // (the current epoch producer state) passes through unchanged.
+  if (input.runtime !== null && input.runtime !== undefined && !RUNTIMES.has(input.runtime)) return deny('invalid_runtime');
+  if (input.epoch !== null && input.epoch !== undefined && !boundedToken(input.epoch, 64)) return deny('invalid_epoch');
 
   if (!boundedToken(input.capability_id)) return deny('invalid_capability_id');
   if (hasFrameworkPrefix(input.capability_id)) return deny('invalid_capability_id');
