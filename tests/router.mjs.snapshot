@@ -2584,7 +2584,7 @@ function modeMapEntryForName(modeMap, name) {
   }) || null;
 }
 
-function telemetryEntryFromState(decision, startNs) {
+export function telemetryEntryFromState(decision, startNs) {
   const guards = decision.guards_fired || [];
   const denyFiltered = guards.includes('deny_filtered');
   const top = decision.top || null;
@@ -2615,6 +2615,11 @@ function telemetryEntryFromState(decision, startNs) {
     // SAF-01: derived mtime-fingerprint of the mode-map/manifest/weights mtimes
     // that produced this route's cache key. Observability only — no prompt text.
     routing_version: decision.routing_version || null,
+    // D-06 / PARITY-02: every telemetry record carries its active runtime
+    // (claude|codex) so shadow-log/per-install correlation can attribute a line
+    // to the runtime that produced it. Additive observability field; append-only
+    // JSONL via logTelemetry; no prompt text.
+    runtime: RUNTIME,
   };
 }
 
