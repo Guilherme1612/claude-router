@@ -57,6 +57,23 @@ test('cacheKey: changing intentKeywords produces a different key', () => {
   assert.notEqual(a, b);
 });
 
+// PARITY-02 / D-05: runtime is cache-key identity — claude and codex must never
+// share a stale route. The trailing 7th `runtime` param does not exist yet, so
+// both calls hash identically today (RED); 31-03 extends cacheKey to fold the
+// runtime slot into the key tuple.
+test('cacheKey: cross-runtime divergence — codex !== claude (D-05)', () => {
+  const codexKey = cacheKey('fix bug', ['fix'], 'fp', '', '', '', 'codex');
+  const claudeKey = cacheKey('fix bug', ['fix'], 'fp', '', '', '', 'claude');
+  assert.notEqual(codexKey, claudeKey, 'same prompt+manifest under different runtime must differ');
+});
+
+test('cacheKey: deterministic within a runtime — claude === claude (D-05)', () => {
+  assert.equal(
+    cacheKey('fix bug', ['fix'], 'fp', '', '', '', 'claude'),
+    cacheKey('fix bug', ['fix'], 'fp', '', '', '', 'claude'),
+  );
+});
+
 test('cacheLookup: miss returns null', () => {
   const cache = { entries: {}, order: [], size: 0 };
   assert.equal(cacheLookup('nope', cache), null);
