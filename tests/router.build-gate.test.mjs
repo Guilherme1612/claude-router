@@ -93,3 +93,71 @@ test('strict coverage fails on a near-tie even when route coverage itself is cle
   assert.equal(result.status, 1, `strict gate must fail: ${result.stderr}`);
   assert.match(result.stderr, /near_tie/);
 });
+
+test('strict coverage accepts a clean wide-gap mode-map', () => {
+  const { result, report } = runBuilder({
+    schema_version: 4,
+    entries: fixtureEntries([
+      { name: 'gsd-debug', weight: 1.0 },
+      { name: 'systematic-debugging', weight: 0.9 },
+    ]),
+  });
+
+  assert.equal(result.status, 0, `clean strict build must pass: ${result.stderr}`);
+  assert.equal(report.forward_diagnostics.length, 0);
+  assert.equal(report.quarantined_diagnostics.length, 0);
+});
+
+test('strict coverage blocks a stale route with no resolvable primary or member', () => {
+  const { result, report } = runBuilder({
+    schema_version: 4,
+    entries: [
+      ...fixtureEntries([{ name: 'gsd-debug', weight: 1.0 }]),
+      {
+        id: 'stale-route',
+        invoke_kind: 'slash',
+        mode: 'ghost-mode',
+        resolve: [{ name: 'ghost-capability', weight: 1.0 }],
+        signal_patterns: ['stale'],
+        recommended_skills: [],
+        recommended_agents: [],
+      },
+    ],
+  });
+
+  assert.equal(result.status, 1, `stale route must fail: ${result.stderr}`);
+  assert.match(result.stderr, /stale_target/);
+  assert.ok(report.forward_diagnostics.some(item =>
+    item.code === 'stale_target' && item.target === 'ghost-capability'));
+});
+
+test('strict coverage allows a resolvable route with an absent optional fallback', () => {
+  const { result, report } = runBuilder({
+    schema_version: 4,
+    entries: [
+      ...fixtureEntries([
+        { name: 'gsd-debug', weight: 1.0 },
+        { name: 'ghost-capability', weight: 0.9 },
+      ]),
+    ],
+  });
+
+  assert.equal(result.status, 0, `resolvable fallback must not fail: ${result.stderr}`);
+  assert.match(result.stderr, /stale_target/);
+  assert.ok(report.quarantined_diagnostics.some(item =>
+    item.code === 'quarantined_fallback' && item.target === 'ghost-capability'));
+  assert.ok(!report.forward_diagnostics.some(item => item.target === 'ghost-capability'));
+});
+
+test('non-strict builds report tie-lint violations without failing', () => {
+  const { result } = runBuilder({
+    schema_version: 4,
+    entries: fixtureEntries([
+      { name: 'gsd-debug', weight: 1.0 },
+      { name: 'systematic-debugging', weight: 0.98 },
+    ]),
+  }, false);
+
+  assert.equal(result.status, 0, `non-strict build must remain fail-open: ${result.stderr}`);
+  assert.match(result.stderr, /near_tie/);
+});
