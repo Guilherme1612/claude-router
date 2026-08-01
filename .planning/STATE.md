@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Framework-Neutral Adaptive Routing
-current_phase: 30
-current_phase_name: foundation-manifest-fingerprint-watcher-narrowing
+current_phase: 31
+current_phase_name: runtime-tagging
 status: executing
 stopped_at: context exhaustion at 79% (2026-08-01)
-last_updated: "2026-08-01T11:53:59.136Z"
+last_updated: "2026-08-01T13:21:58.730Z"
 last_activity: 2026-08-01
-last_activity_desc: Phase 30 execution started
+last_activity_desc: Phase 31 execution started
 progress:
   total_phases: 7
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 6
-  completed_plans: 3
-  percent: 14
+  completed_plans: 6
+  percent: 29
 ---
 
 # Project State
@@ -24,14 +24,14 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-31)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** Phase 30 — foundation-manifest-fingerprint-watcher-narrowing
+**Current focus:** Phase 31 — runtime-tagging
 
 ## Current Position
 
-Phase: 30 (foundation-manifest-fingerprint-watcher-narrowing) — EXECUTING
-Plan: 3 of 3
-Status: Ready to execute
-Last activity: 2026-08-01 — Phase 30 execution started
+Phase: 31 (runtime-tagging) — EXECUTING
+Plan: 1 of 3
+Status: Executing Phase 31
+Last activity: 2026-08-01 — Phase 31 execution started
 
 Progress: [██████████] 100%
 
@@ -112,7 +112,7 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-01T10:57:16.038Z
+Last session: 2026-08-01T13:21:58.720Z
 Stopped at: context exhaustion at 79% (2026-08-01)
 Resume file: None
 

@@ -79,7 +79,7 @@ Full phase details, decisions, and tech debt: [v1.4-ROADMAP](milestones/v1.4-ROA
 **Milestone Goal:** The router chooses the right locally-available capability by intent, not hardcoded framework names; calibrates per install instead of globally; stays consistent across Claude and Codex; and reacts correctly when the inventory changes. Guard-hole closure precedes resolve-list shipping; calibration is last among feature phases.
 
 - [ ] **Phase 30: Foundation — Manifest Fingerprint + Watcher Narrowing** - Content-sha256 fingerprint epoch replaces mtime; watcher ignores noise; lifecycle documented
-- [ ] **Phase 31: Runtime Tagging** - Deterministic runtime detection; runtime-tagged telemetry + cache keys
+- [x] **Phase 31: Runtime Tagging** - Deterministic runtime detection; runtime-tagged telemetry + cache keys (completed 2026-08-01)
 - [ ] **Phase 32: Intent-First Routing** - Mode-map schema v4 resolve lists; guard-hole closure; suppression + next-best fallback; per-runtime resolve
 - [ ] **Phase 33: Shadow-Log Observer** - Three-state outcome capture (accepted / rejected / no_signal) for suggestion→invocation
 - [ ] **Phase 34: Per-Install Auto-Calibration** - Bayesian per-install thresholds from ≥50 accepted routes, epoch-gated
@@ -132,17 +132,17 @@ Plans:
   2. Every telemetry and cache record carries a `runtime` tag; a route cached under one runtime is never served to the other (no cross-runtime cache reuse).
   3. A single telemetry stream shows rows from both Claude and Codex sessions, each with its correct runtime tag and no duplicate writers; the `runtime`/`epoch` fields land via a deliberate `OUTCOME_FIELDS` policy-version bump, never a silent schema add.
 
-**Plans**: 3 plans
+**Plans**: 3/3 plans complete
 
 Plans:
 **Wave 1**
 
-- [ ] 31-01-PLAN.md — Wave 0 RED test infra (runtime-tagging spec, outcome-schema 16-field enforcement, cache divergence, mirror-desync guard)
-- [ ] 31-02-PLAN.md — Wave 1 tracer: runtime detection + runtime-conditional ROUTER_DIR/HOOKS_DIR/children rewire + builder runtime pin (PARITY-01)
+- [x] 31-01-PLAN.md — Wave 0 RED test infra (runtime-tagging spec, outcome-schema 16-field enforcement, cache divergence, mirror-desync guard)
+- [x] 31-02-PLAN.md — Wave 1 tracer: runtime detection + runtime-conditional ROUTER_DIR/HOOKS_DIR/children rewire + builder runtime pin (PARITY-01)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 31-03-PLAN.md — Wave 2 TDD: cache-key runtime identity + telemetry runtime field + deliberate OUTCOME_FIELDS 14→16 policy bump (PARITY-02)
+- [x] 31-03-PLAN.md — Wave 2 TDD: cache-key runtime identity + telemetry runtime field + deliberate OUTCOME_FIELDS 14→16 policy bump (PARITY-02)
 
 *Code-verified: remove hardcoded `RUNTIME_CONFIG_DIR = join(homedir(), '.claude')` (router.mjs:100); ROUTER_DIR:75 and HOOKS_DIR:90 ALSO hardcode `.claude` directly (bypass RUNTIME_CONFIG_DIR) and MUST be rewired to the runtime-conditional base or a Codex session still writes to ~/.claude. reuse `process.argv[1]` (currently only in the `isMain()` guard, router.mjs:57). `~/.codex/router/installed.json` marker already exists — fallback is present, never read. cacheKey has NO runtime partition today → a Codex session can be served a Claude-derived route; cache key folds a runtime tag as identity. `OUTCOME_FIELDS` frozen at 14 fields (src/health/outcome-schema.mjs:33-38, enforced by tests/router.health.outcome-schema.test.mjs:68-71) — the policy-version bump to add `runtime`/`epoch` MUST update that test explicitly. PARITY-03/PARITY-04 (D-07/D-08 resolve-layer) deferred to Phase 32 (resolve-first hot path absent until Phase 32).*
 
@@ -238,7 +238,7 @@ Phases execute in numeric order: 27 → 28 → 29 (v1.4), then 30 → 31 → 32 
 | 28. Coverage Audit-Guard | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 29. Mode-Map Curation and Signal Patterns Expansion | v1.4 | 4/4 | Complete    | 2026-07-29 |
 | 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 3/3 | In Progress|  |
-| 31. Runtime Tagging | v1.5 | 0/0 | Not started | - |
+| 31. Runtime Tagging | v1.5 | 3/3 | Complete   | 2026-08-01 |
 | 32. Intent-First Routing | v1.5 | 0/0 | Not started | - |
 | 33. Shadow-Log Observer | v1.5 | 0/0 | Not started | - |
 | 34. Per-Install Auto-Calibration | v1.5 | 0/0 | Not started | - |
