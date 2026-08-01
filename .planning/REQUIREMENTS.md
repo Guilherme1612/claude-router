@@ -15,10 +15,10 @@
 
 ### INVC — Inventory-Change Correctness
 
-- [ ] **INVC-01**: `build-manifest.mjs` emits a content-sha256 manifest fingerprint over semantic routing inputs only (timestamps excluded)
-- [ ] **INVC-02**: Cache keys fold the fingerprint (replacing mtime); adding/updating/removing any skill, plugin, or agent bumps it and cached routes recompute
+- [x] **INVC-01**: `build-manifest.mjs` emits a content-sha256 manifest fingerprint over semantic routing inputs only (timestamps excluded)
+- [x] **INVC-02**: Cache keys fold the fingerprint (replacing mtime); adding/updating/removing any skill, plugin, or agent bumps it and cached routes recompute
 - [ ] **INVC-03**: Calibration is epoch-keyed by the fingerprint; a fingerprint mismatch means mode-map default thresholds win
-- [ ] **INVC-04**: Watcher scan excludes noise files (sqlite/WAL, plugin-catalog caches); `installed_plugins.json` is the authoritative plugin add/remove signal; plugin add/remove changes the fingerprint
+- [x] **INVC-04**: Watcher scan excludes noise files (sqlite/WAL, plugin-catalog caches); `installed_plugins.json` is the authoritative plugin add/remove signal; plugin add/remove changes the fingerprint
 - [ ] **INVC-05**: The add/update/remove capability lifecycle (watcher → rebuild → coverage audit → recompute → re-calibrate) is documented and test-verified
 
 ### CALIB — Per-Install Auto-Calibration
@@ -87,10 +87,10 @@ Populated during roadmap creation.
 | ROUTE-03 | Phase 32 | Pending |
 | ROUTE-04 | Phase 32 | Pending |
 | ROUTE-05 | Phase 32 | Pending |
-| INVC-01 | Phase 30 | Pending |
-| INVC-02 | Phase 30 | Pending |
+| INVC-01 | Phase 30 | Complete |
+| INVC-02 | Phase 30 | Complete |
 | INVC-03 | Phase 30 | Pending |
-| INVC-04 | Phase 30 | Pending |
+| INVC-04 | Phase 30 | Complete |
 | INVC-05 | Phase 30 | Pending |
 | CALIB-01 | Phase 33 | Pending |
 | CALIB-02 | Phase 33 | Pending |
@@ -109,6 +109,7 @@ Populated during roadmap creation.
 | REL-10 | Phase 36 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 25 total
 - Mapped to phases: 25
 - Unmapped: 0 ✓

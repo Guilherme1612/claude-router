@@ -101,7 +101,23 @@ Full phase details, decisions, and tech debt: [v1.4-ROADMAP](milestones/v1.4-ROA
   4. Calibration data is epoch-keyed by the fingerprint: a fingerprint mismatch means mode-map default thresholds (0.591/0.291/0.191) win, never stale per-install thresholds.
   5. The full add/update/remove capability lifecycle (watcher → rebuild → coverage audit → recompute → re-calibrate) is documented and test-verified end-to-end.
 
-**Plans**: TBD
+**Plans**: 2/3 plans executed
+
+```
+Plans:
+**Wave 1**
+
+- [x] 30-01-PLAN.md — Fingerprint epoch emission + cacheKey fold (INVC-01, INVC-02)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 30-02-PLAN.md — Watcher noise narrowing + authoritative plugin signal (INVC-04)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 30-03-PLAN.md — Calibration epoch-keying + lifecycle documentation (INVC-03, INVC-05)
+
+```
 
 *Code-verified: NOT a new fingerprint build. `src/registry/fingerprint.mjs` already ships a Merkle content-sha256 tree (`buildSubtreeHashes`) and is the live watcher diff source. Work = extend it + bridge to cacheKey. Composite-epoch decision (resolves the research flag): ONE global fingerprint hash over (capability identities + `installed_plugins.json` hash + mode-map + weights), timestamps excluded — cache is a small LRU map, whole-cache recompute on inventory change is acceptable. cacheKey replaces the 7-position mtime fold (`[np, ik, modeMapMtime, manifestMtime, graphMtime, surfaceMtime, weightsMtime]`, router.mjs:1648) with a single `manifest_fingerprint` epoch slot; translate SAF-01 mtime-invalidation tests 1:1 to epoch. `installed_plugins.json` already parsed (build-manifest.mjs:268-280) — it IS the authoritative signal; the gap is only the watcher noise ignore-list.*
 
@@ -211,7 +227,7 @@ Phases execute in numeric order: 27 → 28 → 29 (v1.4), then 30 → 31 → 32 
 | 27. Mutation Safety Infrastructure | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 28. Coverage Audit-Guard | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 29. Mode-Map Curation and Signal Patterns Expansion | v1.4 | 4/4 | Complete    | 2026-07-29 |
-| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 0/0 | Not started | - |
+| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 2/3 | In Progress|  |
 | 31. Runtime Tagging | v1.5 | 0/0 | Not started | - |
 | 32. Intent-First Routing | v1.5 | 0/0 | Not started | - |
 | 33. Shadow-Log Observer | v1.5 | 0/0 | Not started | - |

@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Framework-Neutral Adaptive Routing
 current_phase: 30
-current_phase_name: Foundation — Manifest Fingerprint + Watcher Narrowing
-status: planning
-stopped_at: context exhaustion at 78% (2026-07-31)
-last_updated: "2026-07-31T20:52:21.352Z"
-last_activity: 2026-07-31
-last_activity_desc: v1.5 roadmap created (Phases 30-35, 22/22 requirements mapped)
+current_phase_name: foundation-manifest-fingerprint-watcher-narrowing
+status: executing
+stopped_at: Completed 30-02-PLAN.md
+last_updated: "2026-08-01T09:32:29.264Z"
+last_activity: 2026-08-01
+last_activity_desc: Phase 30 execution started
 progress:
-  total_phases: 10
+  total_phases: 7
   completed_phases: 0
-  total_plans: 0
-  completed_plans: 0
+  total_plans: 3
+  completed_plans: 2
   percent: 0
 ---
 
@@ -24,16 +24,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-07-31)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** v1.5 roadmap created — Phase 30 ready to plan
+**Current focus:** Phase 30 — foundation-manifest-fingerprint-watcher-narrowing
 
 ## Current Position
 
-Phase: 30 of 35 (Foundation — Manifest Fingerprint + Watcher Narrowing)
-Plan: — (0 of 0 in current phase)
-Status: Planning — Phase 30 not started
-Last activity: 2026-07-31 — v1.5 roadmap created (Phases 30-35, 22/22 requirements mapped)
+Phase: 30 (foundation-manifest-fingerprint-watcher-narrowing) — EXECUTING
+Plan: 3 of 3
+Status: Ready to execute
+Last activity: 2026-08-01 — Phase 30 execution started
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [███░░░░░░░] 33%
 
 ## Performance Metrics
 
@@ -59,6 +59,12 @@ Progress: [░░░░░░░░░░] 0%
 - Last 5 plans: none (v1.5 not started)
 - Trend: Not started
 
+**Per-Plan Metrics:**
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 30-foundation-manifest-fingerprint-watcher-narrowing P2 | 12 | 2 tasks | 3 files |
+
 ## Accumulated Context
 
 ### Decisions
@@ -71,6 +77,8 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [v1.5 roadmap]: Shadow-log observer (Phase 33) ships the three-state schema + measure-only divergence report BEFORE any threshold derives; calibration (Phase 34) is deliberately last because it consumes the epoch, runtime split, resolved names, and outcomes.
 - [v1.5 roadmap]: Release-gate cleanup (Phase 35) is final — it verifies the assembled system end-to-end, including cold-start defaults on a fresh account, closing the standing BLOCKER 2 from v1.3/v1.4.
 - [v1.5 roadmap]: Kept shadow-log and auto-calibration as separate phases (not merged) — research's measure-only-first dependency boundary and the two distinct research flags support the split; granularity "standard" permits 6 phases.
+- [Phase ?]: Watcher roots ignore sqlite/WAL + plugin-catalog caches via prefix-specific ignoredRelativePaths; bare 'plugins' prefix never used so installed_plugins.json stays the authoritative add/remove signal
+- [Phase ?]: manifest_fingerprint excludes timestamps: computeCompositeEpoch hashes only name/marketplace/version/scope of installed plugins
 
 ### Pending Todos
 
@@ -100,8 +108,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-07-31T20:52:21.344Z
-Stopped at: context exhaustion at 78% (2026-07-31)
+Last session: 2026-08-01T09:32:29.255Z
+Stopped at: Completed 30-02-PLAN.md
 Resume file: None
 
 ## Operator Next Steps
