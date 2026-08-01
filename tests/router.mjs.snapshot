@@ -913,8 +913,10 @@ export function routeTargetsExist(route, manifest, modeMap, indexes) {
       const id = stripLeadingSlash(route.id);
       const routeIds = new Set((modeMap?.entries || []).map((entry) => stripLeadingSlash(entry?.id)).filter(Boolean));
       const intentionalRouteAlias = mode && mode !== id && routeIds.has(mode);
-      const intentionalSchemaRoute = mode && mode === id && modeMap?.schema_version;
-      if (mode && !idx.commands.has(mode) && !intentionalRouteAlias && !intentionalSchemaRoute) return false;
+      // Guard-hole closure (T-32-05) mirrored on the hot path: valid only when mode
+      // is a present command OR a resolve-list member resolves to a present command.
+      const intentionalResolveRoute = mode && Boolean(resolveSlashRoute(route, idx));
+      if (mode && !idx.commands.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute) return false;
     }
     for (const target of (route.recommended_skills || [])) {
       const name = stripLeadingSlash(target);
