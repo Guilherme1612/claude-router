@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
+  computeCompositeEpoch,
   loadFingerprintState,
   saveFingerprintState,
   scanFingerprintTree,
@@ -348,4 +349,37 @@ test('[phase21-red:mutation] partial scan suppresses removals only inside the un
     tree([], [{ code: 'read_error', logical_root: 'claude_global', relative_path: 'skills/denied' }]),
   );
   assert.deepEqual(result.events.map(event => event.canonical_id), ['router/healthy']);
+});
+
+// --- WR-03 / WR-04 -------------------------------------------
+
+test('WR-03: computeCompositeEpoch is order-independent over semantic entry arrays', () => {
+  const entries = [
+    { name: 'bravo', description: 'B', id: 'b' },
+    { name: 'alpha', description: 'A', id: 'a' },
+    { name: 'charlie', description: 'C', id: 'c' },
+  ];
+  const a = computeCompositeEpoch({ entries, installedPlugins: [{ name: 'p', marketplace: 'm', version: '1', scope: 'user' }] });
+  // Reversed semantics + reordered plugins must emit an identical epoch.
+  const b = computeCompositeEpoch({ entries: [...entries].reverse(), installedPlugins: [{ scope: 'user', version: '1', marketplace: 'm', name: 'p' }] });
+  assert.equal(a, b, 'element order must not perturb the fingerprint (structural determinism)');
+});
+
+test('WR-03: computeCompositeEpoch drops path and stays order-independent for manifest-shaped entries', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-wr03-'));
+  try {
+    mkdirSync(join(root, 'skills', 'beta'), { recursive: true });
+    mkdirSync(join(root, 'skills', 'alpha'), { recursive: true });
+    writeFileSync(join(root, 'skills', 'beta', 'SKILL.md'), '---\nname: beta\ndescription: B\n---\nbody');
+    writeFileSync(join(root, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\ndescription: A\n---\nbody');
+    const entries = [
+      { name: 'beta', description: 'B', path: join(root, 'skills', 'beta', 'SKILL.md') },
+      { name: 'alpha', description: 'A', path: join(root, 'skills', 'alpha', 'SKILL.md') },
+    ];
+    const a = computeCompositeEpoch({ entries });
+    const shuffled = computeCompositeEpoch({ entries: [...entries].reverse() });
+    assert.equal(a, shuffled, 'identical skill set in a different enumeration order → identical epoch');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

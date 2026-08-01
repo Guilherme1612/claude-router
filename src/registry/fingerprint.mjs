@@ -11,6 +11,15 @@ function hash(value) {
   return createHash('sha256').update(stableStringify(value), 'utf8').digest('hex');
 }
 
+// Stable, content-addressed array-order comparator (WR-03): orders elements by
+// their canonical serialization so hash inputs are structurally deterministic
+// regardless of the enumeration order in which they were collected.
+function compareBySerialization(a, b) {
+  const sa = a && typeof a === 'object' ? stableStringify(a) : String(a ?? '');
+  const sb = b && typeof b === 'object' ? stableStringify(b) : String(b ?? '');
+  return sa < sb ? -1 : sa > sb ? 1 : 0;
+}
+
 // Composite content-address epoch (v1.5 INVC-01/INVC-02). One global sha256 over
 // the semantic routing inputs that determine a route: capability identities
 // (manifest entries), installed_plugins identities, the mode-map, and the
@@ -30,9 +39,17 @@ export function computeCompositeEpoch({ entries = [], installedPlugins = [], mod
     version: p && p.version ? p.version : '',
     scope: p && p.scope ? p.scope : '',
   }));
+  // WR-03: canonicalize array element order BEFORE hashing so the epoch is
+  // independent of the readdirSync enumeration order used to populate the
+  // manifest arrays. That order is filesystem/APFS-specific, not a platform
+  // contract — an unchanged directory enumerated in a different order must
+  // still emit an identical fingerprint (the "identical rebuild → identical
+  // fingerprint" guarantee must be structural, not empirical).
+  const sortedSemantic = [...semantic].sort(compareBySerialization);
+  const sortedPluginIds = [...pluginIds].sort(compareBySerialization);
   return hash({
-    entries: semantic,
-    installedPlugins: pluginIds,
+    entries: sortedSemantic,
+    installedPlugins: sortedPluginIds,
     modeMap: modeMap ?? null,
     weights: weights ?? null,
   });
