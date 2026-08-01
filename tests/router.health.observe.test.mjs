@@ -31,6 +31,8 @@ function makeRecord({
   suggested_skills = SUGGESTED_SKILL,
   prompt_signature = SIG,
   guards_fired = [],
+  runtime = 'claude',
+  epoch = null,
 } = {}) {
   return {
     ts,
@@ -42,6 +44,8 @@ function makeRecord({
     guards_fired,
     route_id,
     downstream_invocations,
+    runtime,
+    epoch,
   };
 }
 
@@ -79,6 +83,11 @@ test('HLTH-03 selected: telemetry record with route_id but no completion signal 
   assert.equal(outcomes[0].outcome_kind, 'selected');
   assert.equal(outcomes[0].capability_id, CAP);
   assert.equal(outcomes[0].route_id, 'route-sel');
+  // WR-01: the runtime tag forwarded from telemetry must survive into the
+  // outcome store (runtime emitted with the module RUNTIME value; epoch is
+  // forward-compat scaffolding and stays null).
+  assert.equal(outcomes[0].runtime, 'claude');
+  assert.equal(outcomes[0].epoch, null);
 });
 
 test('HLTH-03 completed: workflow-state advanced (new state not in prior history) yields completed', () => {
