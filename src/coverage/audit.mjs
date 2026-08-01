@@ -78,10 +78,11 @@ function targetIndexes(rows) {
 function typedMappings(modeMap, indexes) {
   const mapped = { command: new Set(), skill: new Set(), agent: new Set() };
   const diagnostics = [];
+  const quarantinedDiagnostics = [];
   if (!modeMap || !Array.isArray(modeMap.entries)) {
     diagnostics.push({ code: 'mode_map_malformed', route: '', target: '', category: 'mode_map',
       reason: 'mode-map entries must be an array' });
-    return { mapped, diagnostics };
+    return { mapped, diagnostics, quarantinedDiagnostics: [] };
   }
 
   const routeIds = new Set(modeMap.entries.map(entry => cleanId(entry?.id)).filter(Boolean));
@@ -143,9 +144,10 @@ function typedMappings(modeMap, indexes) {
       // present manifest command OR an explicit resolve-list member resolves to one. The
       // blanket `mode === route && Boolean(schema_version)` pass is removed so schema_version
       // truthiness no longer exempts slash routes in the audit.
-      const resolveRoute = mode && (entry.resolve || []).some(member => indexes.command.has(cleanId(member?.name)));
+      const resolveRoute = (entry.resolve || []).some(member => indexes.command.has(cleanId(member?.name)));
+      const routeResolvable = indexes.command.has(mode) || resolveRoute;
       if (indexes.command.has(mode)) mapped.command.add(mode);
-      else if (!alias && !resolveRoute) diagnostics.push({
+      else if (!alias && !routeResolvable) diagnostics.push({
         code: 'stale_target', route, target: mode || '<mode>', category: 'commands',
         reason: 'slash mode must match a manifest command or intentional mode-map route id',
       });
@@ -153,10 +155,16 @@ function typedMappings(modeMap, indexes) {
       // forward-orphan / stale diagnostics — never silently dropped.
       for (const member of entry.resolve || []) {
         const name = cleanId(member?.name);
-        if (name && !indexes.command.has(name)) diagnostics.push({
-          code: 'stale_target', route, target: name, category: 'commands',
-          reason: 'resolve member is absent from the manifest command inventory',
-        });
+        if (name && !indexes.command.has(name)) {
+          const diagnostic = {
+            code: routeResolvable ? 'quarantined_fallback' : 'stale_target',
+            route, target: name, category: 'commands',
+            reason: routeResolvable
+              ? 'optional resolve member absent — quarantined non-blocking'
+              : 'resolve member is absent from the manifest command inventory',
+          };
+          (routeResolvable ? quarantinedDiagnostics : diagnostics).push(diagnostic);
+        }
       }
     }
 
@@ -180,7 +188,7 @@ function typedMappings(modeMap, indexes) {
       else mapped.agent.add(target);
     }
   }
-  return { mapped, diagnostics };
+  return { mapped, diagnostics, quarantinedDiagnostics };
 }
 
 function baselinePolicy(baseline, rows, eligibleGaps) {
@@ -298,17 +306,20 @@ export function auditCoverage({ manifest, modeMap, baseline, routeDiagnostics = 
     left.code.localeCompare(right.code)
       || left.category.localeCompare(right.category)
       || left.id.localeCompare(right.id));
+  const quarantinedDiagnostics = routes.quarantinedDiagnostics.sort(compareDiagnostic);
 
   return {
     schema_version: 1,
     records,
     forward_diagnostics: forwardDiagnostics,
+    quarantined_diagnostics: quarantinedDiagnostics,
     baseline_diagnostics: baselineDiagnostics,
     counts: {
       total: records.length,
       mapped: records.filter(entry => entry.coverage_status === 'mapped').length,
       unmapped: records.filter(entry => entry.coverage_status === 'unmapped').length,
       forward_diagnostics: forwardDiagnostics.length,
+      quarantined_diagnostics: quarantinedDiagnostics.length,
       baseline_diagnostics: baselineDiagnostics.length,
       by_classification: Object.fromEntries(Object.entries(byClassification).sort(([a], [b]) => a.localeCompare(b))),
     },
@@ -321,6 +332,7 @@ export function auditCoverage({ manifest, modeMap, baseline, routeDiagnostics = 
         skill: [...routes.mapped.skill].sort(),
         agent: [...routes.mapped.agent].sort(),
         diagnostics: forwardDiagnostics,
+        quarantined_diagnostics: quarantinedDiagnostics,
       }),
       baseline: fingerprint({
         accepted: [...policy.accepted].sort(([a], [b]) => a.localeCompare(b)),

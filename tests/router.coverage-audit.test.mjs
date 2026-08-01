@@ -28,6 +28,7 @@ function runBuilder({
   strict = false,
   blockedAgent = false,
   projectSkill = false,
+  commandName = '',
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-coverage-builder-'));
   const claude = join(root, '.claude');
@@ -38,6 +39,11 @@ function runBuilder({
   const agentsSkills = join(root, 'agents-skills');
   const projectRoot = join(root, 'project');
   mkdirSync(claude, { recursive: true });
+  if (commandName) {
+    mkdirSync(join(claude, 'plugins', 'gsp', 'commands'), { recursive: true });
+    writeFileSync(join(claude, 'plugins', 'gsp', 'commands', `${commandName}.md`),
+      `---\nname: ${commandName}\ndescription: fixture command\n---\nfixture\n`);
+  }
   if (blockedAgent) {
     mkdirSync(join(claude, 'agents'), { recursive: true });
     writeFileSync(join(claude, 'agents', 'blocked-agent.md'),
@@ -500,7 +506,7 @@ test('schema_version-SET builder report surfaces an absent resolvable fallback w
       recommended_agents: [],
     }],
   };
-  const { result, report } = runBuilder({ modeMap });
+  const { result, report } = runBuilder({ modeMap, commandName: 'resolve-mode' });
   assert.equal(result.status, 0, 'non-strict builder exits 0 even while surfacing diagnostics');
   assert.ok(
     Array.isArray(report.quarantined_diagnostics)
