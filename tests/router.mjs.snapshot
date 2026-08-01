@@ -1714,11 +1714,19 @@ export function cacheLookup(sig, cache) {
 // manifest fingerprint still governs no-op-rebuild stability. Fail-open
 // defaults: omitted/'' hashes leave the key byte-identical to the
 // fingerprint-only form, and a missing fingerprint defaults to '0'.
+// runtime (D-05 / PARITY-02): the active runtime (claude|codex) is folded into
+// the hashed identity tuple ALWAYS (as a trailing slot), NOT into route
+// metadata — so a Claude-served route and a Codex-served route can never hash to
+// the same key, even when every live hash is '' (anti-pattern guard, RESEARCH
+// Pitfall 3). Placement: appended last so existing positional (6-arg and fewer)
+// callers keep a stable signature; the production call site passes the module
+// RUNTIME constant explicitly. Default '' keeps the function pure/deterministic
+// for callers that do not pass a runtime.
 export function cacheKey(normalizedPrompt, intentKeywords, manifestFingerprint = '0',
-  modeMapHash = '', weightsHash = '', graphHash = '') {
+  modeMapHash = '', weightsHash = '', graphHash = '', runtime = '') {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
-  const parts = [np, ik, manifestFingerprint];
+  const parts = [np, ik, manifestFingerprint, String(runtime || '')];
   const live = [modeMapHash, weightsHash, graphHash].filter(Boolean).join('|');
   if (live) parts.push(live);
   return createHash('sha256').update(parts.join('|')).digest('hex');
@@ -2810,7 +2818,7 @@ export function inspectDecision(prompt, options = {}) {
     const modeMapHash = contentHash(modeMap);
     const weightsHash = contentHash(weights);
     const graphHash = (graph && graph.content_hash) || '';
-    const sig = cacheKey(state.normalizedPrompt, [], manifestFingerprint, modeMapHash, weightsHash, graphHash);
+    const sig = cacheKey(state.normalizedPrompt, [], manifestFingerprint, modeMapHash, weightsHash, graphHash, RUNTIME);
     state.cache.key_prefix = sig.slice(0, 8);
     state.cache.invalidation_epoch = { manifest_fingerprint: manifestFingerprint };
     // SAF-01: routing_version is a DERIVED observability string (not stored on
