@@ -63,14 +63,9 @@ test('wall-clock and self-reported latency are both < 100ms across 5 runs (combi
   }
 });
 
-// T-32-15 resolve-first hot-path budget (ROADMAP criterion 5). The gate above only
-// measures the trivial pass-through path. This gate exercises the RESOLVE path: it
-// imports the shipped hook and calls resolveSlashRoute with a confident intent that
-// drives a resolve-list decision (a slash entry + framework-neutral resolve list that
-// resolves against the active runtime's present capabilities, per 32-02/32-03). At
-// least 20 warm iterations; assert warm p95 < 40ms and every run's max < 100ms, with
-// exit 0 and stdout carrying ONLY the pure timing JSON (no dead/foreign stdout).
-test('resolve-heavy: resolve-first hot path stays within budget (warm p95 < 40ms, max < 100ms)', () => {
+// Helper-level counterpart to the e2e gate below. This isolates the pure resolver
+// cost with a confident intent and an active runtime's present capabilities.
+test('helper: pure resolveSlashRoute stays within budget (warm p95 < 40ms, max < 100ms)', () => {
   const entry = {
     id: 'debug-capability',
     invoke_kind: 'slash',
