@@ -26,6 +26,8 @@ function fixture(profile) {
 
 async function stop(f, holder) {
   await holder.child?.kill?.();
+  // Quiesce trailing controller writes (mkdir/atomic rename of status.json) before fs teardown.
+  await new Promise(resolve => setTimeout(resolve, 5));
   rmSync(join(f.claudeRoot, 'router', 'controller', 'status.json'), { force: true });
 }
 

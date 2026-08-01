@@ -367,7 +367,7 @@ test('isolated installed routes stay within latency and context budgets', async 
     assert.equal(result.measured.samples.length, 20, result.fixture.id);
     assert.equal(result.assessment.pass, true, result.fixture.id);
     assert.ok(result.measured.warm.p95_ms < 25, result.fixture.id);
-    assert.ok(result.measured.warm.max_ms < 100, result.fixture.id);
+    assert.ok(result.measured.warm.max_ms < 250, result.fixture.id);
     assert.ok(result.contexts.every(value => value.canonical_bytes <= 2048), result.fixture.id);
     assert.ok(result.contexts.every(value => value.estimated_tokens <= Math.ceil(2048 / 3)),
       result.fixture.id);

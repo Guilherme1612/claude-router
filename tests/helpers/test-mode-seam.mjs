@@ -89,19 +89,23 @@ export function inProcessControllerLauncher(runners, holder = {}) {
               .catch(() => { /* already closed or publish('stopped') failed */ });
           } catch { return Promise.resolve(); /* already closed */ }
         };
-        if (handle) { pendingClose = closeHandle(); return pendingClose; }
+        if (handle) { pendingClose = closeHandle(); }
         // handle not ready: poll until runRegistryWatcher resolves, then close.
-        pendingClose = new Promise(resolve => {
-          const poll = () => {
-            if (handle) {
-              try { handle.close().catch(() => {}).then(resolve, resolve); }
-              catch { resolve(); }
-            }
-            else setTimeout(poll, 5);
-          };
-          poll();
-        });
-        return pendingClose;
+        else {
+          pendingClose = new Promise(resolve => {
+            const poll = () => {
+              if (handle) {
+                try { handle.close().catch(() => {}).then(resolve, resolve); }
+                catch { resolve(); }
+              }
+              else setTimeout(poll, 5);
+            };
+            poll();
+          });
+        }
+        // Quiesce a trailing in-flight status.json write pipeline (tmp+rename) that can land
+        // after close() and race the caller's rmSync teardown -> ENOENT unhandledRejection.
+        return pendingClose.then(() => new Promise(resolve => setTimeout(resolve, 5)));
       },
     };
     holder.child = child;

@@ -44,7 +44,8 @@ test('graphifyQuery: returns <= k symbols; result shape is fixed', () => {
   const r = graphifyQuery('memo writer persona', REAL_GRAPH_DIR, 4);
   assert.ok(r.symbols.length <= 4);
   const keys = Object.keys(r).sort();
-  assert.deepEqual(keys, ['boostIds', 'elapsed_ms', 'graph_queried', 'graph_status', 'symbols']);
+  assert.deepEqual(keys, ['boostIds', 'content_hash', 'elapsed_ms', 'graph_queried', 'graph_status', 'symbols']);
+  assert.match(r.content_hash, /^[0-9a-f]{64}$/);
   assert.ok(r.boostIds instanceof Set);
   assert.equal(r.boostIds.size, r.symbols.length);
 });

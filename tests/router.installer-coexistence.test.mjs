@@ -341,6 +341,8 @@ test('together-mode isolation: Claude and Codex installations remain independent
     // Install: both Claude and Codex owned roots are distinct directories.
     await installRouter(installOptions(f, holder));
     await safeStopController(f, holder);
+    // Quiesce trailing controller writes so uninstall's recursive remove never races them.
+    await new Promise(resolve => setTimeout(resolve, 5));
     assert.notEqual(f.ownedRoot, f.codexOwnedRoot);
     assert.equal(existsSync(f.ownedRoot), true);
     assert.equal(existsSync(f.codexOwnedRoot), true);
