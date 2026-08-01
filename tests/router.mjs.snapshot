@@ -1718,12 +1718,14 @@ export function cacheLookup(sig, cache) {
 // the hashed identity tuple ALWAYS (as a trailing slot), NOT into route
 // metadata — so a Claude-served route and a Codex-served route can never hash to
 // the same key, even when every live hash is '' (anti-pattern guard, RESEARCH
-// Pitfall 3). Placement: appended last so existing positional (6-arg and fewer)
-// callers keep a stable signature; the production call site passes the module
-// RUNTIME constant explicitly. Default '' keeps the function pure/deterministic
-// for callers that do not pass a runtime.
+// Pitfall 3). The slot defaults to the module RUNTIME constant (detected once at
+// module load, zero hot-path IO), so callers that do not pin a runtime — e.g.
+// cache integration tests that pre-seed a cache with cacheKey() — derive the
+// SAME key as the production call site, keeping pre-seeded entries reachable.
+// An explicit runtime string (e.g. 'codex' vs 'claude') overrides the default and
+// is the cross-runtime isolation knob.
 export function cacheKey(normalizedPrompt, intentKeywords, manifestFingerprint = '0',
-  modeMapHash = '', weightsHash = '', graphHash = '', runtime = '') {
+  modeMapHash = '', weightsHash = '', graphHash = '', runtime = RUNTIME) {
   const np = String(normalizedPrompt || '');
   const ik = Array.isArray(intentKeywords) ? intentKeywords.join(' ') : String(intentKeywords || '');
   const parts = [np, ik, manifestFingerprint, String(runtime || '')];
