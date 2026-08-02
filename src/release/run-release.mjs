@@ -12,6 +12,13 @@ export const REQUIREMENT_IDS = Object.freeze([
 const V13_REQUIREMENT_IDS = Object.freeze(
   Array.from({ length: 9 }, (_, index) => `REL-0${index + 1}`),
 );
+const V15_REQUIREMENT_IDS = Object.freeze([
+  'ROUTE-01', 'ROUTE-02', 'ROUTE-03', 'ROUTE-04', 'ROUTE-05',
+  'INVC-01', 'INVC-02', 'INVC-03', 'INVC-04', 'INVC-05',
+  'CALIB-01', 'CALIB-02', 'CALIB-03', 'CALIB-04', 'CALIB-05',
+  'PARITY-01', 'PARITY-02', 'PARITY-03', 'PARITY-04',
+  'PROJ-01', 'PROJ-02', 'PROJ-03', 'REL-08', 'REL-09', 'REL-10',
+]);
 
 export const RELEASE_VERSIONS = Object.freeze({
   registry: 'canonical-registry-v1', index: 'compiled-index-v1',
@@ -60,11 +67,12 @@ function validateCommands(commands, repoRoot, { primary = false } = {}) {
 
 export function validateReleaseMatrix(matrix, { repoRoot = MODULE_ROOT } = {}) {
   const v13 = matrix?.milestone === 'v1.3';
-  exactKeys(matrix, v13 ? [...ALLOWED_TOP_KEYS, 'thresholds', 'stages'] : ALLOWED_TOP_KEYS, 'matrix');
-  if (matrix.schema_version !== 1 || (!v13 && matrix.milestone !== 'v1.2')) throw new TypeError('matrix version mismatch');
+  const v15 = matrix?.milestone === 'v1.5';
+  exactKeys(matrix, v13 || v15 ? [...ALLOWED_TOP_KEYS, 'thresholds', 'stages'] : ALLOWED_TOP_KEYS, 'matrix');
+  if (matrix.schema_version !== 1 || (!v13 && !v15 && matrix.milestone !== 'v1.2')) throw new TypeError('matrix version mismatch');
   if (JSON.stringify(matrix.versions) !== JSON.stringify(RELEASE_VERSIONS)) throw new TypeError('immutable version mismatch');
   if (!Array.isArray(matrix.requirements)) throw new TypeError('requirements coverage missing');
-  const requirementIds = v13 ? V13_REQUIREMENT_IDS : REQUIREMENT_IDS;
+  const requirementIds = v15 ? V15_REQUIREMENT_IDS : v13 ? V13_REQUIREMENT_IDS : REQUIREMENT_IDS;
   const ids = matrix.requirements.map(row => row?.id);
   const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
   if (duplicates.length) throw new TypeError(`duplicate primary ownership: ${duplicates[0]}`);
@@ -74,7 +82,8 @@ export function validateReleaseMatrix(matrix, { repoRoot = MODULE_ROOT } = {}) {
   for (const row of matrix.requirements) {
     exactKeys(row, ALLOWED_ROW_KEYS, `requirement ${row.id}`);
     exactKeys(row.primary, ['phase', 'owner', 'commands', 'gate_ids'], `primary ${row.id}`);
-    const validPhase = v13 ? row.primary.phase === 26
+    const validPhase = v15 ? Number.isFinite(row.primary.phase) && row.primary.phase >= 30 && row.primary.phase <= 37.1
+      : v13 ? row.primary.phase === 26
       : Number.isInteger(row.primary.phase) && row.primary.phase >= 11 && row.primary.phase <= 17;
     if (!validPhase || typeof row.primary.owner !== 'string' || !row.primary.owner) throw new TypeError('invalid primary owner');
     if (!Array.isArray(row.primary.gate_ids) || !row.primary.gate_ids.length || row.primary.gate_ids.some(id => typeof id !== 'string' || !id)) throw new TypeError('missing primary gates');
@@ -103,7 +112,7 @@ export function validateReleaseMatrix(matrix, { repoRoot = MODULE_ROOT } = {}) {
       }
     }
   }
-  if (v13) validateStages(matrix, repoRoot);
+  if (v13 || v15) validateStages(matrix, repoRoot);
   return Object.freeze({ status: 'valid', requirement_count: ids.length });
 }
 
@@ -216,7 +225,7 @@ export function parseChildEvidence({ stdout, stage, gate_ids, error, skipped, th
 function executeChild({ stage, command, gate_ids, timeout_ms, thresholds }) {
   const files = command.split(' ').slice(2);
   return new Promise(resolveResult => {
-    execFile(process.execPath, ['--test', '--test-concurrency=1', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
+    execFile(process.execPath, ['--test', '--test-reporter=tap', '--test-concurrency=1', ...files], { cwd: MODULE_ROOT, timeout: timeout_ms, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, ROUTER_RELEASE_STAGE: stage } }, (error, stdout = '', stderr = '') => {
       const passMatch = stdout.match(/^# pass (\d+)/m);
       const skipped = (/^ok .* # SKIP\b/im.test(stdout) || /^# skipped [1-9]/m.test(stdout))
         || !passMatch || Number(passMatch[1]) === 0;
@@ -320,10 +329,13 @@ export function verifyReleaseReport({ reportPath, matrixPath = resolve(MODULE_RO
 }
 
 export async function runRelease({
-  matrix, matrixPath, execute = executeChild, timeoutMs = 120_000, publish = true, outputPath,
+  matrix, matrixPath, requiredMilestone, execute = executeChild, timeoutMs = 120_000, publish = true, outputPath,
 } = {}) {
   matrix ||= loadReleaseMatrix({ matrixPath });
   validateReleaseMatrix(matrix);
+  if (requiredMilestone && matrix.milestone !== requiredMilestone) {
+    throw new TypeError(`release matrix milestone mismatch: expected ${requiredMilestone}`);
+  }
   const stagesForMatrix = stagesFor(matrix);
   const thresholds = thresholdsFor(matrix);
   const stages = [];
@@ -354,10 +366,11 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   try {
     const matrixArg = process.argv.find(argument => argument.startsWith('--matrix='));
     const outputArg = process.argv.find(argument => argument.startsWith('--output='));
-    const matrixPath = matrixArg?.slice('--matrix='.length) || resolve(MODULE_ROOT, 'release/v1.2-matrix.json');
+    const matrixPath = matrixArg?.slice('--matrix='.length) || resolve(MODULE_ROOT, 'release/v1.5-matrix.json');
     const matrix = loadReleaseMatrix({ matrixPath });
     const result = await runRelease({
       matrix,
+      requiredMilestone: 'v1.5',
       matrixPath,
       outputPath: outputArg?.slice('--output='.length) || resolve(MODULE_ROOT, `release/${matrix.milestone}-report.json`),
     });

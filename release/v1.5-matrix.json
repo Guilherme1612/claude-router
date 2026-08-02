@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "milestone": "v1.5",
+  "versions": {"registry":"canonical-registry-v1","index":"compiled-index-v1","policy":"workflow-transitions-v1","corpus":"router-calibration-v1"},
+  "thresholds": {"warm_p95_ms_lt":25,"max_route_ms_lt":100,"context_max_bytes":2048},
+  "requirements": [
+    {"id":"ROUTE-01","primary":{"phase":32,"owner":"intent-routing","commands":["node --test tests/router.schema-v4-routing.test.mjs"],"gate_ids":["ROUTE-01"]}},
+    {"id":"ROUTE-02","primary":{"phase":32,"owner":"route-presence","commands":["node --test tests/router.route-targets.test.mjs"],"gate_ids":["ROUTE-02"]}},
+    {"id":"ROUTE-03","primary":{"phase":32,"owner":"runtime-fallback","commands":["node --test tests/router.phase32-cross-runtime.test.mjs"],"gate_ids":["ROUTE-03"]}},
+    {"id":"ROUTE-04","primary":{"phase":32,"owner":"native-fallback","commands":["node --test tests/router.schema-v4-routing.test.mjs"],"gate_ids":["ROUTE-04"]}},
+    {"id":"ROUTE-05","primary":{"phase":32,"owner":"resolve-lint","commands":["node --test tests/router.resolve-tie-lint.test.mjs"],"gate_ids":["ROUTE-05"]}},
+    {"id":"INVC-01","primary":{"phase":30,"owner":"manifest-fingerprint","commands":["node --test tests/router.freshness.test.mjs"],"gate_ids":["INVC-01"]}},
+    {"id":"INVC-02","primary":{"phase":30,"owner":"cache-epoch","commands":["node --test tests/router.cache.test.mjs"],"gate_ids":["INVC-02"]}},
+    {"id":"INVC-03","primary":{"phase":30,"owner":"calibration-epoch","commands":["node --test tests/router.calibration-epoch.test.mjs"],"gate_ids":["INVC-03"]}},
+    {"id":"INVC-04","primary":{"phase":30,"owner":"watcher-noise","commands":["node --test tests/router.registry-watcher.test.mjs"],"gate_ids":["INVC-04"]}},
+    {"id":"INVC-05","primary":{"phase":30,"owner":"watcher-lifecycle","commands":["node --test tests/router.inventory-mutations.test.mjs"],"gate_ids":["INVC-05"]}},
+    {"id":"CALIB-01","primary":{"phase":33,"owner":"shadow-outcomes","commands":["node --test tests/router.shadow-log.e2e.test.mjs"],"gate_ids":["CALIB-01"]}},
+    {"id":"CALIB-02","primary":{"phase":33,"owner":"cache-hit-exclusion","commands":["node --test tests/router.shadow-log.test.mjs"],"gate_ids":["CALIB-02"]}},
+    {"id":"CALIB-03","primary":{"phase":34,"owner":"bayesian-thresholds","commands":["node --test tests/router.auto-calibration.test.mjs"],"gate_ids":["CALIB-03"]}},
+    {"id":"CALIB-04","primary":{"phase":34,"owner":"calibration-storage","commands":["node --test tests/router.auto-calibration.lifecycle.test.mjs"],"gate_ids":["CALIB-04"]}},
+    {"id":"CALIB-05","primary":{"phase":33,"owner":"hook-coexistence","commands":["node --test tests/router.coexistence.test.mjs"],"gate_ids":["CALIB-05"]}},
+    {"id":"PARITY-01","primary":{"phase":31,"owner":"runtime-detection","commands":["node --test tests/router.runtime-tagging.test.mjs"],"gate_ids":["PARITY-01"]}},
+    {"id":"PARITY-02","primary":{"phase":31,"owner":"runtime-isolation","commands":["node --test tests/router.telemetry.test.mjs"],"gate_ids":["PARITY-02"]}},
+    {"id":"PARITY-03","primary":{"phase":32,"owner":"runtime-local-routing","commands":["node --test tests/router.phase32-cross-runtime.test.mjs"],"gate_ids":["PARITY-03"]}},
+    {"id":"PARITY-04","primary":{"phase":32,"owner":"cross-runtime-equivalence","commands":["node --test tests/router.phase32-cross-runtime.test.mjs"],"gate_ids":["PARITY-04"]}},
+    {"id":"PROJ-01","primary":{"phase":35,"owner":"project-discovery","commands":["node --test tests/router.project-routing.e2e.test.mjs"],"gate_ids":["PROJ-01"]}},
+    {"id":"PROJ-02","primary":{"phase":35,"owner":"cwd-routing","commands":["node --test tests/router.project-routing.test.mjs"],"gate_ids":["PROJ-02"]}},
+    {"id":"PROJ-03","primary":{"phase":35,"owner":"project-epoch","commands":["node --test tests/router.project-routing.e2e.test.mjs"],"gate_ids":["PROJ-03"]}},
+    {"id":"REL-08","primary":{"phase":36,"owner":"installed-runtime","commands":["node --test tests/router.production-verifier-e2e.test.mjs"],"gate_ids":["REL-08"]}},
+    {"id":"REL-09","primary":{"phase":36,"owner":"cold-start","commands":["node --test tests/router.fresh-onboarding.test.mjs"],"gate_ids":["REL-09"]}},
+    {"id":"REL-10","primary":{"phase":37.1,"owner":"watcher-cleanup","commands":["node --test tests/router.lifecycle-recovery.test.mjs"],"gate_ids":["REL-10"]}}
+  ],
+  "stages": [
+    {"id":"inventory","files":["tests/router.freshness.test.mjs","tests/router.registry-watcher.test.mjs","tests/router.inventory-mutations.test.mjs"],"gate_ids":["INVC-01","INVC-02","INVC-03","INVC-04","INVC-05"]},
+    {"id":"routing","files":["tests/router.schema-v4-routing.test.mjs","tests/router.route-targets.test.mjs","tests/router.resolve-tie-lint.test.mjs","tests/router.phase32-cross-runtime.test.mjs"],"gate_ids":["ROUTE-01","ROUTE-02","ROUTE-03","ROUTE-04","ROUTE-05","PARITY-01","PARITY-03","PARITY-04"]},
+    {"id":"telemetry","files":["tests/router.runtime-tagging.test.mjs","tests/router.telemetry.test.mjs","tests/router.shadow-log.e2e.test.mjs","tests/router.shadow-log.test.mjs","tests/router.auto-calibration.test.mjs","tests/router.auto-calibration.lifecycle.test.mjs","tests/router.watcher-telemetry-ingest.test.mjs","tests/router.evidence-persistence.test.mjs"],"gate_ids":["CALIB-01","CALIB-02","CALIB-03","CALIB-04","CALIB-05","PARITY-02"]},
+    {"id":"project","files":["tests/router.project-routing.test.mjs","tests/router.project-routing.e2e.test.mjs"],"gate_ids":["PROJ-01","PROJ-02","PROJ-03"]},
+    {"id":"lifecycle","files":["tests/router.lifecycle.test.mjs","tests/router.installer-coexistence.test.mjs","tests/router.lifecycle-recovery.test.mjs","tests/router.fresh-onboarding.test.mjs"],"gate_ids":["REL-09","REL-10"]},
+    {"id":"installed","files":["tests/router.deployed-bundle.test.mjs","tests/router.production-verifier-e2e.test.mjs","tests/router.phase26-dual-runtime.test.mjs"],"gate_ids":["REL-08"]},
+    {"id":"latency","files":["tests/router.phase26-performance.test.mjs"],"gate_ids":["warm-p95","hard-route-ceiling","context-budget"],"isolated":true}
+  ]
+}
