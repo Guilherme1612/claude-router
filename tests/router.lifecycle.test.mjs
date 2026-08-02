@@ -340,6 +340,22 @@ test('uninstall retains a user-modified owned file', async () => {
   } finally { await cleanup(f); }
 });
 
+test('uninstall preserves hooks that only mention or prefix the router path', async () => {
+  const f = fixture();
+  try {
+    await installRouter(f.options);
+    const settings = JSON.parse(readFileSync(f.settingsPath, 'utf8'));
+    const unrelated = [
+      { hooks: [{ type: 'command', command: `"${process.execPath}" "/tmp/user-hook.mjs" "${f.routerPath}"` }] },
+      { hooks: [{ type: 'command', command: `"${process.execPath}" "${f.routerPath}.backup"` }] },
+    ];
+    settings.hooks.UserPromptSubmit.push(...unrelated);
+    writeFileSync(f.settingsPath, JSON.stringify(settings));
+    await uninstallRouter(f.options);
+    assert.deepEqual(JSON.parse(readFileSync(f.settingsPath, 'utf8')).hooks.UserPromptSubmit, unrelated);
+  } finally { await cleanup(f); }
+});
+
 test('malformed ownership manifest fails closed without mutations', async () => {
   const f = fixture({ trackControllers: true });
   try {

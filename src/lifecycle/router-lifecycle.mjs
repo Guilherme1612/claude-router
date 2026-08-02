@@ -4,7 +4,7 @@ import {
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
 import { reconcileCandidate } from '../registry/reconcile.mjs';
@@ -159,16 +159,22 @@ function readJson(file, fallback, label = file) {
 
 function routerEntry(nodeBinary, routerPath, timeout = 5, matcher = null, runtime = 'claude') {
   return {
+    managed_by: 'claude-router',
+    router_path: routerPath,
     ...(matcher ? { matcher } : {}),
     hooks: [{ type: 'command', command: `ROUTER_RUNTIME=${runtime} "${nodeBinary}" "${routerPath}"`, timeout }],
   };
 }
 
 function isRouterEntry(group, routerPath) {
+  if (group?.managed_by === 'claude-router' && group?.router_path === routerPath) return true;
   return Array.isArray(group?.hooks) && group.hooks.some((hook) => (
     hook?.type === 'command'
     && typeof hook.command === 'string'
-    && hook.command.includes(routerPath)
+    && (() => {
+      const match = hook.command.match(/^(?:ROUTER_RUNTIME=(?:claude|codex) )?"([^"]+)" "([^"]+)"$/);
+      return !!match && /^node(?:\.exe)?$/.test(basename(match[1])) && match[2] === routerPath;
+    })()
   ));
 }
 
