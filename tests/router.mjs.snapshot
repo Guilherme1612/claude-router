@@ -2317,7 +2317,11 @@ function bumpEvolveTrigger() {
   renameSync(tmp, TRIGGER);
   if (n % EVOLVE_TRIGGER_N === 0) {
     try {
-      spawn(process.execPath, [WORKER_PATH], { detached: true, stdio: 'ignore' }).unref();
+      spawn(process.execPath, [WORKER_PATH], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, ROUTER_RUNTIME: RUNTIME },
+      }).unref();
     } catch {}
   }
 }

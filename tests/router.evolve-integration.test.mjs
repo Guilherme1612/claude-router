@@ -12,6 +12,8 @@ import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import { createGzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
+import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const EVOLVE = await import('/Users/guilherme/.claude/hooks/router.evolve.mjs');
 const { runWorker, printStatus } = EVOLVE;
@@ -324,5 +326,22 @@ test('worker: writes a v1-mode-map schema_version 2 entry on apply (atomic bump)
       `schema_version must be 1 or 2; got ${mm.schema_version}`);
   } finally {
     cleanup(sb.dir);
+  }
+});
+
+test('worker: Codex defaults never resolve into Claude state', () => {
+  const home = mkdtempSync(join(tmpdir(), 'router-evolve-runtime-'));
+  try {
+    const workerPath = join(home, 'router.evolve.mjs');
+    writeFileSync(workerPath, readFileSync(new URL('./router.evolve.mjs.snapshot', import.meta.url)));
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const worker = await import(${JSON.stringify(pathToFileURL(workerPath).href)});
+      process.stdout.write(worker.ROUTER_HOOK_HREF);
+    `], { env: { ...process.env, HOME: home, ROUTER_RUNTIME: 'codex' }, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, new URL(`file://${home}/.codex/hooks/router.mjs`).href);
+    assert.equal(result.stdout.includes('/.claude/'), false);
+  } finally {
+    cleanup(home);
   }
 });

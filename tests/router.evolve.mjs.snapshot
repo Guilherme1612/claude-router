@@ -610,8 +610,10 @@ export { pathToFileURL, homedir, mkdtempSync, mkdirSync };
 // --- Path constants --------------------------------------------------------
 
 const _HOME = homedir();
-const _HOOKS_DIR = join(_HOME, '.claude', 'hooks');
-const _ROUTER_DIR = join(_HOME, '.claude', 'router');
+const _RUNTIME = process.env.ROUTER_RUNTIME === 'codex' ? 'codex' : 'claude';
+const _RUNTIME_DIR = join(_HOME, `.${_RUNTIME}`);
+const _HOOKS_DIR = join(_RUNTIME_DIR, 'hooks');
+const _ROUTER_DIR = join(_RUNTIME_DIR, 'router');
 const _MANIFEST = join(_ROUTER_DIR, 'claude-inventory-manifest.json');
 const _MODE_MAP = join(_ROUTER_DIR, 'mode-map.json');
 const _WEIGHTS_FILE = join(_ROUTER_DIR, 'weights.json');
@@ -855,5 +857,5 @@ if (_isMain()) {
 // the url construction works. The actual usage in Plan 03-02 is awaited at
 // runtime so a router.mjs load failure produces a no-op worker (D-16: NOT a
 // re-implementation).
-const ROUTER_HOOK_URL = pathToFileURL(join(homedir(), '.claude', 'hooks', 'router.mjs')).href;
+const ROUTER_HOOK_URL = pathToFileURL(_HOOK_PATH).href;
 export const ROUTER_HOOK_HREF = ROUTER_HOOK_URL;
