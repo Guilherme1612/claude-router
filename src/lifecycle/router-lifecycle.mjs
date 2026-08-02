@@ -74,22 +74,22 @@ export function resolveInstallGeneration(options, { repair = true } = {}) {
 }
 
 function updateManagedBinding(p, options, enabled) {
-  updateBindingAt(p.settingsPath, 'UserPromptSubmit', p.routerPath, options, enabled, 5);
-  updateBindingAt(p.settingsPath, 'UserPromptExpansion', p.routerPath, options, enabled, 5);
-  updateBindingAt(p.settingsPath, 'PostToolUse', p.routerPath, options, enabled, 5, 'Skill|Agent|Task');
-  updateBindingAt(p.settingsPath, 'PostToolUseFailure', p.routerPath, options, enabled, 5, 'Skill|Agent|Task');
-  updateBindingAt(p.settingsPath, 'Stop', p.routerPath, options, enabled, 5);
+  updateBindingAt(p.settingsPath, 'UserPromptSubmit', p.routerPath, options, enabled, 5, null, 'claude');
+  updateBindingAt(p.settingsPath, 'UserPromptExpansion', p.routerPath, options, enabled, 5, null, 'claude');
+  updateBindingAt(p.settingsPath, 'PostToolUse', p.routerPath, options, enabled, 5, 'Skill|Agent|Task', 'claude');
+  updateBindingAt(p.settingsPath, 'PostToolUseFailure', p.routerPath, options, enabled, 5, 'Skill|Agent|Task', 'claude');
+  updateBindingAt(p.settingsPath, 'Stop', p.routerPath, options, enabled, 5, null, 'claude');
 }
 
 function updateCodexBinding(p, options, enabled) {
-  updateBindingAt(p.codexHooksPath, 'UserPromptSubmit', p.codexRouterPath, options, enabled, 10);
+  updateBindingAt(p.codexHooksPath, 'UserPromptSubmit', p.codexRouterPath, options, enabled, 10, null, 'codex');
 }
 
-function updateBindingAt(settingsPath, event, routerPath, options, enabled, timeout, matcher = null) {
+function updateBindingAt(settingsPath, event, routerPath, options, enabled, timeout, matcher = null, runtime = 'claude') {
   const settings = validatedSettings(settingsPath);
   const groups = settings.hooks[event] || [];
   const filtered = groups.filter(group => !isRouterEntry(group, routerPath));
-  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, routerPath, timeout, matcher));
+  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, routerPath, timeout, matcher, runtime));
   if (filtered.length) settings.hooks[event] = filtered;
   else delete settings.hooks[event];
   durableAtomicWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n');
@@ -157,10 +157,10 @@ function readJson(file, fallback, label = file) {
   }
 }
 
-function routerEntry(nodeBinary, routerPath, timeout = 5, matcher = null) {
+function routerEntry(nodeBinary, routerPath, timeout = 5, matcher = null, runtime = 'claude') {
   return {
     ...(matcher ? { matcher } : {}),
-    hooks: [{ type: 'command', command: `"${nodeBinary}" "${routerPath}"`, timeout }],
+    hooks: [{ type: 'command', command: `ROUTER_RUNTIME=${runtime} "${nodeBinary}" "${routerPath}"`, timeout }],
   };
 }
 
@@ -603,14 +603,14 @@ export async function installRouter(options) {
     if (!bindingExists) {
       settings.hooks.UserPromptSubmit = [
         ...groups,
-        routerEntry(options.nodeBinary || process.execPath, p.routerPath),
+        routerEntry(options.nodeBinary || process.execPath, p.routerPath, 5, null, 'claude'),
       ];
       atomicWrite(p.settingsPath, JSON.stringify(settings, null, 2) + '\n');
     }
     if (!codexBindingExists) {
       codexSettings.hooks.UserPromptSubmit = [
         ...codexGroups,
-        routerEntry(options.nodeBinary || process.execPath, p.codexRouterPath, 10),
+        routerEntry(options.nodeBinary || process.execPath, p.codexRouterPath, 10, null, 'codex'),
       ];
       atomicWrite(p.codexHooksPath, JSON.stringify(codexSettings, null, 2) + '\n');
     }

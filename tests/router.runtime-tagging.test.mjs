@@ -21,8 +21,14 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
-const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
+const fixtureRoot = mkdtempSync(join(tmpdir(), 'router-runtime-tagging-'));
+const HOOK = join(fixtureRoot, 'router.mjs');
+writeFileSync(HOOK, readFileSync(new URL('./router.mjs.snapshot', import.meta.url)));
+writeFileSync(join(fixtureRoot, 'router.evolve.mjs'), readFileSync(new URL('./router.evolve.mjs.snapshot', import.meta.url)));
+process.on('exit', () => rmSync(fixtureRoot, { recursive: true, force: true }));
 const mod = await import(HOOK);
 const { RUNTIME, RUNTIME_CONFIG_DIR, cacheKey, telemetryEntryFromState } = mod;
 
@@ -118,4 +124,10 @@ test('detection: out-of-enum ROUTER_RUNTIME clamps to claude (fail-open)', () =>
   const r = probeRuntime({ ROUTER_RUNTIME: 'bogus' });
   assert.equal(r.status, 0, r.err);
   assert.equal(r.out, 'claude', "ROUTER_RUNTIME='bogus' must clamp to claude (enum-clamped fail-open)");
+});
+
+test('detection: ambient CODEX_HOME cannot misroute the Claude hook', () => {
+  const r = probeRuntime({ CODEX_HOME: '/tmp/custom-codex' });
+  assert.equal(r.status, 0, r.err);
+  assert.equal(r.out, 'claude');
 });

@@ -75,7 +75,7 @@ if (!isMain() || proposalCommands.has(process.argv[2])) {
 // detectRuntime() runs ONCE at module load and caches into RUNTIME (D-01) —
 // zero hot-path IO, zero per-prompt branching. Precedence: (1) ROUTER_RUNTIME
 // env override wins when exactly 'claude'|'codex' (D-04); (2) else a codex
-// marker (CODEX_HOME set, or argv[1] path under .codex/) → 'codex'; (3) else
+// executable path under .codex/ → 'codex'; (3) else
 // default 'claude' (deterministic fail-open). Out-of-enum ROUTER_RUNTIME
 // clamps to 'claude' (T-31-01) — an unbounded string never reaches path
 // construction. Uses only process.env/process.argv string checks already in
@@ -84,7 +84,7 @@ export function detectRuntime() {
   try {
     const override = process.env.ROUTER_RUNTIME;
     if (override === 'claude' || override === 'codex') return override;
-    if (process.env.CODEX_HOME || String(process.argv[1] || '').includes('.codex/')) return 'codex';
+    if (String(process.argv[1] || '').includes('.codex/')) return 'codex';
     return 'claude';
   } catch {
     return 'claude';
