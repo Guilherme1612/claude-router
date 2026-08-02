@@ -78,7 +78,10 @@ export function deriveInvalidationInput(built, lifecycle = {}) {
 // re-ingests from the start — safe because a rotated file no longer contains
 // the pre-rotation records already stored. Privacy-denied and non-canary-
 // relevant records are skipped by telemetryRecordToEvidence before any append.
-export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId, candidateVersion = null }) {
+export function ingestTelemetryEvidence({
+  store, telemetryPath, outcomePath, cursorPath, projectId,
+  candidateVersion = null, epoch = null,
+}) {
   let stat;
   try {
     stat = statSync(telemetryPath);
@@ -107,6 +110,18 @@ export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, proj
   const lastNewline = remaining.lastIndexOf(0x0a);
   const complete = lastNewline >= 0 ? remaining.subarray(0, lastNewline + 1) : Buffer.alloc(0);
   const lines = complete.toString('utf8').split('\n');
+  const outcomes = new Map();
+  try {
+    for (const line of readFileSync(outcomePath, 'utf8').split('\n')) {
+      if (!line) continue;
+      try {
+        const value = JSON.parse(line);
+        if (/^[a-f0-9]{64}$/.test(value?.prompt_signature || '')) {
+          outcomes.set(`${value.prompt_signature}:${value.runtime || ''}`, value.outcome || value.outcome_kind);
+        }
+      } catch { /* skip malformed outcome lines */ }
+    }
+  } catch { /* no correlated outcome file means no canary evidence */ }
   let ingested = 0;
   for (const line of lines) {
     if (line.length === 0) continue;
@@ -116,7 +131,12 @@ export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, proj
     } catch {
       continue;
     }
-    const result = telemetryRecordToEvidence(record, { candidate_version: candidateVersion });
+    const outcome = outcomes.get(`${record.prompt_signature}:${record.runtime || ''}`) || null;
+    const result = telemetryRecordToEvidence(record, {
+      candidate_version: candidateVersion,
+      epoch,
+      outcome,
+    });
     if (result.status !== 'accepted') continue;
     const appended = store.append(result.signal, { project_id: projectId });
     if (appended.status === 'stored') ingested += 1;
@@ -782,10 +802,17 @@ export function createRegistryReconciler(config, dependencies = {}) {
               ingestTelemetryEvidence({
                 store,
                 telemetryPath: config.telemetry_path || join(config.activation_root, 'telemetry.jsonl'),
+                outcomePath: config.outcome_path || join(config.activation_root, 'shadow-log.jsonl'),
                 cursorPath: join(config.activation_root, 'evidence', 'ingest-cursor.json'),
                 projectId: config.scope_id || config.scope || 'global',
+                candidateVersion: report.candidate_fingerprint,
+                epoch: report.candidate_fingerprint,
               });
-              const window = store.window({ project_id: config.scope_id || config.scope || 'global' });
+              const window = store.window({
+                project_id: config.scope_id || config.scope || 'global',
+                candidate_version: report.candidate_fingerprint,
+                epoch: report.candidate_fingerprint,
+              });
               if (window.sufficient !== true) {
                 activation = { activation_status: 'preserved', reason_code: 'insufficient_evidence_samples' };
               } else {

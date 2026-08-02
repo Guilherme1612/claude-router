@@ -20,6 +20,9 @@ function validRecord(i) {
     guards_fired: [],
     latency_ms: 1.2,
     selected_route: { id: 'gsd-debug', invoke_kind: 'slash' },
+    outcome: 'accepted',
+    candidate_version: 'steady-state-v1',
+    epoch: 'epoch-v1',
   };
 }
 
@@ -169,11 +172,36 @@ test('ingestTelemetryEvidence waits for a partial line to be completed', () => {
   }
 });
 
+test('ingestTelemetryEvidence requires a correlated outcome and matching candidate epoch', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-ingest-correlated-'));
+  try {
+    const store = createPersistentEvidenceStore({ root: join(root, 'evidence') });
+    const telemetryPath = join(root, 'telemetry.jsonl');
+    const outcomePath = join(root, 'shadow-log.jsonl');
+    const cursorPath = join(root, 'evidence', 'ingest-cursor.json');
+    const record = { ...validRecord(0), outcome: null, candidate_version: 'candidate-v1', epoch: 'epoch-v1', runtime: 'claude' };
+    writeFileSync(telemetryPath, `${JSON.stringify(record)}\n`);
+    writeFileSync(outcomePath, `${JSON.stringify({ prompt_signature: record.prompt_signature, runtime: 'claude', outcome: 'accepted' })}\n`);
+    assert.equal(ingestTelemetryEvidence({
+      store, telemetryPath, outcomePath, cursorPath, projectId: 'global',
+      candidateVersion: 'candidate-v1', epoch: 'epoch-v1',
+    }).ingested, 1);
+    assert.equal(store.window({ project_id: 'global', candidate_version: 'other', epoch: 'epoch-v1' }).sample_count, 0);
+    assert.equal(store.window({ project_id: 'global', candidate_version: 'candidate-v1', epoch: 'epoch-v1' }).sample_count, 1);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('EVO-05: watcher canary path reached with real telemetry + real persistent store', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-ingest-e2e-'));
   try {
     // 35 routed telemetry records -> ingestion makes window.sufficient=true.
-    writeFileSync(join(root, 'telemetry.jsonl'), Array.from({ length: 35 }, (_, i) => JSON.stringify(validRecord(i))).join('\n') + '\n');
+    writeFileSync(join(root, 'telemetry.jsonl'), Array.from({ length: 35 }, (_, i) => JSON.stringify({
+      ...validRecord(i),
+      candidate_version: 'candidate-fp-1234567890',
+      epoch: 'candidate-fp-1234567890',
+    })).join('\n') + '\n');
     const { deps, canaryCalls } = makeCanaryDeps(() => ({ status: 'promoted', reason_code: 'quality_improved', active_version: 'v1-new0000000000a' }));
     const reconcile = createTestRegistryReconciler(baseConfig(root), deps);
     await reconcile({ diff: { events: [], diagnostics: [] } });

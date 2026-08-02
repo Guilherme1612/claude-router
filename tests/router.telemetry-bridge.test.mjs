@@ -16,7 +16,9 @@ function baseTelemetryRecord(overrides = {}) {
     graphify_queried: false,
     guards_fired: ['route_selected'],
     downstream_invocations: null,
-    outcome: null,
+    outcome: 'accepted',
+    candidate_version: 'steady-state-v1',
+    epoch: 'epoch-v1',
     latency_ms: 12,
     ...overrides,
   };
@@ -97,23 +99,24 @@ test('Task1.3 fixture_class classification across confidence_tier + invoke_kind'
   assert.equal(noMode.reason_code, 'no_route');
 });
 
-test('Task1.4 verdict is always success (v1 policy)', async () => {
+test('Task1.4 verdict requires a correlated outcome', async () => {
   const { telemetryRecordToEvidence } = await import(bridgeUrl);
   const result = telemetryRecordToEvidence(baseTelemetryRecord({ outcome: null }));
-  assert.equal(result.status, 'accepted');
-  assert.equal(result.signal.verdict, 'success');
-  // even when telemetry outcome is null, verdict stays success
-  const result2 = telemetryRecordToEvidence(baseTelemetryRecord({ outcome: null, confidence_tier: 'medium' }));
-  assert.equal(result2.signal.verdict, 'success');
+  assert.equal(result.status, 'skipped');
+  assert.equal(result.reason_code, 'uncorrelated_outcome');
+  const rejected = telemetryRecordToEvidence(baseTelemetryRecord({ outcome: 'rejected' }));
+  assert.equal(rejected.signal.verdict, 'regression');
 });
 
 test('Task1.5 candidate_version is a parameter with steady-state-v1 default', async () => {
   const { telemetryRecordToEvidence } = await import(bridgeUrl);
-  const withVersion = telemetryRecordToEvidence(baseTelemetryRecord(), { candidate_version: 'v1-canary-abc' });
+  const withVersion = telemetryRecordToEvidence(baseTelemetryRecord({ candidate_version: 'v1-canary-abc' }), { candidate_version: 'v1-canary-abc' });
   assert.equal(withVersion.status, 'accepted');
   assert.equal(withVersion.signal.candidate_version, 'v1-canary-abc');
   const defaultVersion = telemetryRecordToEvidence(baseTelemetryRecord());
   assert.equal(defaultVersion.signal.candidate_version, 'steady-state-v1');
+  const mismatch = telemetryRecordToEvidence(baseTelemetryRecord(), { candidate_version: 'other' });
+  assert.equal(mismatch.reason_code, 'candidate_epoch_mismatch');
 });
 
 test('Task1.6 bridge never emits a field outside the FIELDS set', async () => {
@@ -154,7 +157,7 @@ test('WR-02 evidence: runtime/epoch bound at the evidence trust boundary', async
   assert.equal(midEpoch.status, 'denied');
   assert.equal(midEpoch.reason_code, 'invalid_epoch');
   // Valid enum runtime is accepted and forwarded.
-  const valid = telemetryRecordToEvidence(baseTelemetryRecord({ runtime: 'codex', epoch: null }));
+  const valid = telemetryRecordToEvidence(baseTelemetryRecord({ runtime: 'codex' }));
   assert.equal(valid.status, 'accepted');
   assert.equal(valid.signal.runtime, 'codex');
 });

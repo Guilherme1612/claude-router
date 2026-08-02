@@ -50,7 +50,13 @@ function deriveReasonCode(record) {
 // Returns either { status: 'skipped', reason_code } (non-canary-relevant) or
 // the result of validateEvidenceEnvelope(envelope) ({ status: 'accepted', signal }
 // or { status: 'denied', reason_code }).
-export function telemetryRecordToEvidence(record, { candidate_version = null } = {}) {
+function verdictForOutcome(outcome) {
+  if (['accepted', 'completed', 'actually_used', 'helpful_reuse'].includes(outcome)) return 'success';
+  if (['rejected', 'overridden', 'replaced', 'corrected', 'retried', 'abandoned'].includes(outcome)) return 'regression';
+  return null;
+}
+
+export function telemetryRecordToEvidence(record, { candidate_version = null, epoch = null, outcome = null } = {}) {
   if (!record || typeof record !== 'object') return { status: 'skipped', reason_code: 'invalid_record' };
   // Privacy-denied records never become canary evidence (RESEARCH.md Pitfall 3).
   // The hook already nulls prompt_signature for these; the bridge skips them
@@ -59,6 +65,14 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
   const fixture_class = classifyFixtureClass(record);
   if (!fixture_class) return { status: 'skipped', reason_code: 'not_canary_evidence' };
   if (!record.suggested_mode) return { status: 'skipped', reason_code: 'no_route' };
+  const boundCandidate = candidate_version || record.candidate_version;
+  const boundEpoch = epoch || record.epoch;
+  if (!boundCandidate || record.candidate_version !== boundCandidate
+      || !boundEpoch || record.epoch !== boundEpoch) {
+    return { status: 'skipped', reason_code: 'candidate_epoch_mismatch' };
+  }
+  const verdict = verdictForOutcome(outcome || record.outcome);
+  if (!verdict) return { status: 'skipped', reason_code: 'uncorrelated_outcome' };
 
   const envelope = {
     timestamp_ms: record.ts,
@@ -68,9 +82,9 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
     reason_code: deriveReasonCode(record),
     fixture_class,
     latency_us: Math.round((record.latency_ms || 0) * 1000),
-    candidate_version: candidate_version || 'steady-state-v1',
+    candidate_version: boundCandidate,
     policy_version: POLICY_VERSION,
-    verdict: 'success', // v1: telemetry outcome is null; regression detected by calibration gates
+    verdict,
     prompt_signature: record.prompt_signature ?? null,
     // D-06 / PARITY-02 (Phase-31 bump): forward the hook's runtime tag (+epoch
     // indicator) so a runtime-tagged telemetry line survives ingest. The
@@ -83,7 +97,7 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
     // forwards null rather than fabricating a value. The schema field stays — the
     // OUTCOME_FIELDS/FIELDS bumps are deliberate and enforcement-tested — until a
     // real producer (e.g. the Phase-30 manifest fingerprint) backfills it.
-    epoch: record.epoch !== undefined && record.epoch !== null ? String(record.epoch) : null,
+    epoch: String(boundEpoch),
   };
   return validateEvidenceEnvelope(envelope);
 }
@@ -91,7 +105,7 @@ export function telemetryRecordToEvidence(record, { candidate_version = null } =
 // Bulk-load a telemetry JSONL file. Calls onRecord(result) per record (accepted,
 // skipped, or denied). Parse failures yield { status: 'skipped', reason_code:
 // 'parse_error' }. Used by trigger surfaces to ingest telemetry off the hot path.
-export function ingestTelemetryFile(path, { candidate_version = null, onRecord = () => {} } = {}) {
+export function ingestTelemetryFile(path, { candidate_version = null, epoch = null, onRecord = () => {} } = {}) {
   const contents = readFileSync(path, 'utf8');
   const lines = contents.split('\n');
   for (const line of lines) {
@@ -103,6 +117,6 @@ export function ingestTelemetryFile(path, { candidate_version = null, onRecord =
       onRecord({ status: 'skipped', reason_code: 'parse_error' });
       continue;
     }
-    onRecord(telemetryRecordToEvidence(record, { candidate_version }));
+    onRecord(telemetryRecordToEvidence(record, { candidate_version, epoch }));
   }
 }

@@ -82,6 +82,11 @@ export function computeWeightedSamples(observations, { now, halfLifeMs = HALF_LI
   }, 0);
 }
 
+function matchesEvidenceTarget(record, options) {
+  return (!options.candidate_version || record.signal.candidate_version === options.candidate_version)
+    && (!options.epoch || record.signal.epoch === options.epoch);
+}
+
 function deepFreeze(value) {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
     for (const nested of Object.values(value)) deepFreeze(nested);
@@ -161,7 +166,8 @@ export function createEvidenceStore({ now = Date.now, minimum_samples = MINIMUM_
       const current = now();
       const observations = records.filter((record) => {
         const age = current - record.signal.timestamp_ms;
-        return age >= 0 && age <= MAX_RETENTION_MS && matchesScope(record, options);
+        return age >= 0 && age <= MAX_RETENTION_MS
+          && matchesScope(record, options) && matchesEvidenceTarget(record, options);
       });
       const weighted_samples = computeWeightedSamples(observations, { now: current, halfLifeMs: HALF_LIFE_MS });
       const sufficient = observations.length >= minimum_samples;
@@ -260,7 +266,8 @@ export function createPersistentEvidenceStore({ root, now = Date.now, minimum_sa
       }
       const observations = records.filter((record) => {
         const age = current - record.signal.timestamp_ms;
-        return age >= 0 && age <= MAX_RETENTION_MS && matchesScope(record, options);
+        return age >= 0 && age <= MAX_RETENTION_MS
+          && matchesScope(record, options) && matchesEvidenceTarget(record, options);
       });
       const weighted_samples = computeWeightedSamples(observations, { now: current, halfLifeMs: HALF_LIFE_MS });
       const sufficient = observations.length >= minimum_samples;
