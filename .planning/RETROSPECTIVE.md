@@ -186,3 +186,47 @@ v1.3.1 release-gate hardening (deferred items above). Run `/gsd-new-milestone`.
 ### Next Milestone
 
 v1.3.1/v1.5 — release-gate hardening (deferred items above) + maintenance risks from v1.4. Run `/gsd-new-milestone`.
+
+## v1.5 — Framework-Neutral Adaptive Routing
+
+**Shipped:** 2026-08-02  
+**Phases:** 9 (30–36, 32.1, 37.1) | **Plans:** 27 | **Tasks:** 21
+
+### What Was Built
+
+- Content-addressed manifest epochs, watcher noise narrowing, runtime-tagged telemetry, and Claude/Codex parity.
+- Framework-neutral resolve lists with guard-hole closure, strict tie-lint, per-project routing, shadow outcomes, and per-install calibration.
+- Live release-gate hardening: safe release-tuple preservation, installed production fixtures, lifecycle cleanup, one owned watcher, and verified release authority.
+
+### What Worked
+
+- Reconciliation against live `.planning` projections found and removed stale phase metadata before archival.
+- Independent source and installed gates caught the deployed lifecycle cleanup gap; the fix was small and validated by the 31/31 coexistence matrix.
+- Preserving a verified tuple when a candidate has no safe dispatch target maintained the safety boundary while still completing release verification.
+
+### What Was Inefficient
+
+- Repeated installer restarts exposed duplicate watcher processes, requiring exact-PID cleanup and a final process-count check.
+- Focused phase suites were green while the full release runner still exposed an uninstall-directory leak; the aggregate gate should run earlier in future closeouts.
+- Roadmap projections for inserted closure phases drifted from disk state and needed explicit checklist reconciliation.
+
+### Patterns Established
+
+- Treat `init.manager`, phase verification, audit evidence, and the installed release tuple as one closeout contract.
+- Include every deployed test-helper parent directory in installer ownership manifests so uninstall can prune deepest-first.
+- Keep recommendation-only candidates visible but non-dispatchable, and preserve known-good release authority rather than fabricating safety metadata.
+
+### Key Lessons
+
+- A passing focused suite is not sufficient for milestone completion; run the aggregate release runner and installed gates.
+- Empty phase placeholders can invalidate dependency projections even when implementation is complete; remove them through canonical phase tooling.
+- Safety-preserving activation can be the correct completed outcome when the candidate lacks trustworthy route targets.
+
+### Tech Debt Carried Forward
+
+- Telemetry epoch presentation and distributed lifecycle evidence remain maintenance items.
+- FUT-05 through FUT-11 remain deferred to v2 as recorded in the requirements archive.
+
+### Next Milestone
+
+Define the next release with `/gsd-new-milestone`.

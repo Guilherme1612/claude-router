@@ -2,46 +2,44 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Framework-Neutral Adaptive Routing
-current_phase: 37.1
-current_phase_name: "Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence"
-status: complete
-stopped_at: Phase 37.1 complete; real-home activation remains safely quarantined
-last_updated: "2026-08-02T09:05:00.000Z"
+current_phase: null
+status: Awaiting next milestone
+stopped_at: Milestone v1.5 complete; archive and tag closeout finished
+last_updated: "2026-08-02T12:25:52.593Z"
 last_activity: 2026-08-02
-last_activity_desc: Phase 37.1 runtime, watcher, strict-gate, and requirements evidence closure
+last_activity_desc: Milestone v1.5 completed and archived
 progress:
-  total_phases: 10
+  total_phases: 9
   completed_phases: 9
   total_plans: 27
   completed_plans: 27
   percent: 100
+current_phase_name: "Milestone v1.5 complete"
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-08-01)
+See: .planning/PROJECT.md (updated 2026-08-02)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** v1.5 milestone complete; release evidence archived in Phase 36
+**Current focus:** v1.5 milestone complete; define the next milestone with `gsd-new-milestone`
 
 ## Current Position
 
-Phase: 37.1 — Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence
-Plan: 01 complete
-Status: Complete
-Last activity: 2026-08-02 — Phase 37.1 runtime, watcher, strict-gate, and requirements evidence closure
-
-Progress: [████████████████████] 27/27 plans (100%)
+Phase: Milestone v1.5 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-02 — Milestone v1.5 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Previous milestone plans completed: 8 (v1.4, phases 27-29)
-- Current milestone plans completed: 26
-- Current milestone execution time: autonomous continuation completed 2026-08-01
+- Current milestone plans completed: 27
+- Current milestone execution time: autonomous closeout completed 2026-08-02
 
 **By Phase:**
 
@@ -50,10 +48,12 @@ Progress: [████████████████████] 27/27 p
 | 30. Manifest Fingerprint + Watcher Narrowing | 3 | 3 | complete |
 | 31. Runtime Tagging | 3 | 3 | complete |
 | 32. Intent-First Routing | 4 | 4 | complete |
+| 32.1. Review Closure | 4 | 4 | complete |
 | 33. Shadow-Log Observer | 3 | 3 | complete |
 | 34. Per-Install Auto-Calibration | 3 | 3 | complete |
 | 35. Per-Project Routing | 3 | 3 | complete |
 | 36. Release-Gate Cleanup | 3 | 3 | complete |
+| 37.1. Audit Gap Closure | 1 | 1 | complete |
 | 31 | 3 | - | - |
 | 32.1 | 4 | - | - |
 
@@ -118,7 +118,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- Live operator activation remains unavailable because the real-home candidate is safely quarantined by native-identity and hook-descriptor collisions; this is recorded, not bypassed.
+- The verified active release tuple remains authoritative when the current recommendation-only candidate has no safe dispatch targets; no unsafe promotion is attempted.
 - Calibration corpus carries two known low-tier misses; thresholds remain unchanged and sensitivity is recorded in Phase 36 evidence.
 
 ### Roadmap Evolution
@@ -126,6 +126,7 @@ None yet.
 - Phase 32.1 inserted after Phase 32: Phase-32 review closure: wire resolver into production hot path, runtime_commands parity on index path, tie-lint build gate, real hot-path perf test (URGENT)
 - Phase 37 added: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence
 - Phase 37.1 inserted after Phase 37: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence (URGENT)
+- Phase 37 removed: empty placeholder phase was reconciled into the completed 37.1 audit closure
 
 ## Deferred Items
 
@@ -138,16 +139,16 @@ None yet.
 | Advanced Routing | FUT-09 multi-intent / clarification triggers, boundary-aware substring matching | v2 | v1.5 requirements |
 | Advanced Routing | FUT-10 per-entry calibration | v2 (needs n≥200) | v1.5 requirements |
 | Advanced Routing | FUT-11 in-turn invocation tap | v2 (only if coexistence review passes) | v1.5 requirements |
-| Release | BLOCKER 2 — live-install release verification (REL-08) | Complete — Phase 36 | v1.5 roadmap |
-| Release | Orphaned watcher instances (REL-10) | Complete — Phase 36 | v1.5 roadmap |
-| Release | router.safety-release live-env failures (REL-10) | Complete — Phase 36 | v1.5 roadmap |
+| Release | BLOCKER 2 — live-install release verification (REL-08) | Complete — Phase 37.1 | v1.5 roadmap |
+| Release | Orphaned watcher instances (REL-10) | Complete — Phase 37.1 | v1.5 roadmap |
+| Release | router.safety-release live-env failures (REL-10) | Complete — Phase 37.1 | v1.5 roadmap |
 
 ## Session Continuity
 
-Last session: 2026-08-01T22:00:00+01:00
-Stopped at: Phase 36 complete; v1.5 release verified
+Last session: 2026-08-02T13:05:00+01:00
+Stopped at: Milestone v1.5 complete; archive and tag closeout finished
 Resume file: None
 
 ## Operator Next Steps
 
-- No next phase in v1.5. If desired, the next action is a separate v2 milestone or a targeted operator-activation investigation.
+- Start the next milestone with /gsd-new-milestone

@@ -8,7 +8,7 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.5 Framework-Neutral Adaptive Routing
+## Current Milestone: v1.5 Framework-Neutral Adaptive Routing (SHIPPED)
 
 **Goal:** Make the router choose the right locally-available capability by intent, not hardcoded framework names; calibrate per install instead of globally; stay consistent across Claude and Codex; react correctly when the inventory changes.
 
@@ -25,7 +25,7 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **All 3 phases (27–29) verified passed — 16/16 requirements satisfied, 101/101 milestone-focused tests pass, integration checker PASS, Nyquist fully compliant.** Milestone audit verdict `passed`. Remaining items are bounded maintenance risks (reverse-gap baseline maintenance, T_high sensitivity re-run on corpus change) plus pre-existing Phase 26 environment issues (lifecycle readiness timeout on real-home checkout, reinstall-verb teardown race, flaky perf suites under load, manifest hook-count drift). Evolution weight tuning (FUT-05..07) remains deferred — `signal_patterns` expansion was the safer primary lever and shipped.
 
-**v1.5 completed and release-verified on 2026-08-01.** Phases 30–36 passed their review, security, Nyquist, and verification gates; the assembled router passed the real-home install, cold-start, teardown, calibration, reverse-gap, and 1284-test baseline checks. Live operator activation remains explicitly unavailable because the real-home candidate is safely quarantined; no unsafe activation was forced.
+**v1.5 completed and release-verified on 2026-08-02.** Phases 30–36, 32.1, and 37.1 passed their review, security, Nyquist, verification, integration, and release gates. The installed controller is ready with one owned watcher, the active and known-good release tuple is healthy, and recommendation-only candidates are never promoted without safe dispatch targets.
 
 ## Last Milestone: v1.4 Coverage Completeness & Auto-Skill Routing Improvement (SHIPPED 2026-07-31)
 
@@ -89,6 +89,12 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Coverage audit-guard — atomic post-manifest typed coverage report, bi-directional orphan detection, strict CI failure with explicit baseline, fail-open one-line stale reminder — v1.4 (Phase 28, COV-01..05)
 - ✓ Mode-map curation — 18 lifecycle/design routes with live+synthetic validation and missing-MCP warning-only safety — v1.4 (Phase 29, MAP-01..03)
 - ✓ Signal patterns expansion — output-type-anchored patterns (1-6/entry), schema v3 contains semantics, canonical collision lint with explicit groups, thresholds re-derived to 0.591/0.291/0.191 — v1.4 (Phase 29, SIG-01..04)
+- ✓ Intent-first framework-neutral resolve lists and guard-hole closure — v1.5 (ROUTE-01..05)
+- ✓ Content-addressed inventory epochs, cache/calibration invalidation, and watcher noise narrowing — v1.5 (INVC-01..05)
+- ✓ Per-install calibration and privacy-safe suggestion outcomes — v1.5 (CALIB-01..05)
+- ✓ Claude/Codex runtime parity and runtime-local resolution — v1.5 (PARITY-01..04)
+- ✓ Cwd-scoped project routing and fingerprint participation — v1.5 (PROJ-01..03)
+- ✓ Live install, cold-start, lifecycle, and release-gate hardening — v1.5 (REL-08..10)
 
 ### Active
 
@@ -141,6 +147,8 @@ The approved design and implementation plan are:
 | Make runtime-aware resolve the sole production suggestion source | Prevent foreign or dead runtime capabilities from reaching injected context | ✓ Good |
 | Enforce tie/stale resolve-list lint at strict build time | Keep near-ties and unresolvable routes from shipping silently | ✓ Good |
 | Measure the live resolve-first hook path separately from the resolver helper | Ensure the latency gate certifies rendered production behavior, not only helper speed | ✓ Good |
+| Preserve a verified release tuple when a recommendation-only candidate has no safe dispatch target | Safety beats forced activation; the last-known-good compiled route remains authoritative | ✓ Good |
+| Treat deployed gate fixtures and helper-directory cleanup as installer-owned lifecycle state | Installed release evidence must be executable and uninstall must remove all owned artifacts | ✓ Good |
 
 ## Evolution
 
@@ -160,4 +168,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-01 after Phase 32.1*
+*Last updated: 2026-08-02 after v1.5 milestone*

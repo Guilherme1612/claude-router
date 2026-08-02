@@ -1,6 +1,6 @@
 ---
 phase: 30-foundation-manifest-fingerprint-watcher-narrowing
-verified: 2026-08-01T00:00:00Z
+verified: 2026-08-02T12:18:00Z
 status: passed
 score: 16/16 must-haves verified
 behavior_unverified: 0
@@ -115,5 +115,10 @@ No gaps found. Phase goal achieved: the content-sha256 fingerprint epoch replace
 
 ---
 
-_Verified: 2026-08-01T00:00:00Z_
+## Fresh Verification Rerun — 2026-08-02
+
+- `node --test tests/router.build-manifest.test.mjs tests/router.cache.test.mjs tests/router.mutation-safety.test.mjs tests/router.inspect.test.mjs tests/router-graphify-integration.test.mjs tests/router.plugins-fingerprint.test.mjs tests/router.registry-watcher.test.mjs tests/router.lifecycle-invc.test.mjs` — 127/127 passed
+- No phase-30 gaps found; the rerun includes the current runtime-specific manifest and watcher changes.
+
+_Verified: 2026-08-02T12:18:00Z_
 _Verifier: Claude (gsd-verifier)_

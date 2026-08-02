@@ -1,5 +1,24 @@
 # Milestones
 
+## v1.5 Framework-Neutral Adaptive Routing (Shipped: 2026-08-02)
+
+**Phases completed:** 9 phases, 27 plans, 21 tasks
+
+**Key accomplishments:**
+
+- Content-sha256 manifest_fingerprint over semantic routing inputs (skills/agents/commands/plugins/mode-map/weights, timestamps excluded) emitted by build-manifest.mjs and folded into the hook's cacheKey as a fingerprint epoch — replacing the 7-position mtime fold so a no-op rebuild never invalidates the route cache while any semantic inventory change recomputes it.
+- Task 1 — Noise ignore prefixes on watcher roots.
+- Closed the calibration epoch-keying gap (INVC-03) with a fail-open `loadEpochCalibration()` that lets fingerprint-matched per-install thresholds win and mode-map defaults (0.591/0.291/0.191) win on every mismatch/absence/corruption, and documented + test-verified the full add/update/remove capability lifecycle (INVC-05) end-to-end.
+- Wave-0 RED test infrastructure for Phase 31: runtime detection precedence spec, cross-runtime cacheKey divergence, telemetry runtime field, the 16-field OUTCOME_FIELDS bump guard, and the snapshot↔live-hook mirror-desync guard — holding every Phase-31 feature surface RED until plans 31-02/31-03 export the API.
+- Tracer-first vertical slice that proves runtime detection end-to-end: the hook resolves its active runtime (claude|codex) once at module load with zero hot-path IO, and every data path (ROUTER_DIR, HOOKS_DIR, SURFACE_FILE, GSD_CORE_DIR and all children) now derives from a single runtime-conditional root instead of the hardcoded `.claude` — plus the install/builder honors a `ROUTER_RUNTIME` pin for Codex homes.
+- PARITY-02 completion: the runtime is folded into the cache-key hashed identity (so a Claude-served route is never returned to a Codex session and vice versa), every telemetry record carries its active runtime field, and runtime/epoch land in the evidence schema via a deliberate 14→16 OUTCOME_FIELDS policy-version bump (HEALTH_POLICY_VERSION → v2) wired through the telemetry ingest — never a silent schema add (ROADMAP criterion 3).
+- Runtime-scoped command indexes now feed resolver guard paths, with Claude/Codex isolation and flat-manifest fallback tests.
+- Production slash injection now emits the active runtime's resolved capability, preserves authored tie order, and fails open on dead candidates.
+- Strict coverage now enforces resolve-list hygiene while preserving resolvable routes with quarantined optional fallbacks.
+- Live resolve-first performance coverage now measures route scoring, cache, guards, runtime resolution, and rendered injection, while retaining a distinct resolver microbenchmark.
+
+---
+
 ## v1.4 Coverage Completeness & Auto-Skill Routing Improvement (Shipped: 2026-07-31)
 
 **Phases completed:** 3 phases, 8 plans, 19 tasks
