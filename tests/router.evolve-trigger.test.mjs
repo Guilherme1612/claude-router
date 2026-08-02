@@ -11,8 +11,8 @@ test('concurrent hook processes preserve every evolution trigger increment', asy
   try {
     const hook = join(root, 'router.mjs');
     const trigger = join(root, '.evolve-trigger');
-    writeFileSync(hook, readFileSync(new URL('./router.mjs.snapshot', import.meta.url)));
-    writeFileSync(join(root, 'router.evolve.mjs'), readFileSync(new URL('./router.evolve.mjs.snapshot', import.meta.url)));
+    writeFileSync(hook, readFileSync(new URL('../src/runtime/router.mjs', import.meta.url)));
+    writeFileSync(join(root, 'router.evolve.mjs'), readFileSync(new URL('../src/runtime/router.evolve.mjs', import.meta.url)));
     writeFileSync(trigger, '0');
     const code = `const m=await import(${JSON.stringify(pathToFileURL(hook).href)});m.bumpEvolveTrigger({triggerPath:${JSON.stringify(trigger)},workerPath:${JSON.stringify(join(root, 'unused.mjs'))}});`;
     const count = 24;

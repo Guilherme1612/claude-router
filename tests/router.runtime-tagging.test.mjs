@@ -2,7 +2,7 @@
 //
 // This spec imports the LIVE hook at ~/.claude/hooks/router.mjs (the same HOOK
 // pattern tests/router.cache.test.mjs:13 uses), which is what makes the
-// byte-identical mirror (tests/router.mjs.snapshot) load-bearing. It targets the
+// byte-identical mirror (src/runtime/router.mjs) load-bearing. It targets the
 // Phase-31 API surface that plans 31-02 (detection + runtime-conditional dirs)
 // and 31-03 (cacheKey runtime slot + telemetry runtime field) will export:
 //
@@ -26,8 +26,8 @@ import { tmpdir } from 'node:os';
 
 const fixtureRoot = mkdtempSync(join(tmpdir(), 'router-runtime-tagging-'));
 const HOOK = join(fixtureRoot, 'router.mjs');
-writeFileSync(HOOK, readFileSync(new URL('./router.mjs.snapshot', import.meta.url)));
-writeFileSync(join(fixtureRoot, 'router.evolve.mjs'), readFileSync(new URL('./router.evolve.mjs.snapshot', import.meta.url)));
+writeFileSync(HOOK, readFileSync(new URL('../src/runtime/router.mjs', import.meta.url)));
+writeFileSync(join(fixtureRoot, 'router.evolve.mjs'), readFileSync(new URL('../src/runtime/router.evolve.mjs', import.meta.url)));
 process.on('exit', () => rmSync(fixtureRoot, { recursive: true, force: true }));
 const mod = await import(HOOK);
 const { RUNTIME, RUNTIME_CONFIG_DIR, cacheKey, telemetryEntryFromState } = mod;

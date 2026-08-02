@@ -8,24 +8,23 @@ import {
   mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync,
   statSync, openSync, closeSync, appendFileSync, rmSync, createReadStream, createWriteStream,
 } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { createGzip } from 'node:zlib';
 import { pipeline } from 'node:stream/promises';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 
-const EVOLVE = await import('/Users/guilherme/.claude/hooks/router.evolve.mjs');
+const EVOLVE = await import('../src/runtime/router.evolve.mjs');
 const { runWorker, printStatus } = EVOLVE;
 
-const HOOKS_DIR = join(homedir(), '.claude', 'hooks');
-const HOOK_PATH = join(HOOKS_DIR, 'router.mjs');
-const CALIBRATE_PATH = '/Users/guilherme/Desktop/ClaudeCode/Router-build/router.calibrate.mjs';
-const TASKS_PATH = '/Users/guilherme/Desktop/ClaudeCode/Router-build/calibration-tasks.json';
+const HOOK_PATH = resolve('src/runtime/router.mjs');
+const CALIBRATE_PATH = resolve('router.calibrate.mjs');
+const TASKS_PATH = resolve('calibration-tasks.json');
 
 function setupSandbox() {
   const dir = mkdtempSync(join(tmpdir(), 'router-evolve-int-'));
-  const manifest = JSON.parse(readFileSync(join(homedir(), '.claude', 'router', 'claude-inventory-manifest.json'), 'utf8'));
+  const manifest = JSON.parse(readFileSync(resolve('claude-inventory-manifest.json'), 'utf8'));
   const modeMap = {
     schema_version: 1,
     thresholds: { T_high: 0.6, T_low: 0.3, M: 0.2 },
@@ -333,7 +332,7 @@ test('worker: Codex defaults never resolve into Claude state', () => {
   const home = mkdtempSync(join(tmpdir(), 'router-evolve-runtime-'));
   try {
     const workerPath = join(home, 'router.evolve.mjs');
-    writeFileSync(workerPath, readFileSync(new URL('./router.evolve.mjs.snapshot', import.meta.url)));
+    writeFileSync(workerPath, readFileSync(new URL('../src/runtime/router.evolve.mjs', import.meta.url)));
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
       const worker = await import(${JSON.stringify(pathToFileURL(workerPath).href)});
       process.stdout.write(worker.ROUTER_HOOK_HREF);

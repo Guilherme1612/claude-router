@@ -12,7 +12,7 @@ import { stableStringify } from '../src/registry/schema.mjs';
 import { compileStartupPointer } from '../src/steward/startup-pointer.mjs';
 
 const LIVE_HOOK = '/Users/guilherme/.claude/hooks/router.mjs';
-const SOURCE_HOOK = resolve('tests/router.mjs.snapshot');
+const SOURCE_HOOK = resolve('src/runtime/router.mjs');
 const MODULE = resolve('src/context/prompt-route.mjs');
 const CANARY = 'PRIVATE-CANARY-raw-prompt-secret';
 const VERSION = 'v1-0123456789abcdef';
@@ -58,7 +58,7 @@ function runHook(prompt, env = {}) {
   try {
     const hook = join(runtime, 'router.mjs');
     writeFileSync(hook, readFileSync(SOURCE_HOOK));
-    writeFileSync(join(runtime, 'router.evolve.mjs'), readFileSync(resolve('tests/router.evolve.mjs.snapshot')));
+    writeFileSync(join(runtime, 'router.evolve.mjs'), readFileSync(resolve('src/runtime/router.evolve.mjs')));
     return spawnSync(process.execPath, [hook], {
       input: JSON.stringify({ hook_event_name: 'UserPromptSubmit', prompt }), encoding: 'utf8',
       env: {

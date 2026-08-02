@@ -6,9 +6,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 
-const R = await import('/Users/guilherme/.claude/hooks/router.mjs');
+const R = await import('../src/runtime/router.mjs');
 const { loadWeights, applyWeightBlend, setModeMapForBlend } = R;
 
 function withTempDir(fn) {

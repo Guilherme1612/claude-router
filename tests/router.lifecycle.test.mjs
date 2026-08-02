@@ -558,7 +558,7 @@ test('controller launch failure rolls back exact bytes and leaves no child', asy
 });
 
 test('prompt hook source has no watcher, scan, or registry build work', async () => {
-  const source = readFileSync(join(REPO_ROOT, 'tests/router.mjs.snapshot'), 'utf8');
+  const source = readFileSync(join(REPO_ROOT, 'src/runtime/router.mjs'), 'utf8');
   assert.doesNotMatch(source, /fs\.watch|scanFingerprintTree|buildFullRegistry|createRegistryWatcher/);
 });
 
@@ -580,7 +580,7 @@ test('production lifecycle stays standard-library-only and offline', async () =>
 });
 
 test('bundled router includes the current operator and safety surfaces', async () => {
-  const source = readFileSync(join(REPO_ROOT, 'tests/router.mjs.snapshot'), 'utf8');
+  const source = readFileSync(join(REPO_ROOT, 'src/runtime/router.mjs'), 'utf8');
   for (const surface of [
     'export function validateRouteTargets',
     'export function buildTelemetryProposals',

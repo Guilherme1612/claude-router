@@ -2,7 +2,7 @@
 //
 // This spec imports the LIVE hook at ~/.claude/hooks/router.mjs (same HOOK pattern
 // tests/router.cache.test.mjs:13 and tests/router.coverage-audit.test.mjs:15 use),
-// which keeps the byte-identical mirror (tests/router.mjs.snapshot) load-bearing.
+// which keeps the byte-identical mirror (src/runtime/router.mjs) load-bearing.
 // It targets the Phase-32 API surface that 32-02/32-03 will export:
 //
 //   resolveSlashRoute(entry, manifest, opts?)  -> the future resolve-first route

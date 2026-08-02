@@ -14,8 +14,8 @@ function fixture() {
   const claudeRoot = join(root, '.claude');
   const codexRoot = join(root, '.codex');
   const settingsPath = join(claudeRoot, 'settings.json');
-  const sourceRouter = join(REPO_ROOT, 'tests/router.mjs.snapshot');
-  const sourceEvolve = join(REPO_ROOT, 'tests/router.evolve.mjs.snapshot');
+  const sourceRouter = join(REPO_ROOT, 'src/runtime/router.mjs');
+  const sourceEvolve = join(REPO_ROOT, 'src/runtime/router.evolve.mjs');
   const routerPath = join(claudeRoot, 'hooks/router.mjs');
   const manifestPath = join(claudeRoot, 'router/install-manifest.json');
   mkdirSync(claudeRoot, { recursive: true });
