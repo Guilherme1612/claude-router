@@ -70,7 +70,7 @@ async function stopFixtureControllers(f) {
 async function cleanup(f) {
   try { await uninstallRouter(f.options); } catch { /* fixture may be intentionally corrupt */ }
   await stopFixtureControllers(f);
-  rmSync(f.root, { recursive: true, force: true });
+  rmSync(f.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 20 });
 }
 
 function snapshot(root) {
