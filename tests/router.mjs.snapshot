@@ -20,7 +20,7 @@
 // no injection, no cache, no telemetry. Subsequent plans slot routing logic
 // into a pipeline that is already provably non-blocking and coexistence-safe.
 
-import { readFileSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync, mkdirSync } from 'node:fs';
+import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -2308,21 +2308,37 @@ export function buildShadowDivergenceReport({ shadowPath = SHADOW_LOG } = {}) {
 // .evolve-trigger file on every prompt; on counter % 200 === 0, spawns the
 // worker detached + stdio:'ignore' + unref() so the hook returns immediately
 // (Pitfall 6: the worker must not block the hot path).
-function bumpEvolveTrigger() {
-  let n = 0;
-  try { n = parseInt(readFileSync(TRIGGER, 'utf8').trim(), 10) || 0; } catch { n = 0; }
-  n += 1;
-  const tmp = `${TRIGGER}.tmp.${process.pid}`;
-  writeFileSync(tmp, String(n));
-  renameSync(tmp, TRIGGER);
-  if (n % EVOLVE_TRIGGER_N === 0) {
-    try {
-      spawn(process.execPath, [WORKER_PATH], {
-        detached: true,
-        stdio: 'ignore',
-        env: { ...process.env, ROUTER_RUNTIME: RUNTIME },
-      }).unref();
-    } catch {}
+export function bumpEvolveTrigger({ triggerPath = TRIGGER, workerPath = WORKER_PATH } = {}) {
+  const lockPath = `${triggerPath}.lock`;
+  let lockFd;
+  for (let attempt = 0; attempt < 50 && lockFd === undefined; attempt += 1) {
+    try { lockFd = openSync(lockPath, 'wx'); }
+    catch (error) {
+      if (error?.code !== 'EEXIST') return null;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2);
+    }
+  }
+  if (lockFd === undefined) return null;
+  try {
+    let n = 0;
+    try { n = parseInt(readFileSync(triggerPath, 'utf8').trim(), 10) || 0; } catch { n = 0; }
+    n += 1;
+    const tmp = `${triggerPath}.tmp.${process.pid}`;
+    writeFileSync(tmp, String(n));
+    renameSync(tmp, triggerPath);
+    if (n % EVOLVE_TRIGGER_N === 0) {
+      try {
+        spawn(process.execPath, [workerPath], {
+          detached: true,
+          stdio: 'ignore',
+          env: { ...process.env, ROUTER_RUNTIME: RUNTIME },
+        }).unref();
+      } catch {}
+    }
+    return n;
+  } finally {
+    try { closeSync(lockFd); } catch {}
+    try { unlinkSync(lockPath); } catch {}
   }
 }
 
