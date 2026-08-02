@@ -10,7 +10,8 @@ import { proposeCandidate, evaluateCandidate, applyCanaryDecision, isSafetyFix, 
 import { createPersistentEvidenceStore } from '../evolution/evidence.mjs';
 import { assessCalibration, CALIBRATION_CORPUS, evaluateCalibrationCorpus, measureRoutes } from '../evolution/perf-measure.mjs';
 import { buildCandidateCalibrationRoute, buildKnownGoodCalibrationRoute } from '../evolution/candidate-calibration-route.mjs';
-import { compatible, COMPILED_INDEX_COMPATIBILITY } from '../prompt/compile-index.mjs';
+import { compatible, COMPILED_INDEX_COMPATIBILITY, loadCompiledIndex } from '../prompt/compile-index.mjs';
+import { recoverReleaseTuple } from '../prompt/publish-index.mjs';
 import { inspect as healthInspect, reset as healthReset, dispose as healthDispose, recover as healthRecover } from '../health/admin.mjs';
 import { selectSuggestion } from '../steward/suggestion.mjs';
 import { createStewardStore } from '../steward/state.mjs';
@@ -60,6 +61,45 @@ function pointer(root) {
     const value = JSON.parse(readFileSync(join(root, 'active.json'), 'utf8'));
     return VERSION_ID.test(value.version_id) && Number.isInteger(value.sequence) ? value : null;
   } catch { return null; }
+}
+
+function controlAuthorityRoot(root) {
+  try {
+    const marker = JSON.parse(readFileSync(join(root, 'installed.json'), 'utf8'));
+    if (marker?.managed_by === 'claude-router' && typeof marker.control_authority_root === 'string') {
+      return resolve(marker.control_authority_root);
+    }
+  } catch { /* Claude installs and pre-contract Codex installs use their local root */ }
+  return root;
+}
+
+function releaseTupleAuthority(root) {
+  const pointerPath = join(root, 'release-tuples', 'active.json');
+  if (!existsSync(pointerPath)) return null;
+  const tuple = loadCompiledIndex({ ownedRoot: root });
+  return tuple.dispatch_eligible && tuple.registry
+    ? tuple
+    : { status: 'blocked', reason_code: tuple.reason_code || 'invalid_release_tuple' };
+}
+
+function tupleProjection(tuple) {
+  return {
+    tuple_version_id: tuple.tuple_version_id,
+    registry_version_id: tuple.registry_version_id,
+    compiled_index_version: tuple.version_id,
+    source: tuple.source,
+  };
+}
+
+function tupleVersion(tuple) {
+  return {
+    verdict: { valid: true, bundle_fingerprint: tuple.tuple_version_id, verification_fingerprint: tuple.tuple_version_id },
+    manifest: { created_at: tuple.manifest?.created_at ?? null },
+    registry: tuple.registry,
+    mapping: { subjects: Object.values(tuple.index?.routes || {}).map(route => ({
+      subject_id: route.workflow_id, target_id: route.target_id, disposition: route.dispatch_eligible ? 'mapped' : 'blocked',
+    })) },
+  };
 }
 
 function versionIds(root) {
@@ -605,7 +645,7 @@ export function renderSuggestionText(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -696,13 +736,13 @@ function defaultInventoryState(root, active, version) {
   };
 }
 
-function inventoryCommand({ root, active, options, dependencies }) {
+function inventoryCommand({ root, active, options, dependencies, authorityVersion = null }) {
   if (options.id && options.availability) {
     return { result: canonical('inventory', false, 'invalid_arguments'), exitCode: EXIT.usage };
   }
-  const unsafe = activeSourceFailure('inventory', root, active);
+  const unsafe = authorityVersion ? null : activeSourceFailure('inventory', root, active);
   if (unsafe) return unsafe;
-  const version = readVersion(root, active.version_id);
+  const version = authorityVersion || readVersion(root, active.version_id);
   if (!version.verdict.valid || !Array.isArray(version.registry?.records)) {
     return {
       result: canonical('inventory', false, 'invalid_inventory_source', { next_action: 'run_registry_recovery' }),
@@ -1028,7 +1068,8 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   try { parsed = parse(argv); } catch (error) { return { result: canonical('usage', false, error.message), exitCode: EXIT.usage }; }
   const { positional, options } = parsed;
   if (options.help) return { result: canonical('help', true, 'help', { usage: usage().trim() }), exitCode: EXIT.success };
-  const root = resolve(options.owned_root || defaultOwnedRoot || join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
+  const requestedRoot = resolve(options.owned_root || defaultOwnedRoot || join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
+  const root = controlAuthorityRoot(requestedRoot);
   const command = positional[0];
   if (command === 'suggestion') {
     return suggestionCommand({ root, positional, options, dependencies });
@@ -1037,16 +1078,41 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
     if (positional.length !== 2) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
     return runContextCommand({ subcommand: positional[1], root, options });
   }
+  if (command === 'registry' && positional[1] === 'recover') {
+    if (positional.length !== 2) return { result: canonical('registry recover', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    try {
+      const recover = dependencies.recoverReleaseTuple || recoverReleaseTuple;
+      const recovered = recover({ ownedRoot: root });
+      return { result: canonical('registry recover', true, recovered.status, { recovery: recovered }), exitCode: EXIT.success };
+    } catch (error) {
+      return { result: canonical('registry recover', false, error.message || 'tuple_recovery_failed'), exitCode: EXIT.invalid };
+    }
+  }
+  const tuple = releaseTupleAuthority(root);
+  if (tuple?.status === 'blocked') {
+    return { result: canonical(command || 'status', false, 'invalid_release_tuple', { next_action: 'run_registry_recovery' }), exitCode: EXIT.unsafe };
+  }
   const active = pointer(root);
   if (command === 'inventory') {
     if (positional.length !== 1) return { result: canonical('inventory', false, 'invalid_arguments'), exitCode: EXIT.usage };
-    return inventoryCommand({ root, active, options, dependencies });
+    return inventoryCommand({
+      root,
+      active: tuple ? { version_id: tuple.registry_version_id, sequence: 0 } : active,
+      options,
+      dependencies,
+      authorityVersion: tuple ? tupleVersion(tuple) : null,
+    });
   }
   if (command === 'contract') {
     return contractCommand({ root, active, positional, options, dependencies });
   }
   if (command === 'status') {
     if (positional.length !== 1) return { result: canonical('status', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    if (tuple) return { result: canonical('status', true, 'healthy', {
+      active: tupleProjection(tuple),
+      record_count: tuple.registry.records?.length || 0,
+      route_count: Object.keys(tuple.index?.routes || {}).length,
+    }), exitCode: 0 };
     const unsafe = activeSourceFailure('status', root, active); if (unsafe) return unsafe;
     const version = readVersion(root, active.version_id);
     return { result: canonical('status', true, 'healthy', { active: { ...projection(active.version_id, version), sequence: active.sequence }, versions: versionIds(root) }), exitCode: 0 };
@@ -1060,6 +1126,29 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   }
   if (command === 'diff') {
     if (![1, 3].includes(positional.length)) return { result: canonical('diff', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    if (tuple && positional.length === 1) {
+      let knownGood = null;
+      try {
+        const pointer = JSON.parse(readFileSync(join(root, 'release-tuples', 'known-good.json'), 'utf8'));
+        const candidate = loadCompiledIndex({ ownedRoot: root, releaseTuplePointer: pointer });
+        if (candidate.dispatch_eligible) knownGood = candidate;
+      } catch { /* active tuple remains a valid self-diff */ }
+      const destination = knownGood || tuple;
+      const sourceVersion = tupleVersion(tuple), destinationVersion = tupleVersion(destination);
+      const sourceRecords = new Map((sourceVersion.registry.records || []).map(record => [record.id, record]));
+      const destinationRecords = new Map((destinationVersion.registry.records || []).map(record => [record.id, record]));
+      const recordChanges = [...new Set([...sourceRecords.keys(), ...destinationRecords.keys()])].sort().flatMap(id => {
+        const before = sourceRecords.get(id), after = destinationRecords.get(id);
+        if (!before) return [{ id, change: 'added' }];
+        if (!after) return [{ id, change: 'removed' }];
+        return stableStringify(before) === stableStringify(after) ? [] : [{ id, change: 'changed' }];
+      });
+      return { result: canonical('diff', true, 'diff_ready', {
+        source: tupleProjection(tuple), destination: tupleProjection(destination),
+        record_changes: recordChanges, record_changes_meta: boundedResult(recordChanges).meta,
+        mapping_changes: [], mapping_changes_meta: boundedResult([]).meta,
+      }), exitCode: 0 };
+    }
     if (positional.length === 1) { const unsafe = activeSourceFailure('diff', root, active); if (unsafe) return unsafe; }
     const ids = versionIds(root), sourceId = positional[1] || active?.version_id, destinationId = positional[2] || ids.find(id => id !== sourceId) || sourceId;
     if (!sourceId || !destinationId) return { result: canonical('diff', false, 'insufficient_history'), exitCode: EXIT.invalid };

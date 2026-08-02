@@ -350,7 +350,11 @@ export async function installRouter(options) {
   const codexRouterHealthy = fileMatches(p.codexRouterPath, sourceFingerprint);
   const evolveHealthy = !deployEvolve || fileMatches(p.evolvePath, evolveFingerprint);
   const codexEvolveHealthy = !deployEvolve || fileMatches(p.codexEvolvePath, evolveFingerprint);
-  const markerValue = JSON.stringify({ schema_version: 1, managed_by: 'claude-router' }, null, 2) + '\n';
+  const markerValue = JSON.stringify({
+    schema_version: 1,
+    managed_by: 'claude-router',
+    control_authority_root: p.ownedRoot,
+  }, null, 2) + '\n';
   const markerFingerprint = fingerprint(markerValue);
   const markerHealthy = fileMatches(p.codexMarkerPath, markerFingerprint);
   const built = (options.buildRegistry || buildFullRegistry)({ claudeRoot: p.claudeRoot, codexRoot: p.codexRoot,

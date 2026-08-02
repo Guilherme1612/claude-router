@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,7 @@ import { activateCandidate, writeImmutableVersion } from '../src/registry/activa
 import * as routerControl from '../src/cli/router-control.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
+import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
 const { runRouterControl } = routerControl;
@@ -124,6 +125,40 @@ async function fixture({ count = 1 } = {}) {
 function run(root, ...args) {
   return spawnSync(process.execPath, [CLI.pathname, ...args, '--owned-root', root], { encoding: 'utf8' });
 }
+
+test('installed Claude and Codex controls share verified release-tuple authority', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-control-tuple-'));
+  const claudeRoot = join(root, '.claude', 'router');
+  const codexRoot = join(root, '.codex', 'router');
+  try {
+    const record = {
+      id: 'capability-1', name: 'execute', type: 'agent', lifecycle: 'ready', dispatchable: true,
+      available: true, scope: { kind: 'global' }, dependencies: { state: 'unknown', items: [] },
+      permissions: { required: [], grants: [], denied: [] }, conflicts: [], provenance: [],
+      invocation: { runtime: 'claude', command: 'execute', args: [] },
+    };
+    publishCompiledIndex({
+      ownedRoot: claudeRoot,
+      registry: { schema_version: 1, records: [record] },
+      registryVersionId: 'v1-aaaaaaaaaaaaaaaa',
+      mapping: { schema_version: 1, policy_fingerprint: 'a'.repeat(64), subjects: [{ subject_id: 'workflow', disposition: 'mapped', target_id: record.id, reason_code: 'explicit_subject' }] },
+      policyFingerprint: 'b'.repeat(64),
+      now: Date.now(),
+    });
+    mkdirSync(codexRoot, { recursive: true });
+    writeFileSync(join(codexRoot, 'installed.json'), JSON.stringify({ managed_by: 'claude-router', control_authority_root: claudeRoot }));
+    for (const command of [['status'], ['inventory'], ['diff']]) {
+      for (const ownedRoot of [claudeRoot, codexRoot]) {
+        const result = runRouterControl({ argv: [...command, '--format', 'json'], defaultOwnedRoot: ownedRoot });
+        assert.equal(result.exitCode, 0, `${ownedRoot}:${command[0]}:${result.result.reason_code}`);
+      }
+    }
+    rmSync(join(claudeRoot, 'release-tuples', 'active.json'));
+    const recovered = runRouterControl({ argv: ['registry', 'recover'], defaultOwnedRoot: codexRoot });
+    assert.equal(recovered.exitCode, 0);
+    assert.equal(runRouterControl({ argv: ['status'], defaultOwnedRoot: codexRoot }).exitCode, 0);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
 
 test('read-only controls share stable canonical JSON and never mutate owned bytes', async () => {
   const f = await fixture();
