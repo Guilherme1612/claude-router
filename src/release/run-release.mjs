@@ -30,6 +30,7 @@ const ALLOWED_TOP_KEYS = ['schema_version', 'milestone', 'versions', 'requiremen
 const ALLOWED_ROW_KEYS = ['id', 'primary', 'secondary'];
 const COMMAND = /^node --test (tests\/router\.[a-z0-9.-]+\.test\.mjs)(?: (tests\/router\.[a-z0-9.-]+\.test\.mjs))*$/;
 const TEST_FILE = /^tests\/router\.[a-z0-9.-]+\.test\.mjs$/;
+const LATENCY_GATE_IDS = new Set(['warm-p95', 'hard-route-ceiling', 'context-budget', 'REL-07']);
 // Phase 19 D-09 (Plan 19-04 Task 3): secondary evidence schema is now per-label. The
 // phase-18-cross-cutting label keeps the executable-commands shape (D-10/D-11). The
 // phase-19-live-path label cites the extended Phase 18 E2E test files directly as
@@ -140,6 +141,9 @@ function validateStages(matrix, repoRoot) {
       if (file === 'tests/router.phase26-release.test.mjs') throw new TypeError('circular release stage evidence');
       try { accessSync(resolve(repoRoot, file), constants.R_OK); } catch { throw new TypeError(`release stage file not readable: ${file}`); }
     }
+    if (stage.id === 'latency' && stage.gate_ids.some(id => !LATENCY_GATE_IDS.has(id))) {
+      throw new TypeError('unknown latency gate');
+    }
   }
   const stageGates = new Set(matrix.stages.flatMap(stage => stage.gate_ids));
   const requiredGates = matrix.requirements.flatMap(row => row.primary.gate_ids);
@@ -212,9 +216,13 @@ export function parseChildEvidence({ stdout, stage, gate_ids, error, skipped, th
         && measurements.context_max_bytes <= thresholds.context_max_bytes;
       gate_results.push({ id: 'context-budget', pass: contextPass, reason_code: contextPass ? 'context-budget_pass' : 'threshold' });
     }
-    const metricIds = new Set(gate_results.map(gate => gate.id));
-    for (const id of gate_ids) {
-      if (!metricIds.has(id)) gate_results.push({ id, pass: true, reason_code: `${id}_pass` });
+    if (gate_ids.includes('REL-07')) {
+      const releasePass = warmPass && maxPass
+        && (!gate_ids.includes('context-budget') || gate_results.find(gate => gate.id === 'context-budget')?.pass === true);
+      gate_results.push({ id: 'REL-07', pass: releasePass, reason_code: releasePass ? 'REL-07_pass' : 'threshold' });
+    }
+    if (gate_ids.some(id => !LATENCY_GATE_IDS.has(id))) {
+      return { gate_results: [], reason_code: 'unknown-latency-gate', measurements };
     }
     return { gate_results, measurements };
   }
