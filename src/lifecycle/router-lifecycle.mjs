@@ -1,10 +1,10 @@
 import {
   closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync,
-  rmdirSync, rmSync, statSync, writeFileSync,
+  lstatSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildFullRegistry } from '../registry/build.mjs';
 import { reconcileCandidate } from '../registry/reconcile.mjs';
@@ -775,14 +775,62 @@ export async function uninstallRouter(options) {
     throw new Error(`ownership manifest is invalid; no files were removed: ${error.message}`);
   }
   if (!manifest || manifest.schema_version !== MANIFEST_SCHEMA_VERSION || manifest.state !== 'complete'
-    || !Array.isArray(manifest.files) || !Array.isArray(manifest.bindings)) {
+    || !Array.isArray(manifest.files) || !Array.isArray(manifest.bindings)
+    || !Array.isArray(manifest.directories)) {
     throw new Error('ownership manifest is invalid; no files were removed');
   }
 
   // Validate all ownership entries before the first mutation.
+  const containedBy = (file, root) => {
+    const rel = relative(root, file);
+    return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  };
+  const ownedRoots = [p.ownedRoot, p.codexOwnedRoot];
+  const externalFiles = new Set([p.routerPath, p.evolvePath, p.codexRouterPath, p.codexEvolvePath]);
+  const externalDirectories = new Set([...externalFiles].map(dirname));
+  const pathAllowed = (file, directory = false) => (
+    (directory ? externalDirectories : externalFiles).has(file)
+    || ownedRoots.some(root => containedBy(file, root))
+  );
+  const validateOwnedPath = (value, directory = false) => {
+    if (typeof value !== 'string' || resolve(value) !== value || !pathAllowed(value, directory)) {
+      throw new Error('ownership manifest is invalid; no files were removed');
+    }
+    if (!existsSync(value)) return;
+    if (lstatSync(value).isSymbolicLink()) throw new Error('ownership manifest is invalid; no files were removed');
+    const actual = realpathSync(value);
+    const actualRoots = ownedRoots.filter(existsSync).map(root => realpathSync(root));
+    const actualExternal = new Set([...(directory ? externalDirectories : externalFiles)]
+      .filter(existsSync).map(file => realpathSync(file)));
+    if (!actualExternal.has(actual) && !actualRoots.some(root => containedBy(actual, root))) {
+      throw new Error('ownership manifest is invalid; no files were removed');
+    }
+  };
+  if (manifest.roots?.claude !== p.claudeRoot || manifest.roots?.codex !== p.codexRoot) {
+    throw new Error('ownership manifest is invalid; no files were removed');
+  }
   for (const file of manifest.files) {
     if (!file || typeof file.path !== 'string' || typeof file.fingerprint !== 'string') {
       throw new Error('ownership manifest is invalid; no files were removed');
+    }
+    validateOwnedPath(file.path);
+  }
+  for (const directory of manifest.directories) validateOwnedPath(directory, true);
+  const expectedBindings = new Set([
+    ['UserPromptSubmit', p.settingsPath, p.routerPath],
+    ['UserPromptExpansion', p.settingsPath, p.routerPath],
+    ['PostToolUse', p.settingsPath, p.routerPath],
+    ['PostToolUseFailure', p.settingsPath, p.routerPath],
+    ['Stop', p.settingsPath, p.routerPath],
+    ['UserPromptSubmit', p.codexHooksPath, p.codexRouterPath],
+  ].map(parts => parts.join('\0')));
+  for (const binding of manifest.bindings) {
+    const key = [binding?.event, binding?.settings_path, binding?.router_path].join('\0');
+    if (!expectedBindings.has(key)) throw new Error('ownership manifest is invalid; no files were removed');
+    for (const file of [binding.settings_path, binding.router_path]) {
+      if (existsSync(file) && lstatSync(file).isSymbolicLink()) {
+        throw new Error('ownership manifest is invalid; no files were removed');
+      }
     }
   }
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync,
+  existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -350,6 +350,31 @@ test('malformed ownership manifest fails closed without mutations', async () => 
     assert.equal(readFileSync(f.settingsPath, 'utf8'), settingsBefore);
     assert.equal(existsSync(f.routerPath), true);
   } finally { await cleanup(f); }
+});
+
+test('uninstall rejects outside-root files, forged bindings, and symlink entries atomically', async () => {
+  for (const forge of ['outside-file', 'binding', 'symlink']) {
+    const f = fixture({ trackControllers: true });
+    try {
+      await installRouter(f.options);
+      const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
+      const unrelated = join(f.root, 'keep.txt');
+      writeFileSync(unrelated, 'keep');
+      if (forge === 'outside-file') manifest.files.push({ path: unrelated, fingerprint: fingerprint('keep') });
+      if (forge === 'binding') manifest.bindings[0].settings_path = unrelated;
+      if (forge === 'symlink') {
+        const link = join(f.options.claudeRoot, 'router', 'forged-link');
+        symlinkSync(unrelated, link);
+        manifest.files.push({ path: link, fingerprint: fingerprint('keep') });
+      }
+      writeFileSync(f.manifestPath, JSON.stringify(manifest));
+      const settingsBefore = readFileSync(f.settingsPath, 'utf8');
+      await assert.rejects(uninstallRouter(f.options), /ownership manifest is invalid/);
+      assert.equal(readFileSync(unrelated, 'utf8'), 'keep');
+      assert.equal(readFileSync(f.settingsPath, 'utf8'), settingsBefore);
+      assert.equal(existsSync(f.routerPath), true);
+    } finally { await cleanup(f); }
+  }
 });
 
 function runCli(f, ...extra) {
