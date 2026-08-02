@@ -106,7 +106,7 @@ node install-router.mjs --uninstall
 The test suite uses Node's built-in test runner:
 
 ```bash
-node --test tests/*.test.mjs
+node --test --test-concurrency=1 tests/*.test.mjs
 ```
 
 The main implementation areas are under `src/`, while `install-router.mjs` is the zero-dependency lifecycle entry point.

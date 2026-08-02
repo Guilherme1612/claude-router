@@ -3,16 +3,17 @@
 // (D-01). Mirrors the existing tests/router.perf.test.mjs pattern.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync, spawn } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
-const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
-const WORKER = join(homedir(), '.claude', 'hooks', 'router.evolve.mjs');
-const NODE = '/Users/guilherme/.hermes/node/bin/node';
+const TEST_HOME = mkdtempSync(join(tmpdir(), 'router-perf-evolved-home-'));
+const HOOK = join(TEST_HOME, '.claude', 'hooks', 'router.mjs');
+const WORKER = join(TEST_HOME, '.claude', 'hooks', 'router.evolve.mjs');
+const CONTEXT_MODULE = resolve('src/context/prompt-route.mjs');
+const NODE = process.execPath;
 const TRIVIAL_PROMPT = JSON.stringify({ prompt: 'thanks' });
 const NON_TRIVIAL_PROMPT = JSON.stringify({ prompt: 'the flaky payment test keeps failing intermittently' });
 const BUDGET_MS = 100;
@@ -21,18 +22,25 @@ const BUDGET_MS = 100;
 // __router_latency_ms line) is what guards real routing cost, so wall uses a contention
 // tolerance while the in-process latency assertions below stay at the strict budget.
 const WALL_BUDGET_MS = 250;
-const R = await import(HOOK);
+mkdirSync(join(TEST_HOME, '.claude', 'hooks'), { recursive: true });
+mkdirSync(join(TEST_HOME, '.claude', 'router'), { recursive: true });
+writeFileSync(HOOK, readFileSync(resolve('src/runtime/router.mjs')));
+writeFileSync(WORKER, readFileSync(resolve('src/runtime/router.evolve.mjs')));
+writeFileSync(join(TEST_HOME, '.claude', 'router', 'claude-inventory-manifest.json'), readFileSync(resolve('claude-inventory-manifest.json')));
+writeFileSync(join(TEST_HOME, '.claude', 'router', 'mode-map.json'), readFileSync(resolve('mode-map.json')));
+const R = await import(resolve('src/runtime/router.mjs'));
 
-const LIVE_WEIGHTS = join(homedir(), '.claude', 'router', 'weights.json');
-const LIVE_TRIGGER = join(homedir(), '.claude', 'router', '.evolve-trigger');
+const LIVE_WEIGHTS = join(TEST_HOME, '.claude', 'router', 'weights.json');
+const LIVE_TRIGGER = join(TEST_HOME, '.claude', 'router', '.evolve-trigger');
+writeFileSync(LIVE_WEIGHTS, JSON.stringify({ schema_version: 2, weights: {} }));
+writeFileSync(LIVE_TRIGGER, '0');
 const ORIGINAL_WEIGHTS = readFileSync(LIVE_WEIGHTS, 'utf8');
-const ORIGINAL_TRIGGER = existsSync(LIVE_TRIGGER) ? readFileSync(LIVE_TRIGGER, 'utf8') : '0';
+const ORIGINAL_TRIGGER = readFileSync(LIVE_TRIGGER, 'utf8');
 
 // after hook: restore global state so other test files (router.telemetry.test.mjs)
 // see the expected v1 schema. Runs once after ALL tests in this file.
 after(() => {
-  writeFileSync(LIVE_WEIGHTS, ORIGINAL_WEIGHTS);
-  writeFileSync(LIVE_TRIGGER, ORIGINAL_TRIGGER);
+  rmSync(TEST_HOME, { recursive: true, force: true });
 });
 
 function runHook(promptStr, extraEnv = {}) {
@@ -40,7 +48,15 @@ function runHook(promptStr, extraEnv = {}) {
   const r = spawnSync(NODE, [HOOK], {
     input: promptStr,
     encoding: 'utf8',
-    env: { ...process.env, ROUTER_DEBUG_LATENCY: '1', ...extraEnv },
+    env: {
+      ...process.env,
+      HOME: TEST_HOME,
+      ROUTER_DEBUG_LATENCY: '1',
+      ROUTER_TEST_FRESHNESS: 'fresh',
+      ROUTER_TEST_COVERAGE_FRESHNESS: 'fresh',
+      ROUTER_CONTEXT_MODULE_PATH: CONTEXT_MODULE,
+      ...extraEnv,
+    },
   });
   const wall = performance.now() - start;
   return { wall, status: r.status, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };

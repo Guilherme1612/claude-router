@@ -11,7 +11,6 @@ import { routeContextPrompt } from '../src/context/prompt-route.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { compileStartupPointer } from '../src/steward/startup-pointer.mjs';
 
-const LIVE_HOOK = '/Users/guilherme/.claude/hooks/router.mjs';
 const SOURCE_HOOK = resolve('src/runtime/router.mjs');
 const MODULE = resolve('src/context/prompt-route.mjs');
 const CANARY = 'PRIVATE-CANARY-raw-prompt-secret';
