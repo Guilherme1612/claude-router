@@ -355,7 +355,7 @@ test('installed Claude and Codex modules publish, load, and route every recommen
       now: NOW + 1,
     });
     assert.equal(routed.handled, true, installed.runtime);
-    assert.equal(routed.resolution.reason_code, 'dependency_missing', installed.runtime);
+    assert.equal(routed.resolution.reason_code, 'authoritative_state_required', installed.runtime);
     assert.equal(typeof routed.additional_context, 'string');
   }
 });
