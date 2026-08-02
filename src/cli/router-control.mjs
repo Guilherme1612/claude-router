@@ -1088,7 +1088,7 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
       return { result: canonical('registry recover', false, error.message || 'tuple_recovery_failed'), exitCode: EXIT.invalid };
     }
   }
-  const tuple = releaseTupleAuthority(root);
+  const tuple = command === 'health' ? null : releaseTupleAuthority(root);
   if (tuple?.status === 'blocked') {
     return { result: canonical(command || 'status', false, 'invalid_release_tuple', { next_action: 'run_registry_recovery' }), exitCode: EXIT.unsafe };
   }
