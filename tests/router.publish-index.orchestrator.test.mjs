@@ -40,10 +40,16 @@ function registryWith(records) {
   return { schema_version: 1, records };
 }
 
-function publish(root, records, workflowId = 'gsd-execute-phase', targetId = 'router/executor') {
+function publish(root, records, workflowId = 'gsd-execute-phase', targetId = 'router/executor', workflowEvidenceById = {
+  'gsd-execute-phase': {
+    status: 'active', freshness: 'fresh', position: { family: 'gsd', state: 'planned' },
+    gates: { plan_approved: true }, dependencies_safe: true,
+  },
+}) {
   return publishCompiledIndex({
     ownedRoot: root, registry: registryWith(records), registryVersionId: 'v1-aaaaaaaaaaaaaaaa',
     mapping: mappingFor(workflowId, targetId), policyFingerprint: 'b'.repeat(64), now: NOW,
+    workflowEvidenceById,
   });
 }
 
@@ -222,4 +228,36 @@ test('when selectCapabilities returns blocked (missing dependency), closure.by_w
     const loaded = loadCompiledIndex({ ownedRoot: root, now: NOW });
     assert.equal(loaded.status, 'ready');
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('publication selects a non-planned transition from supplied authoritative state', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-pub-orch-executed-'));
+  try {
+    const result = publish(root, HAPPY_RECORDS, 'gsd-verify-work', 'router/executor', {
+      'gsd-verify-work': {
+        status: 'active', freshness: 'fresh', position: { family: 'gsd', state: 'executed' },
+        gates: { execution_complete: true }, dependencies_safe: true,
+      },
+    });
+    const closure = JSON.parse(readFileSync(join(root, 'release-tuples', 'versions', result.tuple_version_id, 'closure.json')));
+    assert.equal(closure.by_workflow['gsd-verify-work'].selected_transition.transition_id, 'gsd.verify');
+    assert.equal(closure.by_workflow['gsd-verify-work'].selected_transition.from, 'executed');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('publication blocks terminal or missing authoritative workflow state', () => {
+  for (const evidence of [
+    { 'gsd-execute-phase': { status: 'completed', freshness: 'fresh', position: { family: 'gsd', state: 'planned' }, gates: { plan_approved: true }, dependencies_safe: true } },
+    null,
+  ]) {
+    const root = mkdtempSync(join(tmpdir(), 'router-pub-orch-terminal-'));
+    try {
+      const result = publish(root, HAPPY_RECORDS, 'gsd-execute-phase', 'router/executor', evidence);
+      const closure = JSON.parse(readFileSync(join(root, 'release-tuples', 'versions', result.tuple_version_id, 'closure.json')));
+      const entry = closure.by_workflow['gsd-execute-phase'];
+      assert.equal(entry.dispatch_eligible, false);
+      assert.equal(entry.selected_transition, null);
+      assert.equal(entry.reason_code, evidence ? 'terminal_workflow' : 'authoritative_state_required');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  }
 });

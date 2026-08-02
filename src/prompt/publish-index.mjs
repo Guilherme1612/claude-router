@@ -69,6 +69,7 @@ export function recoverReleaseTuple({ ownedRoot, now = Date.now() } = {}) {
 export function publishCompiledIndex({
   ownedRoot, registry, registryVersionId, mapping, policyFingerprint, now = Date.now(), crashAt,
   contracts, relationships, intentPolicy, workflows, healthPolicy, suggestionReference,
+  workflowEvidenceById,
 } = {}) {
   const root = resolve(ownedRoot);
   if (['build', 'before-build'].includes(crashAt)) throw new Error('injected crash before tuple build');
@@ -99,12 +100,17 @@ export function publishCompiledIndex({
   const budgetByWorkflow = {};
   const summaryIndexByWorkflow = {};
   for (const workflowId of Object.keys(routes)) {
-    const family = workflowId.includes('-') ? workflowId.slice(0, workflowId.indexOf('-')) : workflowId;
-    const evidence = {
-      status: 'active', freshness: 'fresh',
-      position: { family, state: 'planned' },
-      gates: { plan_approved: true }, dependencies_safe: true,
-    };
+    const evidence = workflowEvidenceById?.[workflowId];
+    if (!evidence) {
+      closureByWorkflow[workflowId] = {
+        selected_transition: null, candidates: [], closure: [],
+        invokable_capabilities: [], required_models: [], required_permissions: [],
+        lifecycle_bindings: [], dispatch_eligible: false, reason_code: 'authoritative_state_required',
+      };
+      budgetByWorkflow[workflowId] = { report: null, dispatch_eligible: false, reason_code: 'authoritative_state_required' };
+      summaryIndexByWorkflow[workflowId] = null;
+      continue;
+    }
     const transitionResult = nextValidTransitions(evidence, WORKFLOW_TRANSITIONS);
     if (transitionResult.status !== 'candidates_available') {
       closureByWorkflow[workflowId] = {
@@ -117,16 +123,6 @@ export function publishCompiledIndex({
       continue;
     }
     const selected = selectWorkflow(transitionResult, undefined);
-    // WR-01 (latent v2 bug): position.state is hardcoded to 'planned' for every
-    // workflow regardless of its actual lifecycle state. The v1.2 audit recommends
-    // asserting selected.selection.workflow_id === workflowId here and deriving
-    // position.state from the selected transition's target state (selected.selection.to)
-    // rather than hardcoding 'planned'. Changing this today would alter the evidence
-    // fed to nextValidTransitions, changing the published index bytes — too risky for
-    // v1 which only wires gsd-execute-phase. The hardcoded 'planned' stays until v2
-    // derives position.state from the workflow declaration / selected transition.
-    // TODO(v2): position.state = selected.selection.to.
-    //
     // When the orchestrator selects a declared workflow that does NOT match the
     // route's workflow_id (e.g. a route for 'gsd-debug' — a real workflow not yet
     // in the 8 declared workflow-declarations — selects 'gsd-execute-phase' because
