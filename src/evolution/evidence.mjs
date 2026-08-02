@@ -240,12 +240,22 @@ export function createPersistentEvidenceStore({ root, now = Date.now, minimum_sa
       let records = [];
       if (existsSync(path)) {
         const lines = readFileSync(path, 'utf8').split('\n');
+        const seen = new Set();
         for (const line of lines) {
           if (line.length === 0) continue;
           let record;
           try { record = JSON.parse(line); } catch { continue; }
           if (!record || !record.signal || !record.scope) continue;
-          records.push(record);
+          const validated = validateEvidenceEnvelope(record.signal);
+          if (validated.status !== 'accepted') continue;
+          const expectedScope = requestedScope.kind === 'aggregate'
+            ? { kind: 'aggregate' }
+            : { kind: 'project', project_id: requestedScope.project_id };
+          if (JSON.stringify(record.scope) !== JSON.stringify(expectedScope)) continue;
+          const fingerprint = defaultHash(JSON.stringify(validated.signal));
+          if (record.fingerprint !== fingerprint || seen.has(fingerprint)) continue;
+          seen.add(fingerprint);
+          records.push({ scope: expectedScope, signal: validated.signal, fingerprint });
         }
       }
       const observations = records.filter((record) => {

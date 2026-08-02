@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -59,7 +59,7 @@ test('Task2.2 scope isolation — project-A records never appear in project-B wi
     const now = 1_750_000_000_000;
     const store = createPersistentEvidenceStore({ root, now: () => now });
     store.append(validSignal(), { scope: 'project', project_id: 'proj-A' });
-    store.append(validSignal(), { scope: 'project', project_id: 'proj-A' });
+    store.append(validSignal({ timestamp_ms: now - 1 }), { scope: 'project', project_id: 'proj-A' });
     store.append(validSignal(), { scope: 'project', project_id: 'proj-B' });
     const winA = store.window({ scope: 'project', project_id: 'proj-A' });
     const winB = store.window({ scope: 'project', project_id: 'proj-B' });
@@ -119,7 +119,7 @@ test('Task2.5 floor — window.sufficient false below 30 samples, true at ≥30'
     let win = store.window({ scope: 'project', project_id: 'p' });
     assert.equal(win.sample_count, 29);
     assert.equal(win.sufficient, false);
-    store.append(validSignal({ timestamp_ms: now }), { scope: 'project', project_id: 'p' });
+    store.append(validSignal({ timestamp_ms: now - 29_000 }), { scope: 'project', project_id: 'p' });
     win = store.window({ scope: 'project', project_id: 'p' });
     assert.equal(win.sample_count, 30);
     assert.equal(win.sufficient, true);
@@ -184,6 +184,29 @@ test('Task2.8 atomic append — directory 0o700, file append flag a mode 0o600',
     store.append(validSignal(), { scope: 'project', project_id: 'p' });
     const lines = readFileSync(join(root, 'project-p.jsonl'), 'utf8').split('\n').filter(Boolean);
     assert.equal(lines.length, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('disk window rejects replayed, tampered, truncated, and bad-fingerprint evidence', async () => {
+  const { createPersistentEvidenceStore } = await import(evidenceUrl);
+  const root = uniqueRoot();
+  try {
+    const now = 1_750_000_000_000;
+    const store = createPersistentEvidenceStore({ root, now: () => now, minimum_samples: 2 });
+    store.append(validSignal(), { scope: 'project', project_id: 'p' });
+    const path = join(root, 'project-p.jsonl');
+    const original = readFileSync(path, 'utf8').trim();
+    const tampered = JSON.parse(original);
+    tampered.signal.route_id = 'forged-route';
+    const badFingerprint = JSON.parse(original);
+    badFingerprint.signal.timestamp_ms -= 1;
+    badFingerprint.fingerprint = '0'.repeat(64);
+    appendFileSync(path, `${original}\n${JSON.stringify(tampered)}\n${JSON.stringify(badFingerprint)}\n{"scope":`);
+    const window = store.window({ scope: 'project', project_id: 'p' });
+    assert.equal(window.sample_count, 1);
+    assert.equal(window.sufficient, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
