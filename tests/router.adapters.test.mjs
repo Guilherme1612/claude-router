@@ -115,6 +115,25 @@ test('native discovery is deterministic, inert, contained, and ignores arbitrary
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('Claude discovery ignores plugin metadata and keeps installed plugin skills', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-adapters-plugin-metadata-'));
+  const claudeRoot = join(root, 'claude');
+  try {
+    const pluginRoot = join(claudeRoot, 'plugins/cache/demo/demo/1.0');
+    put(join(pluginRoot, '.claude-plugin/plugin.json'), { name: 'demo' });
+    put(join(pluginRoot, '.claude-plugin/marketplace.json'), { name: 'demo-marketplace' });
+    put(join(pluginRoot, 'gemini-extension.json'), { name: 'demo-gemini' });
+    put(join(pluginRoot, '.codex-plugin/hooks.json'), { name: 'demo-hooks' });
+    put(join(pluginRoot, '.claude/skills/real/SKILL.md'), markdown('real-plugin-skill', '/real-plugin-skill'));
+
+    const result = claude.discoverRoots({ claudeRoot });
+    const paths = result.observations.map((entry) => entry.provenance[0].relative_path);
+    assert.deepEqual(paths, ['plugins/cache/demo/demo/1.0/.claude/skills/real/SKILL.md']);
+    assert.equal(result.observations[0].name, 'real-plugin-skill');
+    assert.equal(result.observations[0].type, 'plugin_skill');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
 test('parse and discovery require explicit runtime roots', () => {
   assert.throws(() => claude.discoverRoots({}), /claudeRoot is required/);
   assert.throws(() => codex.discoverRoots({}), /codexRoot is required/);
@@ -270,6 +289,7 @@ test('real-world settings.json hooks: node_modules excluded, quoted TOML headers
     // (c) the multi-hook PostToolUse binding is valid with no duplicate_reference / path_escape.
     const binding = cr.observations.find((o) => o.name === 'settings:PostToolUse');
     assert.ok(binding, 'PostToolUse binding not observed');
+    assert.equal(binding.canonical_identity, 'binding:settings:PostToolUse');
     assert.equal(binding.hook_observation.valid, true);
     assert.equal(binding.hook_observation.reason, undefined);
   } finally { rmSync(root, { recursive: true, force: true }); }

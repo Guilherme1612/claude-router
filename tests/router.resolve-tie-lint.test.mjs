@@ -23,11 +23,12 @@ test('commandInventory: flat commands[] form the present inventory', () => {
 });
 
 test('commandInventory: runtime_commands slice is runtime-conditional', () => {
-  const manifest = mkManifest([], { claude: ['gsd-debug'], codex: ['systematic-debugging'] });
+  const manifest = mkManifest(['gsd-debug'], { claude: ['gsd-debug'], codex: ['systematic-debugging'] });
   assert.ok(commandInventory(manifest, { runtime: 'claude' }).has('gsd-debug'));
   assert.ok(!commandInventory(manifest, { runtime: 'claude' }).has('systematic-debugging'));
   assert.ok(commandInventory(manifest, { runtime: 'codex' }).has('systematic-debugging'));
-  assert.ok(!commandInventory(manifest, { runtime: 'codex' }).has('gsd-debug'));
+  assert.ok(!commandInventory(manifest, { runtime: 'codex' }).has('gsd-debug'),
+    'flat commands must not leak when an active runtime slice exists');
 });
 
 test('routeTargetInventory: slash routes may resolve routeable skills', () => {

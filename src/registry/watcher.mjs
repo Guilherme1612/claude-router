@@ -392,8 +392,8 @@ export function rebuildRuntimeArtifacts(config, { run = null } = {}) {
     const env = {
       ...process.env,
       ROUTER_RUNTIME: artifact.runtime,
-      ROUTER_CLAUDE_HOME: dirname(config.claude_root),
-      ROUTER_CODEX_HOME: dirname(config.codex_root),
+      ROUTER_CLAUDE_HOME: config.claude_root,
+      ROUTER_CODEX_HOME: config.codex_root,
       ROUTER_AGENTS_SKILLS_DIR: join(dirname(config.claude_root), '.agents', 'skills'),
       ROUTER_CLAUDE_JSON: join(dirname(config.claude_root), '.claude.json'),
       ROUTER_MANIFEST_OUT: artifact.manifest_path,
@@ -685,10 +685,19 @@ export function createRegistryReconciler(config, dependencies = {}) {
           recoveryReady = true;
           knownGood = recoveryResult.version_id || null;
         } else if (recoveryResult.recovery_status === 'blocked' && recoveryResult.reason_code === 'no_valid_history') {
-          // Bootstrap: first-ever activation (no valid history to roll back to).
-          // Route through the existing activator path with reason:'watcher'.
-          recoveryReady = true;
-          knownGood = null;
+          if (active.tuple_version_id) {
+            // A verified release tuple is already the authoritative route source.
+            // The legacy registry version store may be absent after lifecycle
+            // repair, so do not treat this as first-ever bootstrap or publish a
+            // zero-route recommendation-only candidate over the known-good tuple.
+            activation = { activation_status: 'preserved', reason_code: 'release_tuple_active' };
+            recoveryReady = false;
+          } else {
+            // Bootstrap: first-ever activation (no valid history to roll back to).
+            // Route through the existing activator path with reason:'watcher'.
+            recoveryReady = true;
+            knownGood = null;
+          }
         } else if (recoveryResult.recovery_status === 'blocked') {
           activation = { activation_status: 'preserved', reason_code: recoveryResult.reason_code || 'recovery_blocked' };
           recoveryReady = false;

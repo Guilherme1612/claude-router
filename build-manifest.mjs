@@ -42,12 +42,10 @@ const PROJECT_CONFIG_PATH = process.env.ROUTER_PROJECT_CONFIG_PATH || '';
 // D-04: runtime pin. Defaults to 'claude'; ROUTER_RUNTIME=codex pins the codex
 // home as the builder's config/home root so the manifest, mode-map, and hook
 // path resolve under ~/.codex for a Codex install (lockstep with the hook's
-// runtime-conditional RUNTIME_CONFIG_DIR). Additive + fail-open: unset or
-// 'claude' leaves every default path byte-for-byte identical to today. The full
-// Codex inventory walk is NOT implemented (deferred) — this only retargets the
-// existing writer's config root, it does not walk ~/.codex.
+// runtime-conditional RUNTIME_CONFIG_DIR).
 const RUNTIME = process.env.ROUTER_RUNTIME === 'codex' ? 'codex' : 'claude';
 const CODEX_HOME = process.env.ROUTER_CODEX_HOME || join(HOME, '.codex');
+const RUNTIME_HOME = RUNTIME === 'codex' ? CODEX_HOME : CLAUDE;
 // CONFIG_HOME is the runtime-pinned config root: CLAUDE when claude (unchanged
 // default), CODEX_HOME when ROUTER_RUNTIME=codex.
 const CONFIG_HOME = RUNTIME === 'codex' ? CODEX_HOME : CLAUDE;
@@ -164,6 +162,37 @@ function walkFiles(root, files = []) {
   return files;
 }
 
+function collectRuntimeRouteNames(runtimeHome) {
+  const names = new Set();
+  const addSkill = (skillFile, fallbackName) => {
+    if (!existsSync(skillFile)) return;
+    const { fm } = parseFrontmatter(readText(skillFile));
+    const name = stripLeadingSlash(fm.name || fallbackName);
+    if (name) names.add(name);
+  };
+
+  for (const entry of safeReaddir(join(runtimeHome, 'skills'))) {
+    if (entry.isDirectory()) addSkill(join(runtimeHome, 'skills', entry.name, 'SKILL.md'), entry.name);
+  }
+  for (const file of walkFiles(join(runtimeHome, 'plugins'))) {
+    if (basename(file) === 'SKILL.md' && basename(dirname(dirname(file))) === 'skills') {
+      addSkill(file, basename(dirname(file)));
+    }
+    if (basename(dirname(file)) === 'commands' && file.endsWith('.md')) {
+      addSkill(file, basename(file, '.md'));
+    }
+  }
+  for (const file of walkFiles(runtimeHome)) {
+    if (basename(dirname(file)) === 'commands' && file.endsWith('.md')) {
+      addSkill(file, basename(file, '.md'));
+    }
+  }
+  for (const entry of safeReaddir(AGENTS_SKILLS_DIR)) {
+    if (entry.isDirectory()) addSkill(join(AGENTS_SKILLS_DIR, entry.name, 'SKILL.md'), entry.name);
+  }
+  return [...names].sort();
+}
+
 function toolsList(fm) {
   const tools = fm.tools || '';
   if (Array.isArray(tools)) return tools;
@@ -178,9 +207,11 @@ function pluginSourceFromPath(p, fallback = '?') {
 }
 
 const manifest = {
-  generated_at_runtime_note: 'static snapshot of ~/.claude + ~/.agents + known project .claude/skills dirs',
+  generated_at_runtime_note: 'static snapshot of the active runtime + ~/.agents + known project .claude/skills dirs',
   registry_scope: {
     claude_home: CLAUDE,
+    runtime_home: RUNTIME_HOME,
+    runtime: RUNTIME,
     agents_skills_dir: AGENTS_SKILLS_DIR,
     project_skill_dirs: DISCOVERED_PROJECT_SKILL_DIRS,
     skill_lock: SKILL_LOCK_PATH,
@@ -193,6 +224,7 @@ const manifest = {
   agents: [],
   hooks: [],
   commands: [],
+  runtime_commands: { claude: [], codex: [] },
   mcp_servers: [],
   unwired_mcp_refs: {},
   plugins_enabled: [],
@@ -206,9 +238,9 @@ const manifest = {
   counts: {},
 };
 
-// SKILLS — ~/.claude/skills (incl. symlinks into ~/.agents)
-for (const e of safeReaddir(join(CLAUDE, 'skills'))) {
-  const d = join(CLAUDE, 'skills', e.name);
+// SKILLS — active runtime skills (incl. symlinks into ~/.agents)
+for (const e of safeReaddir(join(RUNTIME_HOME, 'skills'))) {
+  const d = join(RUNTIME_HOME, 'skills', e.name);
   if (!isDirFollow(d)) continue;
   const sf = join(d, 'SKILL.md');
   if (!existsSync(sf)) continue;
@@ -229,10 +261,10 @@ for (const e of safeReaddir(join(CLAUDE, 'skills'))) {
   });
 }
 
-// AGENTS — ~/.claude/agents/*.md
-for (const e of safeReaddir(join(CLAUDE, 'agents'))) {
+// AGENTS — active runtime agents/*.md
+for (const e of safeReaddir(join(RUNTIME_HOME, 'agents'))) {
   if (!e.isFile() || !e.name.endsWith('.md')) continue;
-  const f = join(CLAUDE, 'agents', e.name);
+  const f = join(RUNTIME_HOME, 'agents', e.name);
   const { fm, body } = parseFrontmatter(readText(f));
   manifest.agents.push({
     id: fm.name || e.name.replace(/\.md$/, ''),
@@ -250,7 +282,7 @@ for (const e of safeReaddir(join(CLAUDE, 'agents'))) {
 
 // PLUGIN AGENTS — plugins/**/agents/*.md, dedup by stem
 const seenAgentStems = new Set(manifest.agents.map(a => a.name));
-for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
+for (const cf of walkFiles(join(RUNTIME_HOME, 'plugins'))) {
   if (basename(dirname(cf)) !== 'agents' || !cf.endsWith('.md')) continue;
   const stem = basename(cf, '.md');
   if (seenAgentStems.has(stem)) continue;
@@ -270,16 +302,16 @@ for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
   });
 }
 
-// HOOKS — files in ~/.claude/hooks + hooks/lib
+// HOOKS — files in the active runtime hooks + hooks/lib
 const hookFiles = [];
-for (const e of safeReaddir(join(CLAUDE, 'hooks'))) {
+for (const e of safeReaddir(join(RUNTIME_HOME, 'hooks'))) {
   if (!e.isFile() || e.name.startsWith('.')) continue;
   const ext = extname(e.name).slice(1);
   const kind = ({ js: 'node', mjs: 'node', cjs: 'node', sh: 'shell' })[ext] || ext;
-  const f = join(CLAUDE, 'hooks', e.name);
+  const f = join(RUNTIME_HOME, 'hooks', e.name);
   hookFiles.push({ id: e.name.replace(/\.[^.]+$/, ''), name: e.name, type: kind, path: f, size: fileStatSize(f) });
 }
-const libDir = join(CLAUDE, 'hooks', 'lib');
+const libDir = join(RUNTIME_HOME, 'hooks', 'lib');
 for (const e of safeReaddir(libDir)) {
   if (!e.isFile()) continue;
   const f = join(libDir, e.name);
@@ -288,7 +320,7 @@ for (const e of safeReaddir(libDir)) {
 manifest.hooks = hookFiles;
 
 // settings.json — hooks config + permissions + enabledPlugins
-const settings = readJson(join(CLAUDE, 'settings.json'), {}) || {};
+const settings = readJson(join(RUNTIME_HOME, 'settings.json'), {}) || {};
 const hookBindings = [];
 for (const [event, matchers] of Object.entries(settings.hooks || {})) {
   for (const matcherEntry of matchers || []) {
@@ -309,7 +341,7 @@ manifest.settings = {
 manifest.plugins_enabled = Object.keys(settings.enabledPlugins || {});
 
 // INSTALLED PLUGINS — plugins/installed_plugins.json
-const ip = readJson(join(CLAUDE, 'plugins', 'installed_plugins.json'), {}) || {};
+const ip = readJson(join(RUNTIME_HOME, 'plugins', 'installed_plugins.json'), {}) || {};
 const installedPlugins = [];
 for (const [key, records] of Object.entries(ip.plugins || {})) {
   const r = (records && records[0]) || {};
@@ -326,7 +358,7 @@ manifest.installed_plugins = installedPlugins;
 
 // COMMANDS — plugins/**/commands/*.md + gsd-core/**/commands/*.md, dedup by id
 const seenCmds = new Set();
-for (const root of [join(CLAUDE, 'plugins'), join(CLAUDE, 'gsd-core')]) {
+for (const root of [join(RUNTIME_HOME, 'plugins'), join(RUNTIME_HOME, 'gsd-core')]) {
   for (const cf of walkFiles(root)) {
     if (basename(dirname(cf)) !== 'commands' || !cf.endsWith('.md')) continue;
     const { fm, body: _body } = parseFrontmatter(readText(cf));
@@ -351,7 +383,7 @@ for (const root of [join(CLAUDE, 'plugins'), join(CLAUDE, 'gsd-core')]) {
 
 // MCP SERVERS — plugins/**/.mcp.json + mcp.json + optional project .mcp.json
 const mcpFiles = [];
-for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
+for (const cf of walkFiles(join(RUNTIME_HOME, 'plugins'))) {
   const b = basename(cf);
   if (b === '.mcp.json' || b === 'mcp.json') mcpFiles.push(cf);
 }
@@ -378,7 +410,7 @@ for (const mf of mcpFiles) {
 
 // PLUGIN-PROVIDED SKILLS — plugins/**/skills/*/SKILL.md, dedup by (source, name)
 const seenPSkills = new Set();
-for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
+for (const cf of walkFiles(join(RUNTIME_HOME, 'plugins'))) {
   if (basename(cf) !== 'SKILL.md' || basename(dirname(dirname(cf))) !== 'skills') continue;
   const sname = basename(dirname(cf));
   const { fm, body } = parseFrontmatter(readText(cf));
@@ -452,7 +484,7 @@ for (const proj of DISCOVERED_PROJECT_SKILL_DIRS) {
 
 // PLUGIN MANIFESTS — every .claude-plugin/plugin.json
 const seenPm = new Set();
-for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
+for (const cf of walkFiles(join(RUNTIME_HOME, 'plugins'))) {
   if (basename(cf) !== 'plugin.json' || basename(dirname(cf)) !== '.claude-plugin') continue;
   const pm = readJson(cf, {}) || {};
   const pname = pm.name || basename(dirname(dirname(cf)));
@@ -474,7 +506,7 @@ for (const cf of walkFiles(join(CLAUDE, 'plugins'))) {
 }
 
 // MARKETPLACES — known_marketplaces.json
-const km = readJson(join(CLAUDE, 'plugins', 'known_marketplaces.json'), {}) || {};
+const km = readJson(join(RUNTIME_HOME, 'plugins', 'known_marketplaces.json'), {}) || {};
 for (const [mname, mconf] of Object.entries(km)) {
   const src = mconf.source || {};
   manifest.marketplaces.push({
@@ -528,7 +560,7 @@ for (const pm of manifest.plugin_manifests) {
 }
 
 // CLAUDE.md
-const cmdFile = join(CLAUDE, 'CLAUDE.md');
+const cmdFile = join(RUNTIME_HOME, 'CLAUDE.md');
 if (existsSync(cmdFile)) {
   manifest.claude_md = {
     path: cmdFile,
@@ -558,6 +590,10 @@ for (const a of manifest.agents) {
   }
 }
 manifest.unwired_mcp_refs = unwiredRefs;
+manifest.runtime_commands = {
+  claude: collectRuntimeRouteNames(CLAUDE),
+  codex: collectRuntimeRouteNames(CODEX_HOME),
+};
 
 manifest.counts = {
   skills: manifest.skills.length,

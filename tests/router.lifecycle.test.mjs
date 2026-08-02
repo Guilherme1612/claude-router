@@ -148,9 +148,10 @@ test('one command installs router, binding, Codex marker, and complete ownership
     //   to both owned roots, runs once for claude's ownedRoot post-readiness)
     // + 20 = 10 gate fixtures (tests/*.test.mjs) × 2 roots (Blocker-2b: production
     //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality)
+    // + 6 = 3 shared gate helpers (tests/helpers/*.mjs) × 2 roots
     // + 2 = fresh-install mode-map seed, one per runtime
-    // = 225
-    assert.equal(manifest.files.length, 225);
+    // = 231
+    assert.equal(manifest.files.length, 231);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -171,6 +172,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
       }
       for (const module of ['compile-index.mjs', 'publish-index.mjs']) {
         assert.equal(existsSync(join(runtimeRoot, 'modules', 'prompt', module)), true);
+      }
+      for (const helper of ['inventory-fixture.mjs', 'latency-isolated.mjs', 'test-mode-seam.mjs']) {
+        assert.equal(existsSync(join(runtimeRoot, 'tests', 'helpers', helper)), true);
       }
     }
     for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {

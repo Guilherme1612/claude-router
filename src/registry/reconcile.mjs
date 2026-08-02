@@ -386,7 +386,14 @@ export function reconcileCandidate(options = {}) {
       }
     }
     for (const record of candidate.records) {
-      if (record.lifecycle === 'ready' && record.dispatchable && record.invocation.command?.trim()) continue;
+      const inert = ['container', 'configuration', 'instruction', 'opaque'].includes(record.semantic_type)
+        || ['container', 'configuration', 'instruction', 'opaque'].includes(record.lifecycle_role);
+      const recommendationOnly = record.contract?.fields?.risk?.value === 'unknown'
+        && record.contract?.fields?.reversibility?.value === 'unknown';
+      if (inert && record.lifecycle === 'partial') continue;
+      if (record.lifecycle === 'ready'
+        && record.invocation.command?.trim()
+        && (record.dispatchable || recommendationOnly)) continue;
       verdicts.push(verdict({
         code: 'target_not_dispatchable',
         subject: { kind: 'target', id: record.id },

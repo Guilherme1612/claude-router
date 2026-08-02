@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { reconcileCandidate } from '../src/registry/reconcile.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
+import { buildCapabilityContract } from '../src/registry/contract.mjs';
 
 export function capability(overrides = {}) {
   const runtime = overrides.runtime || 'claude';
@@ -61,6 +62,33 @@ test('reconciliation is deterministic, portable, pure, and preserves active stat
   assert.equal(quarantined.active_fingerprint, active.fingerprint);
   assert.ok(quarantined.verdicts.every(verdict => verdict.dispatchable === false && verdict.corrective_action));
   assert.doesNotMatch(stableStringify(quarantined), /\/Users\/|[A-Za-z]:\\\\/);
+});
+
+test('ready recommendation-only records remain visible without blocking publication', () => {
+  const recommendation = capability({
+    name: 'recommendation',
+    canonical_identity: 'router/recommendation',
+    dispatchable: false,
+  });
+  recommendation.contract = buildCapabilityContract(recommendation);
+  const result = reconcileCandidate({ candidate: candidate([recommendation]), hookInventory: [] });
+  assert.equal(result.disposition, 'eligible');
+  assert.equal(result.verdicts.some(value => value.code === 'target_not_dispatchable'), false);
+});
+
+test('inert instruction and configuration records do not block publication', () => {
+  const inert = capability({
+    name: 'instructions',
+    canonical_identity: 'router/instructions',
+    semantic_type: 'instruction',
+    lifecycle_role: 'instruction',
+    lifecycle: 'partial',
+    dispatchable: false,
+    invocation: { runtime: 'claude', availability: 'unavailable', reason: 'inert-artifact' },
+  });
+  const result = reconcileCandidate({ candidate: candidate([inert]), hookInventory: [] });
+  assert.equal(result.disposition, 'eligible');
+  assert.equal(result.verdicts.some(value => value.code === 'target_not_dispatchable'), false);
 });
 
 test('malformed candidates and injected failures fail closed without changing active bytes', () => {

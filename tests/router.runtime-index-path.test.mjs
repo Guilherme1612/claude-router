@@ -100,7 +100,9 @@ for (const runtime of ['claude', 'codex']) {
 
     assert.ok(flatIndexes.commands.includes('flat-command'));
     assert.ok(flatIndexes.commands.includes('legacy-command'));
-    assert.ok(emptyRuntimeIndexes.commands.includes('flat-command'));
-    assert.ok(emptyRuntimeIndexes.commands.includes('legacy-command'));
+    // An explicitly present empty runtime slice is authoritative; do not leak
+    // legacy flat commands into a runtime with no registered slash targets.
+    assert.ok(!emptyRuntimeIndexes.commands.includes('flat-command'));
+    assert.ok(!emptyRuntimeIndexes.commands.includes('legacy-command'));
   });
 }

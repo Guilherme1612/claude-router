@@ -49,14 +49,14 @@ test('runtime artifact refresh builds Claude and Codex manifests with isolated o
     ],
   }, {
     run(artifact, env) {
-      calls.push({ runtime: env.ROUTER_RUNTIME, builder: artifact.builder_path, manifest: env.ROUTER_MANIFEST_OUT, modeMap: env.ROUTER_MODE_MAP_PATH, hook: env.ROUTER_HOOK_PATH });
+      calls.push({ runtime: env.ROUTER_RUNTIME, claudeHome: env.ROUTER_CLAUDE_HOME, codexHome: env.ROUTER_CODEX_HOME, builder: artifact.builder_path, manifest: env.ROUTER_MANIFEST_OUT, modeMap: env.ROUTER_MODE_MAP_PATH, hook: env.ROUTER_HOOK_PATH });
       return { status: 0 };
     },
   });
   assert.equal(result.status, 'built');
   assert.deepEqual(calls, [
-    { runtime: 'claude', builder: '/owned/claude/build-manifest.mjs', manifest: '/owned/claude/manifest.json', modeMap: '/owned/claude/mode-map.json', hook: '/home/user/.claude/hooks/router.mjs' },
-    { runtime: 'codex', builder: '/owned/codex/build-manifest.mjs', manifest: '/owned/codex/manifest.json', modeMap: '/owned/codex/mode-map.json', hook: '/home/user/.codex/hooks/router.mjs' },
+    { runtime: 'claude', claudeHome: '/home/user/.claude', codexHome: '/home/user/.codex', builder: '/owned/claude/build-manifest.mjs', manifest: '/owned/claude/manifest.json', modeMap: '/owned/claude/mode-map.json', hook: '/home/user/.claude/hooks/router.mjs' },
+    { runtime: 'codex', claudeHome: '/home/user/.claude', codexHome: '/home/user/.codex', builder: '/owned/codex/build-manifest.mjs', manifest: '/owned/codex/manifest.json', modeMap: '/owned/codex/mode-map.json', hook: '/home/user/.codex/hooks/router.mjs' },
   ]);
 });
 
@@ -495,6 +495,25 @@ test('blocked recovery preserves authority and is retried before later activatio
   await reconcile({ diff: { events: [], diagnostics: [] } });
   assert.deepEqual(calls, ['recover', 'recover', 'map', 'verify', 'activate']);
   assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
+});
+
+test('valid release-tuple authority is preserved when legacy registry history is absent', async () => {
+  const calls = [];
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned' }, {
+    acquireRegistry: () => ({}), refreshIncrementalAcquisition: value => value,
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{"tuple":"known-good"}\n', fingerprint: 'tuple', authority_status: 'active', tuple_version_id: 't1-known-good00000' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{"tuple":"known-good"}\n', active_fingerprint: 'tuple' }),
+    writeJson: async () => {},
+    recoverActiveVersion: async () => ({ recovery_status: 'blocked', reason_code: 'no_valid_history' }),
+    mapCandidateRegistry: async () => { calls.push('map'); return { schema_version: 1, subjects: [], summary: { disposition: 'complete' } }; },
+    produceActivationVerification: async () => { calls.push('verify'); return { disposition: 'passing', complete: true }; },
+    activateCandidate: async () => { calls.push('activate'); return { activation_status: 'activated' }; },
+  });
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(calls, []);
+  assert.equal(reconcile.lastReconciliation.activation_status, 'preserved');
+  assert.equal(reconcile.lastReconciliation.activation_reason, 'release_tuple_active');
 });
 
 test('quarantine publishes corrective diagnostics and preserves exact active authority', async () => {

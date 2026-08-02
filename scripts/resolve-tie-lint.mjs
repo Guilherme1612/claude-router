@@ -36,6 +36,7 @@ export function commandInventory(manifest, opts = {}) {
   const slice = rc && Array.isArray(rc[runtime]) ? rc[runtime] : null;
   if (slice) {
     for (const name of slice) set.add(stripLeadingSlash(name));
+    return set;
   }
   for (const c of (manifest && manifest.commands) || []) {
     set.add(stripLeadingSlash(c && (c.name || c.id)));

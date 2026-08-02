@@ -70,7 +70,7 @@ try {
     // past the 5s default. Give the owned controller enough headroom to publish
     // its first `ready` status before the installer declares readiness failure
     // and rolls the deploy back.
-    readinessTimeoutMs: 60_000,
+    readinessTimeoutMs: 180_000,
     ...(args.includes('--project-root') ? { projectRoot: path.resolve(arg('project-root')) } : {}),
   };
 

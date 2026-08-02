@@ -230,8 +230,8 @@ function claudeLayout(rel) {
   if (/^capabilities\/[^/]+$/.test(rel)) {
     return { type: 'opaque', semanticType: 'unknown', lifecycleRole: 'opaque', format: 'opaque' };
   }
-  if (/^(skills|plugins|agents-store|agents|commands|hooks|bindings|dependencies)\/.+\.json$/.test(rel)) {
-    const map = { skills: 'skill', plugins: 'plugin_skill', 'agents-store': 'agents_store_skill', agents: 'agent', commands: 'command', hooks: 'hook', bindings: 'binding', dependencies: 'dependency' };
+  if (/^(skills|agents-store|agents|commands|hooks|bindings|dependencies)\/.+\.json$/.test(rel)) {
+    const map = { skills: 'skill', 'agents-store': 'agents_store_skill', agents: 'agent', commands: 'command', hooks: 'hook', bindings: 'binding', dependencies: 'dependency' };
     return { type: map[rel.split('/')[0]], format: 'json' };
   }
   return null;
@@ -399,7 +399,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
           ? bindings.filter((entry) => !JSON.stringify(entry).includes('router.mjs')) : bindings;
         if (Array.isArray(portableBindings) && portableBindings.length === 0) continue;
         filteredHooks[event] = portableBindings;
-        records.push({ ...base, type: 'binding', name: `settings:${event}`, data: { schema_version: 1, command: event, args: [], native_invocation: { event, bindings: portableBindings } } });
+        records.push({ ...base, type: 'binding', name: `settings:${event}`, data: { schema_version: 1, command: event, args: [], canonical_identity: `binding:settings:${event}`, native_invocation: { event, bindings: portableBindings } } });
       }
       const filteredSettingsFingerprint = fingerprint(Buffer.from(stableStringify({ ...data, hooks: filteredHooks }), 'utf8'));
       for (const record of records) record.sourceFingerprint = filteredSettingsFingerprint;

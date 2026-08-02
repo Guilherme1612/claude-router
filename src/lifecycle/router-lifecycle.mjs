@@ -434,6 +434,9 @@ export async function installRouter(options) {
     'tests/router.perf-evolved.test.mjs',
     'tests/router-graphify-integration.test.mjs',
     'tests/router.inject.test.mjs',
+    'tests/helpers/inventory-fixture.mjs',
+    'tests/helpers/latency-isolated.mjs',
+    'tests/helpers/test-mode-seam.mjs',
   ];
   const gateFixtureValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => [
     ...gateEntryNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
@@ -651,6 +654,8 @@ export async function installRouter(options) {
         ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))],
         ...[...new Set(gateEntryNames.map(name => dirname(join(p.ownedRoot, name))))],
         ...[...new Set(gateEntryNames.map(name => dirname(join(p.codexOwnedRoot, name))))],
+        ...[...new Set(gateFixtureNames.map(name => dirname(join(p.ownedRoot, name))))],
+        ...[...new Set(gateFixtureNames.map(name => dirname(join(p.codexOwnedRoot, name))))],
         // Blocker-2: prune the deployed gate-fixture trees. `src` mirrors
         // modules/ (isomorphic subdir layout) and `tests` holds the 10 gate
         // fixtures; both must be empty before the owned root can be removed.

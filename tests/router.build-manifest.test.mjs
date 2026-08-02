@@ -19,6 +19,7 @@ const TOP_KEYS = [
   'plugins_enabled', 'installed_plugins', 'plugin_manifests', 'marketplaces',
   'project_config', 'plugin_hooks', 'settings', 'claude_md', 'counts',
   'registry_scope', 'generated_at_runtime_note', 'manifest_fingerprint',
+  'runtime_commands',
 ];
 
 function freshHome() {
@@ -40,6 +41,7 @@ function runBuilder(root, extraEnv = {}) {
     || join(root, '.claude', 'router', 'coverage-report.json');
   const env = {
     ROUTER_CLAUDE_HOME: join(root, '.claude'),
+    ROUTER_CODEX_HOME: join(root, '.codex'),
     ROUTER_AGENTS_SKILLS_DIR: join(root, '.agents', 'skills'),
     ROUTER_SKILL_LOCK_PATH: join(root, '.agents', '.skill-lock.json'),
     ROUTER_CLAUDE_JSON: join(root, '.claude.json'),
@@ -61,6 +63,7 @@ test('build-manifest: empty HOME → exit 0, valid schema, all-zero counts', () 
     for (const [k, v] of Object.entries(m.counts)) assert.equal(v, 0, `counts.${k} must be 0 on empty HOME`);
     assert.deepEqual(m.skills, []);
     assert.deepEqual(m.agents, []);
+    assert.deepEqual(m.runtime_commands, { claude: [], codex: [] });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -82,8 +85,11 @@ test('build-manifest: populated HOME → parsed skills/agents/commands + mcp ref
     mkdirSync(join(root, '.claude', 'plugins', 'mp', 'plug', 'commands'), { recursive: true });
     writeFileSync(join(root, '.claude', 'plugins', 'mp', 'plug', 'commands', 'c.md'),
       '---\nname: c\ndescription: a command\n---\ncmd body');
+    mkdirSync(join(root, '.codex', 'skills', 'codex-demo'), { recursive: true });
+    writeFileSync(join(root, '.codex', 'skills', 'codex-demo', 'SKILL.md'),
+      '---\nname: codex-demo\ndescription: codex skill\n---\nobj');
 
-    const { r, out } = runBuilder(root);
+    const { r, out } = runBuilder(root, { ROUTER_CODEX_HOME: join(root, '.codex') });
     assert.equal(r.status, 0, `builder exited ${r.status}: ${r.stderr}`);
     const m = JSON.parse(readFileSync(out, 'utf8'));
     assert.ok(m.counts.skills >= 1, `skills count ${m.counts.skills}`);
@@ -95,6 +101,34 @@ test('build-manifest: populated HOME → parsed skills/agents/commands + mcp ref
     assert.deepEqual(bob.requires_mcp_not_in_manifest, ['foo'],
       `bob mcp refs: ${JSON.stringify(bob.requires_mcp_not_in_manifest)}`);
     assert.ok(m.skills.some(s => s.name === 'demo'), 'demo skill must be parsed');
+    assert.ok(m.runtime_commands.claude.includes('c'), 'Claude runtime command slice must be populated');
+    assert.ok(m.runtime_commands.codex.includes('codex-demo'), 'Codex runtime skill slice must be populated');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('build-manifest: Codex runtime uses Codex-local inventory', () => {
+  const root = freshHome();
+  try {
+    mkdirSync(join(root, '.claude', 'skills', 'claude-only'), { recursive: true });
+    writeFileSync(join(root, '.claude', 'skills', 'claude-only', 'SKILL.md'),
+      '---\nname: claude-only\n---\nobj');
+    mkdirSync(join(root, '.codex', 'skills', 'codex-only'), { recursive: true });
+    writeFileSync(join(root, '.codex', 'skills', 'codex-only', 'SKILL.md'),
+      '---\nname: codex-only\n---\nobj');
+    const out = join(root, '.codex', 'router', 'claude-inventory-manifest.json');
+    const { r } = runBuilder(root, {
+      ROUTER_RUNTIME: 'codex',
+      ROUTER_CODEX_HOME: join(root, '.codex'),
+      ROUTER_MANIFEST_OUT: out,
+      ROUTER_HOOK_PATH: join(root, 'missing-router.mjs'),
+    });
+    assert.equal(r.status, 0, `builder exited ${r.status}: ${r.stderr}`);
+    const m = JSON.parse(readFileSync(out, 'utf8'));
+    assert.ok(m.skills.some(s => s.name === 'codex-only'), 'Codex skill must be active inventory');
+    assert.ok(!m.skills.some(s => s.name === 'claude-only'), 'Claude skill must not leak into Codex inventory');
+    assert.equal(m.registry_scope.runtime, 'codex');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

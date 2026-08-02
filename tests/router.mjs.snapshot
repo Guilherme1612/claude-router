@@ -723,7 +723,7 @@ export function buildTargetIndexes(manifest) {
   const blockedAgent = (entry) => hasMissingMcp(entry);
   const globalAgentsStore = (entry) => String(entry?.scope || '') === 'global';
   const runtimeSlice = (manifest?.runtime_commands || {})[RUNTIME];
-  const commandEntries = Array.isArray(runtimeSlice) && runtimeSlice.length > 0
+  const commandEntries = Array.isArray(runtimeSlice)
     ? runtimeSlice
     : manifest?.commands;
   const commands = namesFromEntries(commandEntries);
