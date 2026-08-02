@@ -73,7 +73,7 @@ export function deriveInvalidationInput(built, lifecycle = {}) {
 // reading the canary window. Cursor-based incremental append avoids duplicate
 // evidence on every reconcile (the watcher reconciles every few seconds; the
 // telemetry file grows monotonically between rotations). The cursor records the
-// last-consumed file size + mtime + line count; if the file is unchanged since
+// last complete byte offset plus file identity; if the file is unchanged since
 // the last ingest the call is a no-op. Rotation (file shrank) resets and
 // re-ingests from the start — safe because a rotated file no longer contains
 // the pre-rotation records already stored. Privacy-denied and non-canary-
@@ -96,14 +96,19 @@ export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, proj
   if (cursor && cursor.size === size && cursor.mtimeMs === mtimeMs) {
     return { ingested: 0, skipped: 'unchanged' };
   }
-  const lines = readFileSync(telemetryPath, 'utf8').split('\n');
-  let startLine = 0;
-  if (cursor && cursor.size <= size && cursor.lineCount <= lines.length) {
-    startLine = cursor.lineCount;
-  }
+  const sameFile = cursor
+    && cursor.dev === stat.dev
+    && cursor.ino === stat.ino
+    && Number.isSafeInteger(cursor.offset)
+    && cursor.offset >= 0
+    && cursor.offset <= size;
+  const startOffset = sameFile ? cursor.offset : 0;
+  const remaining = readFileSync(telemetryPath).subarray(startOffset);
+  const lastNewline = remaining.lastIndexOf(0x0a);
+  const complete = lastNewline >= 0 ? remaining.subarray(0, lastNewline + 1) : Buffer.alloc(0);
+  const lines = complete.toString('utf8').split('\n');
   let ingested = 0;
-  for (let i = startLine; i < lines.length; i += 1) {
-    const line = lines[i];
+  for (const line of lines) {
     if (line.length === 0) continue;
     let record;
     try {
@@ -118,12 +123,18 @@ export function ingestTelemetryEvidence({ store, telemetryPath, cursorPath, proj
   }
   try {
     mkdirSync(dirname(cursorPath), { recursive: true, mode: 0o700 });
-    writeFileSync(cursorPath, JSON.stringify({ size, mtimeMs, lineCount: lines.length }), { mode: 0o600 });
+    writeFileSync(cursorPath, JSON.stringify({
+      size,
+      mtimeMs,
+      dev: stat.dev,
+      ino: stat.ino,
+      offset: startOffset + complete.length,
+    }), { mode: 0o600 });
   } catch {
     // Cursor persistence is best-effort; a failed write only risks re-ingesting
     // duplicates next reconcile (bounded by the 7d retention window filter).
   }
-  return { ingested, skipped: startLine > 0 ? 'incremental' : 'full' };
+  return { ingested, skipped: startOffset > 0 ? 'incremental' : 'full' };
 }
 
 export function createRegistryWatcher(options) {

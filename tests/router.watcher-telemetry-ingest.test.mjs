@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -132,6 +132,38 @@ test('ingestTelemetryEvidence skips privacy-denied and unrouted records', () => 
     writeFileSync(telemetryPath, records.map((r) => JSON.stringify(r)).join('\n') + '\n');
     const r = ingestTelemetryEvidence({ store, telemetryPath, cursorPath: join(root, 'evidence', 'ingest-cursor.json'), projectId: 'global' });
     assert.equal(r.ingested, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ingestTelemetryEvidence consumes appended records after a newline cursor', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-ingest-append-'));
+  try {
+    const store = createPersistentEvidenceStore({ root: join(root, 'evidence') });
+    const telemetryPath = join(root, 'telemetry.jsonl');
+    const cursorPath = join(root, 'evidence', 'ingest-cursor.json');
+    writeFileSync(telemetryPath, `${JSON.stringify(validRecord(0))}\n`);
+    assert.equal(ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId: 'global' }).ingested, 1);
+    appendFileSync(telemetryPath, `${JSON.stringify(validRecord(1))}\n`);
+    assert.equal(ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId: 'global' }).ingested, 1);
+    assert.equal(store.window({ project_id: 'global' }).sample_count, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ingestTelemetryEvidence waits for a partial line to be completed', () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-ingest-partial-'));
+  try {
+    const store = createPersistentEvidenceStore({ root: join(root, 'evidence') });
+    const telemetryPath = join(root, 'telemetry.jsonl');
+    const cursorPath = join(root, 'evidence', 'ingest-cursor.json');
+    const line = JSON.stringify(validRecord(0));
+    writeFileSync(telemetryPath, line.slice(0, -1));
+    assert.equal(ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId: 'global' }).ingested, 0);
+    appendFileSync(telemetryPath, `${line.slice(-1)}\n`);
+    assert.equal(ingestTelemetryEvidence({ store, telemetryPath, cursorPath, projectId: 'global' }).ingested, 1);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
