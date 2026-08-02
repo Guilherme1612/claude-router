@@ -3,11 +3,12 @@
 // deterministic resolve-tie-lint gate (scripts/resolve-tie-lint.mjs).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { lintModeMap, commandInventory, TIE_GAP } from '../scripts/resolve-tie-lint.mjs';
+import { lintModeMap, commandInventory, routeTargetInventory, TIE_GAP } from '../scripts/resolve-tie-lint.mjs';
 
-function mkManifest(commandNames, runtimeCommands) {
+function mkManifest(commandNames, runtimeCommands, skills = []) {
   return {
     commands: commandNames.map((name) => ({ name })),
+    skills: skills.map((name) => ({ name })),
     ...(runtimeCommands ? { runtime_commands: runtimeCommands } : {}),
   };
 }
@@ -27,6 +28,16 @@ test('commandInventory: runtime_commands slice is runtime-conditional', () => {
   assert.ok(!commandInventory(manifest, { runtime: 'claude' }).has('systematic-debugging'));
   assert.ok(commandInventory(manifest, { runtime: 'codex' }).has('systematic-debugging'));
   assert.ok(!commandInventory(manifest, { runtime: 'codex' }).has('gsd-debug'));
+});
+
+test('routeTargetInventory: slash routes may resolve routeable skills', () => {
+  const manifest = mkManifest([], null, ['gsd-debug']);
+  assert.ok(routeTargetInventory(manifest).has('gsd-debug'));
+  const { violations } = lintModeMap({ entries: [{
+    id: 'debug', mode: 'gsd-debug', invoke_kind: 'slash',
+    resolve: [{ name: 'gsd-debug', weight: 1 }],
+  }] }, manifest);
+  assert.deepEqual(violations, []);
 });
 
 test('tie-lint: a single-member resolve list is never a near-tie', () => {

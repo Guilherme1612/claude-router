@@ -114,7 +114,11 @@ test('build-manifest: env-var project dirs honored (project_scoped_skills + proj
     // ~/.claude.json project entry
     const cjPath = join(root, '.claude.json');
     writeFileSync(cjPath, JSON.stringify({
-      projects: { '/some/proj': { allowedTools: ['Read'], mcpServers: { projsrv2: {} }, enabledMcpjsonServers: ['projsrv2'] } },
+      projects: {
+        [root]: {},
+        '/some/proj': { allowedTools: ['Read'], mcpServers: { projsrv2: {} }, enabledMcpjsonServers: ['projsrv2'] },
+        [proj]: {},
+      },
     }) + '\n');
 
     const { r, out } = runBuilder(root, {
@@ -126,6 +130,8 @@ test('build-manifest: env-var project dirs honored (project_scoped_skills + proj
     const m = JSON.parse(readFileSync(out, 'utf8'));
     assert.ok(m.project_scoped_skills.some(s => s.name === 'pskill' && s.scope === 'project'),
       `project_scoped_skills: ${JSON.stringify(m.project_scoped_skills)}`);
+    assert.ok(m.registry_scope.project_skill_dirs.includes(proj), 'project root from ~/.claude.json must be discovered');
+    assert.ok(!m.registry_scope.project_skill_dirs.includes(root), 'global .claude/skills must not be reclassified as project-scoped');
     assert.ok(m.mcp_servers.some(s => s.id === 'projsrv'), 'project mcp server projsrv must appear');
     assert.deepEqual(m.project_config.allowed_tools, ['Read']);
     assert.deepEqual(m.project_config.enabled_mcpjson_servers, ['projsrv2']);

@@ -1,5 +1,5 @@
-// Fresh-account onboarding: install runs the inventory manifest builder once
-// post-readiness so a brand-new account (empty ~/.claude / ~/.codex) is fully
+// Fresh-account onboarding: install runs the inventory manifest builder once per
+// runtime post-readiness so a brand-new account (empty ~/.claude / ~/.codex) is fully
 // ready to route. The builder is an injectable seam (options.manifestBuilder,
 // mirroring options.launchController); this test stubs it to write a minimal
 // valid manifest so the install test stays fast + decoupled from the real
@@ -51,6 +51,7 @@ function fixture() {
     routerPath: join(claudeRoot, 'hooks', 'router.mjs'),
     ownedRoot: join(claudeRoot, 'router'),
     manifestPath: join(claudeRoot, 'router', 'claude-inventory-manifest.json'),
+    codexManifestPath: join(codexRoot, 'router', 'claude-inventory-manifest.json'),
     nodeBinary: process.execPath,
   };
 }
@@ -62,18 +63,21 @@ async function safeStopController(holder) {
 test('fresh-account install: builder seam writes inventory manifest and reports manifestBuilt', async () => {
   const f = fixture();
   const holder = {};
-  let builderInvoked = false;
+  const builderInvocations = [];
   // Stub the manifest builder: write a minimal valid manifest to the env-var
   // output path and return a zero-exit spawn-shaped result. Asserts the seam is
   // called with claude's ownedRoot build-manifest.mjs + ROUTER_MANIFEST_OUT env.
   const manifestBuilder = (nodeBinary, scriptPath, env) => {
-    builderInvoked = true;
-    assert.equal(scriptPath, join(f.ownedRoot, 'build-manifest.mjs'),
-      'builder must run claude ownedRoot build-manifest.mjs (codex shares claude manifest)');
-    assert.equal(env.ROUTER_MANIFEST_OUT, f.manifestPath,
-      'builder must write to claude ownedRoot claude-inventory-manifest.json');
+    builderInvocations.push(env.ROUTER_RUNTIME);
+    const expectedRoot = env.ROUTER_RUNTIME === 'codex' ? f.codexRoot : f.claudeRoot;
+    const expectedOwnedRoot = join(expectedRoot, 'router');
+    const expectedManifest = env.ROUTER_RUNTIME === 'codex' ? f.codexManifestPath : f.manifestPath;
+    assert.equal(scriptPath, join(expectedOwnedRoot, 'build-manifest.mjs'),
+      'builder must run the runtime-local build-manifest.mjs');
+    assert.equal(env.ROUTER_MANIFEST_OUT, expectedManifest,
+      'builder must write to the runtime-local inventory manifest');
     assert.equal(env.ROUTER_CLAUDE_HOME, f.claudeRoot, 'builder env must target the fresh claude root');
-    mkdirSync(join(f.ownedRoot), { recursive: true });
+    mkdirSync(expectedOwnedRoot, { recursive: true });
     writeFileSync(env.ROUTER_MANIFEST_OUT, JSON.stringify(MINIMAL_MANIFEST, null, 2));
     return { status: 0 };
   };
@@ -87,7 +91,7 @@ test('fresh-account install: builder seam writes inventory manifest and reports 
       manifestBuilder,
     });
     assert.ok(result.status === 'installed' || result.status === 'repaired', `unexpected status: ${result.status}`);
-    assert.equal(builderInvoked, true, 'manifest builder seam must be invoked post-readiness');
+    assert.deepEqual(builderInvocations, ['claude', 'codex'], 'manifest builder must run for both runtimes');
     assert.equal(result.manifestBuilt, true, 'manifestBuilt must be true on zero-exit builder run');
     assert.equal(existsSync(f.manifestPath), true, 'inventory manifest must exist after install');
     const manifest = JSON.parse(readFileSync(f.manifestPath, 'utf8'));
@@ -95,6 +99,7 @@ test('fresh-account install: builder seam writes inventory manifest and reports 
       assert.ok(key in manifest, `manifest missing top-level key: ${key}`);
     }
     assert.deepEqual(manifest.counts.skills, 0, 'stub manifest counts must be present');
+    assert.equal(existsSync(f.codexManifestPath), true, 'Codex inventory manifest must exist after install');
   } finally {
     await safeStopController(holder);
     rmSync(f.root, { recursive: true, force: true });

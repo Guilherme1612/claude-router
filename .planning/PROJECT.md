@@ -25,6 +25,8 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **All 3 phases (27–29) verified passed — 16/16 requirements satisfied, 101/101 milestone-focused tests pass, integration checker PASS, Nyquist fully compliant.** Milestone audit verdict `passed`. Remaining items are bounded maintenance risks (reverse-gap baseline maintenance, T_high sensitivity re-run on corpus change) plus pre-existing Phase 26 environment issues (lifecycle readiness timeout on real-home checkout, reinstall-verb teardown race, flaky perf suites under load, manifest hook-count drift). Evolution weight tuning (FUT-05..07) remains deferred — `signal_patterns` expansion was the safer primary lever and shipped.
 
+**v1.5 completed and release-verified on 2026-08-01.** Phases 30–36 passed their review, security, Nyquist, and verification gates; the assembled router passed the real-home install, cold-start, teardown, calibration, reverse-gap, and 1284-test baseline checks. Live operator activation remains explicitly unavailable because the real-home candidate is safely quarantined; no unsafe activation was forced.
+
 ## Last Milestone: v1.4 Coverage Completeness & Auto-Skill Routing Improvement (SHIPPED 2026-07-31)
 
 **Goal:** No manifest skill/command/agent goes unnoticed by the router, and the right skill is auto-suggested more often — dropping rework from mis-routed tasks further.
@@ -136,6 +138,9 @@ The approved design and implementation plan are:
 | Couple mode-map curation with signal_patterns expansion in one phase | New entries need patterns; patterns need collision lint + threshold re-tune on the expanded set | ✓ Good |
 | Defer evolution weight tuning (FUT-05..07) | Highest research flag; signal_patterns expansion is the safer primary lever | ✓ Good |
 | Keep all v1.4 mutation work off the hot path (builder + curated mode-map overlay) | Hot path stays semantically unchanged; fail-open, <100ms, no-API-call intact | ✓ Good |
+| Make runtime-aware resolve the sole production suggestion source | Prevent foreign or dead runtime capabilities from reaching injected context | ✓ Good |
+| Enforce tie/stale resolve-list lint at strict build time | Keep near-ties and unresolvable routes from shipping silently | ✓ Good |
+| Measure the live resolve-first hook path separately from the resolver helper | Ensure the latency gate certifies rendered production behavior, not only helper speed | ✓ Good |
 
 ## Evolution
 
@@ -155,4 +160,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-31 after v1.5 milestone start*
+*Last updated: 2026-08-01 after Phase 32.1*

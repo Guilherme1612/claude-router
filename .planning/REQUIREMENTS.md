@@ -7,11 +7,11 @@
 
 ### INTENT — Intent-First Routing (framework-neutral)
 
-- [ ] **ROUTE-01**: Router maps prompt intent to a capability role and resolves to the first locally-present candidate from a ranked, framework-neutral list — never a hardcoded framework name (works for GSD, superpowers, Gstack, or fully custom command sets)
-- [ ] **ROUTE-02**: A slash-route suggestion is emitted only when its mode resolves to a manifest-present command OR an explicit resolve-list member is present — the `schema_version` guard hole is closed
-- [ ] **ROUTE-03**: When the top candidate is absent, the router suppresses it and falls back to the next-best locally-present entry; zero resolvable → silent low tier, never a dead injection
-- [ ] **ROUTE-04**: High-confidence intent with an empty resolve set may emit one generic fallback line to native capabilities, never a fabricated capability name
-- [ ] **ROUTE-05**: Resolve semantics are linted (tie handling, near-tie downgrade to med, stale-target quarantine) and covered by the coverage audit-guard
+- [x] **ROUTE-01**: Router maps prompt intent to a capability role and resolves to the first locally-present candidate from a ranked, framework-neutral list — never a hardcoded framework name (works for GSD, superpowers, Gstack, or fully custom command sets)
+- [x] **ROUTE-02**: A slash-route suggestion is emitted only when its mode resolves to a manifest-present command OR an explicit resolve-list member is present — the `schema_version` guard hole is closed
+- [x] **ROUTE-03**: When the top candidate is absent, the router suppresses it and falls back to the next-best locally-present entry; zero resolvable → silent low tier, never a dead injection
+- [x] **ROUTE-04**: High-confidence intent with an empty resolve set may emit one generic fallback line to native capabilities, never a fabricated capability name
+- [x] **ROUTE-05**: Resolve semantics are linted (tie handling, near-tie downgrade to med, stale-target quarantine) and covered by the coverage audit-guard
 
 ### INVC — Inventory-Change Correctness
 
@@ -23,30 +23,30 @@
 
 ### CALIB — Per-Install Auto-Calibration
 
-- [ ] **CALIB-01**: Router records a three-state outcome (accepted / rejected / no_signal) correlating suggestion with actual invocation via hashed signature — no raw prompt persistence, no user commands
-- [ ] **CALIB-02**: Cache-hit suggestions are excluded from calibration evidence
-- [ ] **CALIB-03**: Per-install thresholds derive from ≥50 real accepted routes via Bayesian blend toward global defaults (min-sample floor, hysteresis, clamp) — never raw proportions
-- [ ] **CALIB-04**: Derived thresholds live in a separate epoch-gated file, never mutate the curated mode-map; fingerprint mismatch → default thresholds
-- [ ] **CALIB-05**: The suggestion→invocation observer is additive and does not touch ralph-loop or gsd hooks (coexistence)
+- [x] **CALIB-01**: Router records a three-state outcome (accepted / rejected / no_signal) correlating suggestion with actual invocation via hashed signature — no raw prompt persistence, no user commands
+- [x] **CALIB-02**: Cache-hit suggestions are excluded from calibration evidence
+- [x] **CALIB-03**: Per-install thresholds derive from ≥50 real accepted routes via Bayesian blend toward global defaults (min-sample floor, hysteresis, clamp) — never raw proportions
+- [x] **CALIB-04**: Derived thresholds live in a separate epoch-gated file, never mutate the curated mode-map; fingerprint mismatch → default thresholds
+- [x] **CALIB-05**: The suggestion→invocation observer is additive and does not touch ralph-loop or gsd hooks (coexistence)
 
 ### PARITY — Per-Runtime Parity
 
-- [ ] **PARITY-01**: Router detects its active runtime (Claude vs Codex) deterministically with zero IO on the hot path
-- [ ] **PARITY-02**: Telemetry and cache records carry a runtime tag; no cross-runtime cache reuse
-- [ ] **PARITY-03**: Resolve evaluation uses only the active runtime's present capabilities; only the active runtime's suggestion is injected
-- [ ] **PARITY-04**: A capability present in one runtime resolves to its local equivalent in the other (cross-runtime fixture)
+- [x] **PARITY-01**: Router detects its active runtime (Claude vs Codex) deterministically with zero IO on the hot path
+- [x] **PARITY-02**: Telemetry and cache records carry a runtime tag; no cross-runtime cache reuse
+- [x] **PARITY-03**: Resolve evaluation uses only the active runtime's present capabilities; only the active runtime's suggestion is injected
+- [x] **PARITY-04**: A capability present in one runtime resolves to its local equivalent in the other (cross-runtime fixture)
 
 ### PROJ — Per-Project Routing
 
-- [ ] **PROJ-01**: Router derives project roots from `~/.claude.json` `projects` keys and includes each project's `.claude/skills` in the manifest — discovery is no longer env-gated to zero live entries
-- [ ] **PROJ-02**: GRD-02 flips from hard-exclude `scope === 'project'` to cwd-prefix include — a project-scoped skill is suggested only when the active cwd is under its project root (pure string compare, no FS, sub-µs, fail-open)
-- [ ] **PROJ-03**: Project capability content folds into the manifest fingerprint automatically; adding/removing a project root bumps the epoch
+- [x] **PROJ-01**: Router derives project roots from `~/.claude.json` `projects` keys and includes each project's `.claude/skills` in the manifest — discovery is no longer env-gated to zero live entries
+- [x] **PROJ-02**: GRD-02 flips from hard-exclude `scope === 'project'` to cwd-prefix include — a project-scoped skill is suggested only when the active cwd is under its project root (pure string compare, no FS, sub-µs, fail-open)
+- [x] **PROJ-03**: Project capability content folds into the manifest fingerprint automatically; adding/removing a project root bumps the epoch
 
 ### REL — Release-Gate Cleanup
 
-- [ ] **REL-08**: Live-install release verification stage runs the router against a fresh real home in an isolated environment — REL-05/06/07 proven, not simulated
-- [ ] **REL-09**: Cold-start defaults (no calibration data yet) proven correct on a fresh-account install
-- [ ] **REL-10**: Orphaned watcher instances cleaned up; `router.safety-release` live-env failures resolved
+- [x] **REL-08**: Live-install release verification stage runs the router against a fresh real home in an isolated environment — REL-05/06/07 proven, not simulated
+- [x] **REL-09**: Cold-start defaults (no calibration data yet) proven correct on a fresh-account install
+- [x] **REL-10**: Orphaned watcher instances cleaned up; `router.safety-release` live-env failures resolved
 
 ## v2 Requirements
 
@@ -82,31 +82,31 @@ Populated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ROUTE-01 | Phase 32 | Pending |
-| ROUTE-02 | Phase 32 | Pending |
-| ROUTE-03 | Phase 32 | Pending |
-| ROUTE-04 | Phase 32 | Pending |
-| ROUTE-05 | Phase 32 | Pending |
+| ROUTE-01 | Phase 32 | Complete |
+| ROUTE-02 | Phase 32 | Complete |
+| ROUTE-03 | Phase 32 | Complete |
+| ROUTE-04 | Phase 32 | Complete |
+| ROUTE-05 | Phase 32 | Complete |
 | INVC-01 | Phase 30 | Complete |
 | INVC-02 | Phase 30 | Complete |
 | INVC-03 | Phase 30 | Complete |
 | INVC-04 | Phase 30 | Complete |
 | INVC-05 | Phase 30 | Complete |
-| CALIB-01 | Phase 33 | Pending |
-| CALIB-02 | Phase 33 | Pending |
-| CALIB-03 | Phase 34 | Pending |
-| CALIB-04 | Phase 34 | Pending |
-| CALIB-05 | Phase 33 | Pending |
-| PARITY-01 | Phase 31 | Pending |
-| PARITY-02 | Phase 31 | Pending |
-| PARITY-03 | Phase 32 | Pending |
-| PARITY-04 | Phase 32 | Pending |
-| PROJ-01 | Phase 35 | Pending |
-| PROJ-02 | Phase 35 | Pending |
-| PROJ-03 | Phase 35 | Pending |
-| REL-08 | Phase 36 | Pending |
-| REL-09 | Phase 36 | Pending |
-| REL-10 | Phase 36 | Pending |
+| CALIB-01 | Phase 33 | Complete |
+| CALIB-02 | Phase 33 | Complete |
+| CALIB-03 | Phase 34 | Complete |
+| CALIB-04 | Phase 34 | Complete |
+| CALIB-05 | Phase 33 | Complete |
+| PARITY-01 | Phase 31 | Complete |
+| PARITY-02 | Phase 31 | Complete |
+| PARITY-03 | Phase 32 | Complete |
+| PARITY-04 | Phase 32 | Complete |
+| PROJ-01 | Phase 35 | Complete |
+| PROJ-02 | Phase 35 | Complete |
+| PROJ-03 | Phase 35 | Complete |
+| REL-08 | Phase 36 | Complete |
+| REL-09 | Phase 36 | Complete |
+| REL-10 | Phase 36 | Complete |
 
 **Coverage:**
 
@@ -116,4 +116,4 @@ Populated during roadmap creation.
 
 ---
 *Requirements defined: 2026-07-31*
-*Last updated: 2026-07-31 after v1.5 roadmap revision (25 v1 requirements mapped)*
+*Last updated: 2026-08-01 after v1.5 release-gate verification (25 v1 requirements mapped)*

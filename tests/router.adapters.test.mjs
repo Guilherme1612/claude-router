@@ -277,8 +277,11 @@ test('real-world settings.json hooks: node_modules excluded, quoted TOML headers
 
 test('[phase21-red:discovery] fingerprint roots expose stable completeness without absolute paths', async () => {
   const root = mkdtempSync(join(tmpdir(), 'router-root-completeness-'));
+  const outside = mkdtempSync(join(tmpdir(), 'router-root-completeness-outside-'));
   try {
     put(join(root, 'skills/safe/SKILL.md'), markdown('safe'));
+    put(join(outside, 'SKILL.md'), markdown('outside'));
+    symlinkSync(outside, join(root, 'skills/escaped'));
     const first = await scanFingerprintTree([{ logicalRoot: 'authorized', path: root }]);
     const second = await scanFingerprintTree([{ logicalRoot: 'authorized', path: root }]);
     assert.deepEqual(first, second);
@@ -287,10 +290,12 @@ test('[phase21-red:discovery] fingerprint roots expose stable completeness witho
       complete: true,
       status: 'complete',
       canonicalRoot: 'authorized',
-      diagnosticCodes: [],
+      diagnosticCodes: ['path_escape'],
     }]);
+    assert.equal(first.entries.some(entry => entry.relative_path.startsWith('skills/escaped')), false);
     assert.equal(JSON.stringify(first).includes(root), false);
   } finally {
     rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   }
 });

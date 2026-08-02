@@ -141,21 +141,23 @@ function typedMappings(modeMap, indexes) {
     if (entry?.invoke_kind === 'slash') {
       const alias = mode && mode !== route && routeIds.has(mode);
       // Guard-hole closure (T-32-09): a slash route is intentional only when its mode is a
-      // present manifest command OR an explicit resolve-list member resolves to one. The
+      // present manifest command/skill OR an explicit resolve-list member resolves to one. The
       // blanket `mode === route && Boolean(schema_version)` pass is removed so schema_version
       // truthiness no longer exempts slash routes in the audit.
-      const resolveRoute = (entry.resolve || []).some(member => indexes.command.has(cleanId(member?.name)));
-      const routeResolvable = indexes.command.has(mode) || resolveRoute;
+      const routeTargets = new Set([...indexes.command, ...indexes.skill]);
+      const resolveRoute = (entry.resolve || []).some(member => routeTargets.has(cleanId(member?.name)));
+      const routeResolvable = routeTargets.has(mode) || resolveRoute;
       if (indexes.command.has(mode)) mapped.command.add(mode);
+      else if (indexes.skill.has(mode)) mapped.skill.add(mode);
       else if (!alias && !routeResolvable) diagnostics.push({
         code: 'stale_target', route, target: mode || '<mode>', category: 'commands',
-        reason: 'slash mode must match a manifest command or intentional mode-map route id',
+        reason: 'slash mode must match a manifest command/skill or intentional mode-map route id',
       });
       // T-32-10: resolve-list members absent from the active manifest are reported as
       // forward-orphan / stale diagnostics — never silently dropped.
       for (const member of entry.resolve || []) {
         const name = cleanId(member?.name);
-        if (name && !indexes.command.has(name)) {
+        if (name && !routeTargets.has(name)) {
           const diagnostic = {
             code: routeResolvable ? 'quarantined_fallback' : 'stale_target',
             route, target: name, category: 'commands',

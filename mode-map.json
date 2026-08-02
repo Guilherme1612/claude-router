@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "thresholds": {
     "T_high": 0.591,
     "T_low": 0.291,
@@ -50,7 +50,11 @@
         "systematic-debugging"
       ],
       "recommended_agents": [],
-      "args_hint": "<bug description>"
+      "args_hint": "<bug description>",
+      "resolve": [
+        { "name": "gsd-debug", "weight": 1 },
+        { "name": "systematic-debugging", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-explore",
@@ -66,7 +70,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "<idea or question>"
+      "args_hint": "<idea or question>",
+      "resolve": [{ "name": "gsd-explore", "weight": 1 }]
     },
     {
       "id": "gsd-secure-phase",
@@ -82,7 +87,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "<phase>"
+      "args_hint": "<phase>",
+      "resolve": [{ "name": "gsd-secure-phase", "weight": 1 }]
     },
     {
       "id": "gsd-ui-phase",
@@ -100,7 +106,11 @@
         "high-end-visual-design"
       ],
       "recommended_agents": [],
-      "args_hint": "<phase>"
+      "args_hint": "<phase>",
+      "resolve": [
+        { "name": "gsd-ui-phase", "weight": 1 },
+        { "name": "high-end-visual-design", "weight": 0.8 }
+      ]
     },
     {
       "id": "modernize-assess",
@@ -118,7 +128,8 @@
       "recommended_agents": [
         "scaffolder"
       ],
-      "args_hint": "<legacy system or module>"
+      "args_hint": "<legacy system or module>",
+      "resolve": [{ "name": "modernize-assess", "weight": 1 }]
     },
     {
       "id": "ralph-loop",
@@ -134,7 +145,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "\"<task>\" --completion-promise \"<verbatim verifiable criteria from prompt>\""
+      "args_hint": "\"<task>\" --completion-promise \"<verbatim verifiable criteria from prompt>\"",
+      "resolve": [{ "name": "ralph-loop", "weight": 1 }]
     },
     {
       "id": "find-skills",
@@ -170,7 +182,11 @@
         "test-driven-development"
       ],
       "recommended_agents": [],
-      "args_hint": "<feature or behavior>"
+      "args_hint": "<feature or behavior>",
+      "resolve": [
+        { "name": "gsd-add-tests", "weight": 1 },
+        { "name": "test-driven-development", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-code-review",
@@ -188,7 +204,11 @@
         "requesting-code-review"
       ],
       "recommended_agents": [],
-      "args_hint": "<scope>"
+      "args_hint": "<scope>",
+      "resolve": [
+        { "name": "gsd-code-review", "weight": 1 },
+        { "name": "requesting-code-review", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-audit-fix",
@@ -203,7 +223,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "<scope>"
+      "args_hint": "<scope>",
+      "resolve": [{ "name": "gsd-audit-fix", "weight": 1 }]
     },
     {
       "id": "gsd-ui-review",
@@ -221,7 +242,11 @@
         "frontend-design"
       ],
       "recommended_agents": [],
-      "args_hint": "<implemented UI>"
+      "args_hint": "<implemented UI>",
+      "resolve": [
+        { "name": "gsd-ui-review", "weight": 1 },
+        { "name": "frontend-design", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-graphify",
@@ -239,7 +264,11 @@
         "graphify"
       ],
       "recommended_agents": [],
-      "args_hint": "<path or question>"
+      "args_hint": "<path or question>",
+      "resolve": [
+        { "name": "gsd-graphify", "weight": 1 },
+        { "name": "graphify", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-map-codebase",
@@ -256,7 +285,11 @@
         "graphify"
       ],
       "recommended_agents": [],
-      "args_hint": "<focus area>"
+      "args_hint": "<focus area>",
+      "resolve": [
+        { "name": "gsd-map-codebase", "weight": 1 },
+        { "name": "graphify", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-docs-update",
@@ -271,7 +304,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "<scope>"
+      "args_hint": "<scope>",
+      "resolve": [{ "name": "gsd-docs-update", "weight": 1 }]
     },
     {
       "id": "gsd-spec-phase",
@@ -288,7 +322,11 @@
         "writing-plans"
       ],
       "recommended_agents": [],
-      "args_hint": "<phase or feature>"
+      "args_hint": "<phase or feature>",
+      "resolve": [
+        { "name": "gsd-spec-phase", "weight": 1 },
+        { "name": "writing-plans", "weight": 0.8 }
+      ]
     },
     {
       "id": "gsd-plan-phase",
@@ -305,7 +343,11 @@
         "writing-plans"
       ],
       "recommended_agents": [],
-      "args_hint": "<phase>"
+      "args_hint": "<phase>",
+      "resolve": [
+        { "name": "gsd-plan-phase", "weight": 1 },
+        { "name": "writing-plans", "weight": 0.8 }
+      ]
     },
     {
       "id": "review-pr",
@@ -322,7 +364,11 @@
         "requesting-code-review"
       ],
       "recommended_agents": [],
-      "args_hint": "<pr url or branch>"
+      "args_hint": "<pr url or branch>",
+      "resolve": [
+        { "name": "review-pr", "weight": 1 },
+        { "name": "requesting-code-review", "weight": 0.8 }
+      ]
     },
     {
       "id": "code-review",
@@ -338,7 +384,11 @@
         "requesting-code-review"
       ],
       "recommended_agents": [],
-      "args_hint": "<scope>"
+      "args_hint": "<scope>",
+      "resolve": [
+        { "name": "code-review", "weight": 1 },
+        { "name": "requesting-code-review", "weight": 0.8 }
+      ]
     },
     {
       "id": "commit-push-pr",
@@ -352,7 +402,8 @@
       ],
       "recommended_skills": [],
       "recommended_agents": [],
-      "args_hint": "<branch>"
+      "args_hint": "<branch>",
+      "resolve": [{ "name": "commit-push-pr", "weight": 1 }]
     },
     {
       "id": "design-taste-frontend",

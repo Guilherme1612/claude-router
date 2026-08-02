@@ -23,6 +23,7 @@ metrics:
   duration: "~12 min"
   completed: "2026-08-01"
 status: complete
+requirements-completed: [INVC-04]
 actuals:
   tokens: 2114   # chars/4 over realized diff (8455 added chars)
   tasks: 2

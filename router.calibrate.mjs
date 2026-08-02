@@ -25,12 +25,13 @@
 // T_high (D-09: prefer false pass-through over wrong auto-route).
 
 import { readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { mapCandidateRegistry } from './src/registry/map.mjs';
 
 const HOME = homedir();
+const GLOBAL_CALIBRATION_CWD = tmpdir();
 const ROUTER_DIR = join(HOME, '.claude', 'router');
 const MANIFEST = join(ROUTER_DIR, 'claude-inventory-manifest.json');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
@@ -307,7 +308,7 @@ const boundaryFixture = (task, thresholds) => {
 export function phase29CalibrationRecords(tasks, manifest, modeMap) {
   return tasks.filter(({ phase29 }) => phase29 === true).map((task) => {
     const fixture = task.boundary ? boundaryFixture(task, modeMap.thresholds) : { manifest, modeMap, weights: null };
-    const result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || process.cwd(), fixture.weights);
+    const result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || GLOBAL_CALIBRATION_CWD, fixture.weights);
     const actualRoute = result.route?.id || result.route?.mode || null;
     const expectedRoute = task.right.mode?.replace(/^\//, '') || null;
     return {
@@ -415,7 +416,7 @@ async function evolutionRight(task, manifest, modeMap, weights) {
       const b = (v && typeof v.b === 'number') ? v.b : 0;
       syntheticWeights.weights[k] = { g, b, u: (v && typeof v.u === 'number') ? v.u : 0, score: g / Math.max(1, g + b) };
     }
-    const result = dryRun(task.prompt, manifest, modeMap, task.cwd || process.cwd(), syntheticWeights);
+    const result = dryRun(task.prompt, manifest, modeMap, task.cwd || GLOBAL_CALIBRATION_CWD, syntheticWeights);
     const outcome_actual = (outcomes[0] && outcomes[0].outcome) || 'unknown';
     const topEntry = result && result.route ? result.route.mode : null;
     const expectedMode = task.right ? normMode(task.right.mode) : null;
@@ -513,7 +514,7 @@ if (isMain()) {
       // print (tier, route, top3, etc.). Use empty weights so the printed
       // columns reflect the un-blended baseline; the blend math is captured
       // separately in evolution_score (weight_applied).
-      const baselineRun = dryRun(task.prompt, manifest, modeMap, task.cwd || process.cwd());
+      const baselineRun = dryRun(task.prompt, manifest, modeMap, task.cwd || GLOBAL_CALIBRATION_CWD);
       result = {
         ...baselineRun,
         route: baselineRun.route
@@ -534,7 +535,7 @@ if (isMain()) {
       evolutionOutcomes.push({ id: task.id, outcome: evo.detail.outcome_actual, ok });
     } else {
       const fixture = task.boundary ? boundaryFixture(task, modeMap.thresholds) : { manifest, modeMap, weights: null };
-      result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || process.cwd(), fixture.weights);
+      result = dryRun(task.prompt, fixture.manifest, fixture.modeMap, task.cwd || GLOBAL_CALIBRATION_CWD, fixture.weights);
       const ev = evaluate(task, result);
       ok = ev.ok;
       detail = ev.detail;

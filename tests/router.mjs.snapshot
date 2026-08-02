@@ -20,7 +20,7 @@
 // no injection, no cache, no telemetry. Subsequent plans slot routing logic
 // into a pipeline that is already provably non-blocking and coexistence-safe.
 
-import { readFileSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync } from 'node:fs';
+import { readFileSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -104,6 +104,8 @@ const BUILD_SCRIPT = join(ROUTER_DIR, 'build-manifest.mjs');
 const COVERAGE_REPORT = join(ROUTER_DIR, 'coverage-report.json');
 const CACHE = join(ROUTER_DIR, 'cache.json');
 const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
+const SHADOW_LOG = join(ROUTER_DIR, 'shadow-log.jsonl');
+const SHADOW_STATE = join(ROUTER_DIR, 'shadow-state.json');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
 const WEIGHTS = join(ROUTER_DIR, 'weights.json');
 // INVC-03: per-install calibration FILE (created by Phase 34). The hook only
@@ -525,7 +527,7 @@ export function loadModeMap(path = MODE_MAP) {
 //     calibration.thresholds is a plain object → { matched: true, thresholds }
 //   - otherwise (mismatch | absent | corrupt/parse error) →
 //     { matched: false, thresholds: null } so mode-map defaults win.
-export function loadEpochCalibration(manifestFingerprint, { calibrationPath = CALIBRATION_PATH } = {}) {
+export function loadEpochCalibration(manifestFingerprint, { calibrationPath = CALIBRATION_PATH, modeMapVersion = null } = {}) {
   try {
     if (!calibrationPath || !existsSync(calibrationPath)) return { matched: false, thresholds: null };
     const parsed = JSON.parse(readFileSync(calibrationPath, 'utf8'));
@@ -534,12 +536,15 @@ export function loadEpochCalibration(manifestFingerprint, { calibrationPath = CA
       && typeof parsed === 'object'
       && !Array.isArray(parsed)
       && parsed.manifest_fingerprint === manifestFingerprint
+      && parsed.calibration_status !== 'rolled_back'
+      && (modeMapVersion == null || String(parsed.mode_map_version) === String(modeMapVersion))
       && parsed.thresholds
       && typeof parsed.thresholds === 'object'
       && !Array.isArray(parsed.thresholds)
       && typeof parsed.thresholds.T_high === 'number'
       && typeof parsed.thresholds.T_low === 'number'
       && typeof parsed.thresholds.M === 'number'
+      && validCalibrationThresholds(parsed.thresholds)
     ) {
       return { matched: true, thresholds: parsed.thresholds };
     }
@@ -604,6 +609,12 @@ function hasMissingMcp(entry) {
 
 function isProjectScoped(entry) {
   return String(entry?.scope || '') === 'project';
+}
+
+function projectCwdIncludes(cwd, projectRoot) {
+  const candidate = String(cwd || '').replaceAll('\\', '/').replace(/\/+$/, '');
+  const root = String(projectRoot || '').replaceAll('\\', '/').replace(/\/+$/, '');
+  return Boolean(root) && (candidate === root || candidate.startsWith(`${root}/`));
 }
 
 function categoryCounts() {
@@ -715,12 +726,17 @@ export function buildTargetIndexes(manifest) {
   const commandEntries = Array.isArray(runtimeSlice) && runtimeSlice.length > 0
     ? runtimeSlice
     : manifest?.commands;
+  const commands = namesFromEntries(commandEntries);
+  const globalSkills = namesFromEntries(manifest?.skills);
+  const pluginSkills = namesFromEntries(manifest?.plugin_skills);
+  const globalAgentsStoreSkills = namesFromEntries(manifest?.agents_store_skills, globalAgentsStore);
   return {
-    commands: namesFromEntries(commandEntries),
-    skills: namesFromEntries(manifest?.skills),
-    globalSkills: namesFromEntries(manifest?.skills),
-    pluginSkills: namesFromEntries(manifest?.plugin_skills),
-    globalAgentsStoreSkills: namesFromEntries(manifest?.agents_store_skills, globalAgentsStore),
+    commands,
+    skills: globalSkills,
+    globalSkills,
+    pluginSkills,
+    globalAgentsStoreSkills,
+    routeTargets: new Set([...commands, ...globalSkills, ...pluginSkills, ...globalAgentsStoreSkills]),
     safeAgents: namesFromEntries(manifest?.agents, safeAgent),
     blockedAgents: namesFromEntries(manifest?.agents, blockedAgent),
     runtime: RUNTIME,
@@ -745,8 +761,10 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
   try {
     if (!entry) return null;
     let commands;
+    let routeTargets;
     if (manifestOrIndexes && manifestOrIndexes.commands instanceof Set) {
       commands = manifestOrIndexes.commands;
+      routeTargets = manifestOrIndexes.routeTargets || commands;
     } else {
       // PARITY-03 runtime-conditional presence: prefer the ACTIVE runtime's
       // runtime-tagged command slice (runtime_commands[RUNTIME], phase 31/26
@@ -763,6 +781,12 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
         if (typeof c === 'string') return stripLeadingSlash(c);
         return stripLeadingSlash(c?.name || c?.id);
       }).filter(Boolean));
+      routeTargets = new Set([
+        ...commands,
+        ...namesFromEntries(manifestOrIndexes?.skills),
+        ...namesFromEntries(manifestOrIndexes?.plugin_skills),
+        ...namesFromEntries(manifestOrIndexes?.agents_store_skills),
+      ]);
     }
     const candidates = new Map();
     const addCandidate = (name, weight) => {
@@ -780,10 +804,10 @@ export function resolveSlashRoute(entry, manifestOrIndexes, opts = {}) {
     // present inventory are quarantined (flagged), never injected. Only the
     // active runtime's candidates are ever in play (PARITY-03).
     const quarantined = [...candidates.values()]
-      .filter((candidate) => !commands.has(candidate.name))
+      .filter((candidate) => !routeTargets.has(candidate.name))
       .map((candidate) => candidate.name);
     const present = [...candidates.values()]
-      .filter((candidate) => commands.has(candidate.name))
+      .filter((candidate) => routeTargets.has(candidate.name))
       // ROUTE-01 ranked-list contract: weight desc, then declared authoring
       // order. ES2019+ Array#sort is stable, and candidates comes from the
       // insertion-ordered mode + resolve list Map.
@@ -838,6 +862,7 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
   const rows = [];
   const routeIds = new Set((modeMap?.entries || []).map((entry) => stripLeadingSlash(entry?.id)).filter(Boolean));
   const skills = knownSkillTargets(indexes);
+  const routeTargets = indexes.routeTargets || new Set([...indexes.commands, ...skills]);
   const collisions = new Map();
   const schemaVersion = Number(modeMap?.schema_version || 2);
 
@@ -877,7 +902,7 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
       // blanket `mode === id && schema_version` pass is removed — schema_version
       // truthiness no longer makes any slash route intentional.
       const intentionalResolveRoute = mode && Boolean(resolveSlashRoute(entry, indexes));
-      if (!mode || (!indexes.commands.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute)) {
+      if (!mode || (!routeTargets.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute)) {
         rows.push(routeDiagnostic(entry, 'stale_target', mode || '<mode>', 'slash mode must match a manifest command or intentional mode-map route id'));
       }
       // T-32-10 forward-orphan: when a slash route is otherwise resolvable (its mode is a
@@ -885,11 +910,11 @@ export function validateRouteTargets(manifest, modeMap, indexes = buildTargetInd
       // ABSENT from the active manifest's command inventory are flagged (quarantined), never
       // silently dropped. A fully-unresolvable route is reported once by its mode and does
       // not additionally flag each member, so it stays a single stale_target.
-      const routeResolvable = Boolean(indexes.commands.has(mode)) || Boolean(intentionalResolveRoute);
+      const routeResolvable = Boolean(routeTargets.has(mode)) || Boolean(intentionalResolveRoute);
       if (routeResolvable) {
         for (const member of entry.resolve || []) {
           const name = stripLeadingSlash(member?.name);
-          if (name && !indexes.commands.has(name)) {
+          if (name && !routeTargets.has(name)) {
             rows.push(routeDiagnostic(entry, 'stale_target', name, 'resolve member is absent from the manifest command inventory'));
           }
         }
@@ -967,7 +992,7 @@ export function routeTargetsExist(route, manifest, modeMap, indexes) {
     const skills = knownSkillTargets(idx);
     // Slash routes: the mode must resolve as a manifest command. This mirrors
     // validateRouteTargets, which checks entry.mode (not entry.id) against
-    // indexes.commands — entry.id is the mode-map identifier, not necessarily
+    // indexes.routeTargets — entry.id is the mode-map identifier, not necessarily
     // a command name. A miss means the command was removed or renamed since the
     // cache entry was written.
     if (kind === 'slash') {
@@ -978,7 +1003,8 @@ export function routeTargetsExist(route, manifest, modeMap, indexes) {
       // Guard-hole closure (T-32-05) mirrored on the hot path: valid only when mode
       // is a present command OR a resolve-list member resolves to a present command.
       const intentionalResolveRoute = mode && Boolean(resolveSlashRoute(route, idx));
-      if (mode && !idx.commands.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute) return false;
+      const routeTargets = idx.routeTargets || new Set([...idx.commands, ...skills]);
+      if (mode && !routeTargets.has(mode) && !intentionalRouteAlias && !intentionalResolveRoute) return false;
     }
     for (const target of (route.recommended_skills || [])) {
       const name = stripLeadingSlash(target);
@@ -1625,7 +1651,7 @@ export function applyWeightBlend(normed, weights, blend = 0.15) {
 // (concatenated 3 times into the document text before tokenizing) so name hits
 // dominate — cheap field-boost without BM25F. When `summary` is absent (commands,
 // plugin_skills), fall back to name+description.
-export function buildCorpus(manifest, modeMap = null) {
+export function buildCorpus(manifest, modeMap = null, cwd = process.cwd()) {
   if (!manifest || typeof manifest !== 'object') return [];
   // Pre-index mode-map entries by the manifest entry names they map to, so each
   // manifest entry's associated mode-map signal_patterns can be appended to its
@@ -1681,6 +1707,10 @@ export function buildCorpus(manifest, modeMap = null) {
     if (e.scope === 'project') continue; // GRD-02
     if (e.scope === 'agents-store (not globally symlinked)') continue; // conservative (§3)
     push(e);
+  }
+  const projectSkills = Array.isArray(manifest.project_scoped_skills) ? manifest.project_scoped_skills : [];
+  for (const e of projectSkills) {
+    if (e && projectCwdIncludes(cwd, e.project)) push(e);
   }
   const agents = Array.isArray(manifest.agents) ? manifest.agents : [];
   // GRD-01: hard-filter agents whose requires_mcp_not_in_manifest is non-empty
@@ -1963,6 +1993,315 @@ export function logTelemetry(entry, telemetryPath = TELEMETRY) {
   } catch {
     // Never block injection on a telemetry write failure (fail-open).
   }
+}
+
+// Phase 33 — measure-only suggestion -> invocation observer. The observer is
+// deliberately independent of routing and health outcomes: it records only
+// accepted/rejected/no_signal evidence for the next calibration phase.
+const SHADOW_OUTCOMES = Object.freeze(['accepted', 'rejected', 'no_signal']);
+const SHADOW_EVENTS = new Set(['UserPromptExpansion', 'PostToolUse', 'PostToolUseFailure', 'Stop']);
+const SHADOW_TOOLS = new Set(['Skill', 'Agent', 'Task']);
+const SHADOW_MAX_AGE_MS = 15 * 60 * 1000;
+const CALIBRATION_MIN_ACCEPTED = 50;
+const CALIBRATION_DEFAULTS = Object.freeze({ T_high: 0.591, T_low: 0.291, M: 0.191 });
+const CALIBRATION_PRIOR_STRENGTH = 50;
+const CALIBRATION_DAMPING = 0.3;
+const CALIBRATION_MAX_HYSTERESIS = 0.05;
+
+function shadowToken(value) {
+  return String(value || '').trim().replace(/^\/+/, '').toLowerCase();
+}
+
+function shadowHash(value) {
+  return createHash('sha256').update(stableStringify(value), 'utf8').digest('hex');
+}
+
+function readJsonLines(path) {
+  if (!existsSync(path)) return [];
+  try {
+    return readFileSync(path, 'utf8').split(/\r?\n/).filter(Boolean).flatMap((line) => {
+      try {
+        const value = JSON.parse(line);
+        return value && typeof value === 'object' && !Array.isArray(value) ? [value] : [];
+      } catch { return []; }
+    });
+  } catch { return []; }
+}
+
+function readShadowState(path) {
+  try {
+    const value = JSON.parse(readFileSync(path, 'utf8'));
+    return { settled: new Set(Array.isArray(value?.settled) ? value.settled.filter((id) => /^[a-f0-9]{64}$/.test(id)) : []) };
+  } catch { return { settled: new Set() }; }
+}
+
+function writeShadowState(path, settled) {
+  try {
+    mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+    const tmp = `${path}.tmp.${process.pid}`;
+    writeFileSync(tmp, JSON.stringify({ settled: [...settled].slice(-256) }) + '\n', { mode: 0o600 });
+    renameSync(tmp, path);
+  } catch { /* observation is advisory */ }
+}
+
+function shadowCandidateId(row) {
+  if (/^[a-f0-9]{64}$/.test(row?.suggestion_id || '')) return row.suggestion_id;
+  return shadowHash({
+    ts: row?.ts,
+    prompt_signature: row?.prompt_signature,
+    runtime: row?.runtime,
+    suggested_mode: row?.suggested_mode,
+    suggested_skills: Array.isArray(row?.suggested_skills) ? row.suggested_skills : [],
+    suggested_agents: Array.isArray(row?.suggested_agents) ? row.suggested_agents : [],
+  });
+}
+
+function freshShadowCandidate({ telemetryPath, runtime = RUNTIME, now = Date.now(), maxAgeMs = SHADOW_MAX_AGE_MS, settled = new Set(), invoked = '' } = {}) {
+  const rows = readJsonLines(telemetryPath || TELEMETRY);
+  const candidates = [];
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    const row = rows[i];
+    const ts = Number(row.ts);
+    const suggestionId = shadowCandidateId(row);
+    const capabilities = [row.suggested_mode, ...(row.suggested_skills || []), ...(row.suggested_agents || [])]
+      .map(shadowToken).filter(Boolean);
+    if (row.runtime !== runtime || !/^[a-f0-9]{64}$/.test(row.prompt_signature || '')
+      || !Number.isSafeInteger(ts) || now - ts < 0 || now - ts > maxAgeMs
+      || row.cache_hit === true || row.cache_status === 'hit'
+      || settled.has(suggestionId) || capabilities.length === 0) continue;
+    candidates.push({ row, suggestionId, capabilities: new Set(capabilities) });
+  }
+  return candidates.find((candidate) => invoked && candidate.capabilities.has(invoked)) || candidates[0] || null;
+}
+
+function eventCapability(payload) {
+  if (payload?.hook_event_name === 'UserPromptExpansion') return shadowToken(payload.command_name);
+  if (!SHADOW_TOOLS.has(payload?.tool_name)) return '';
+  const input = payload.tool_input;
+  if (!input || typeof input !== 'object') return '';
+  return shadowToken(input.skill || input.name || input.subagent_type);
+}
+
+export function readShadowOutcomes({ shadowPath = SHADOW_LOG } = {}) {
+  return readJsonLines(shadowPath).filter((row) => SHADOW_OUTCOMES.includes(row.outcome));
+}
+
+export function appendShadowOutcome(record, { shadowPath = SHADOW_LOG } = {}) {
+  if (!record || !SHADOW_OUTCOMES.includes(record.outcome)) return { status: 'ignored', reason_code: 'invalid_shadow_outcome' };
+  try {
+    mkdirSync(join(shadowPath, '..'), { recursive: true, mode: 0o700 });
+    const existedBefore = existsSync(shadowPath);
+    appendFileSync(shadowPath, JSON.stringify(record) + '\n', { flag: 'a', mode: 0o600 });
+    if (!existedBefore) try { chmodSync(shadowPath, 0o600); } catch {}
+    return { status: 'stored', outcome: record.outcome, suggestion_id: record.suggestion_id };
+  } catch { return { status: 'ignored', reason_code: 'shadow_write_failed' }; }
+}
+
+function calibrationDefaults(defaults = CALIBRATION_DEFAULTS) {
+  return {
+    T_high: Number.isFinite(defaults?.T_high) ? defaults.T_high : CALIBRATION_DEFAULTS.T_high,
+    T_low: Number.isFinite(defaults?.T_low) ? defaults.T_low : CALIBRATION_DEFAULTS.T_low,
+    M: Number.isFinite(defaults?.M) ? defaults.M : CALIBRATION_DEFAULTS.M,
+  };
+}
+
+function validCalibrationThresholds(thresholds) {
+  return thresholds && typeof thresholds === 'object' && !Array.isArray(thresholds)
+    && ['T_high', 'T_low', 'M'].every((key) => Number.isFinite(thresholds[key]) && thresholds[key] >= 0 && thresholds[key] <= 1)
+    && thresholds.T_low <= thresholds.T_high;
+}
+
+function boundedThreshold(value, baseline, maxHysteresis = CALIBRATION_MAX_HYSTERESIS) {
+  return Number(Math.min(1, Math.max(0, Math.min(baseline + maxHysteresis,
+    Math.max(baseline - maxHysteresis, value)))).toFixed(6));
+}
+
+function shadowCorpusHash(rows) {
+  return shadowHash(rows.map((row) => ({
+    suggestion_id: row.suggestion_id,
+    prompt_signature: row.prompt_signature,
+    suggested_mode: row.suggested_mode || null,
+    suggested_skills: Array.isArray(row.suggested_skills) ? row.suggested_skills : [],
+    suggested_agents: Array.isArray(row.suggested_agents) ? row.suggested_agents : [],
+    outcome: row.outcome,
+    runtime: row.runtime,
+    source_event: row.source_event,
+  })).sort((a, b) => String(a.suggestion_id).localeCompare(String(b.suggestion_id))));
+}
+
+export function deriveCalibrationThresholds(rows, {
+  defaults = CALIBRATION_DEFAULTS,
+  minAccepted = CALIBRATION_MIN_ACCEPTED,
+  priorStrength = CALIBRATION_PRIOR_STRENGTH,
+  damping = CALIBRATION_DAMPING,
+  maxHysteresis = CALIBRATION_MAX_HYSTERESIS,
+} = {}) {
+  const safeDefaults = calibrationDefaults(defaults);
+  const counts = emptyShadowCounts();
+  for (const row of Array.isArray(rows) ? rows : []) {
+    if (SHADOW_OUTCOMES.includes(row?.outcome)) counts[row.outcome] += 1;
+  }
+  if (counts.accepted < minAccepted) {
+    return { status: 'insufficient_evidence', thresholds: safeDefaults, counts, corpus_hash: shadowCorpusHash(Array.isArray(rows) ? rows : []) };
+  }
+  const settled = counts.accepted + counts.rejected;
+  const thresholds = {};
+  for (const key of Object.keys(safeDefaults)) {
+    const prior = safeDefaults[key] * priorStrength;
+    const posterior = (prior + counts.accepted) / (priorStrength + settled);
+    const damped = safeDefaults[key] * (1 - damping) + posterior * damping;
+    thresholds[key] = boundedThreshold(damped, safeDefaults[key], maxHysteresis);
+  }
+  // Keep the confidence boundaries ordered even when a future default changes.
+  thresholds.T_low = Math.min(thresholds.T_low, thresholds.T_high);
+  return {
+    status: 'ready',
+    thresholds,
+    counts,
+    corpus_hash: shadowCorpusHash(Array.isArray(rows) ? rows : []),
+    prior_strength: priorStrength,
+    damping,
+    max_hysteresis: maxHysteresis,
+  };
+}
+
+function atomicCalibrationWrite(path, value) {
+  mkdirSync(join(path, '..'), { recursive: true, mode: 0o700 });
+  const tmp = `${path}.tmp.${process.pid}.${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(value) + '\n', { mode: 0o600 });
+  try { chmodSync(tmp, 0o600); } catch {}
+  renameSync(tmp, path);
+}
+
+export function writeEpochCalibration(record, { calibrationPath = CALIBRATION_PATH } = {}) {
+  if (!record || record.status !== 'ready'
+    || !/^[a-f0-9]{64}$/.test(record.manifest_fingerprint || '')
+    || !/^[a-f0-9]{64}$/.test(record.corpus_hash || '')
+    || !record.mode_map_version || !validCalibrationThresholds(record.thresholds)) {
+    return { status: 'ignored', reason_code: 'invalid_calibration_record' };
+  }
+  try {
+    let previous = null;
+    try { previous = JSON.parse(readFileSync(calibrationPath, 'utf8')); } catch {}
+    const value = {
+      schema_version: 1,
+      manifest_fingerprint: record.manifest_fingerprint,
+      mode_map_version: record.mode_map_version,
+      corpus_hash: record.corpus_hash,
+      thresholds: record.thresholds,
+      evidence: record.counts,
+      calibration_status: 'active',
+      rollback_thresholds: previous?.thresholds || CALIBRATION_DEFAULTS,
+      generated_at: record.generated_at || Date.now(),
+    };
+    atomicCalibrationWrite(calibrationPath, value);
+    return { status: 'stored', calibration: value };
+  } catch { return { status: 'ignored', reason_code: 'calibration_write_failed' }; }
+}
+
+export function rollbackEpochCalibration({ calibrationPath = CALIBRATION_PATH, defaults = CALIBRATION_DEFAULTS, now = Date.now() } = {}) {
+  try {
+    const current = JSON.parse(readFileSync(calibrationPath, 'utf8'));
+    if (!current || typeof current !== 'object' || !current.thresholds) return { status: 'ignored', reason_code: 'no_active_calibration' };
+    const value = {
+      ...current,
+      thresholds: calibrationDefaults(defaults),
+      calibration_status: 'rolled_back',
+      rolled_back_at: now,
+    };
+    atomicCalibrationWrite(calibrationPath, value);
+    return { status: 'rolled_back', calibration: value };
+  } catch { return { status: 'ignored', reason_code: 'calibration_rollback_failed' }; }
+}
+
+export function maybeCalibrateShadow({
+  shadowPath = SHADOW_LOG, calibrationPath = CALIBRATION_PATH,
+  manifestFingerprint, modeMapVersion = 'unknown', now = Date.now(),
+  defaults = CALIBRATION_DEFAULTS,
+} = {}) {
+  const rows = readShadowOutcomes({ shadowPath });
+  const derived = deriveCalibrationThresholds(rows, { defaults });
+  if (derived.status !== 'ready') return derived;
+  const record = {
+    ...derived,
+    manifest_fingerprint: manifestFingerprint,
+    mode_map_version: String(modeMapVersion),
+    generated_at: now,
+  };
+  return writeEpochCalibration(record, { calibrationPath });
+}
+
+export function observeShadowEvent(payload, {
+  telemetryPath = TELEMETRY, shadowPath = SHADOW_LOG, statePath = SHADOW_STATE,
+  calibrationPath = CALIBRATION_PATH, manifestFingerprint = '', modeMapVersion = 'unknown',
+  runtime = RUNTIME, now = Date.now(), maxAgeMs = SHADOW_MAX_AGE_MS,
+} = {}) {
+  const event = payload?.hook_event_name;
+  if (!SHADOW_EVENTS.has(event)) return { status: 'ignored', reason_code: 'unsupported_event' };
+  if (event === 'Stop' && payload?.stop_hook_active === true) return { status: 'ignored', reason_code: 'stop_hook_active' };
+  if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && !SHADOW_TOOLS.has(payload?.tool_name)) {
+    return { status: 'ignored', reason_code: 'unsupported_tool' };
+  }
+  const invoked = event === 'Stop' ? '' : eventCapability(payload);
+  const state = readShadowState(statePath);
+  const candidate = freshShadowCandidate({ telemetryPath, runtime, now, maxAgeMs, settled: state.settled, invoked });
+  if (!candidate) return { status: 'ignored', reason_code: 'no_fresh_suggestion' };
+  const outcome = event === 'Stop'
+    ? 'no_signal'
+    : (event === 'PostToolUse' && candidate.capabilities.has(invoked) ? 'accepted' : 'rejected');
+  const record = {
+    schema_version: 1,
+    timestamp_ms: now,
+    suggestion_id: candidate.suggestionId,
+    prompt_signature: candidate.row.prompt_signature,
+    suggested_mode: candidate.row.suggested_mode || null,
+    suggested_skills: Array.isArray(candidate.row.suggested_skills) ? candidate.row.suggested_skills.map(String).slice(0, 16) : [],
+    suggested_agents: Array.isArray(candidate.row.suggested_agents) ? candidate.row.suggested_agents.map(String).slice(0, 16) : [],
+    invocation_signature: invoked ? shadowHash({ capability: invoked }) : null,
+    outcome,
+    runtime,
+    source_event: event,
+  };
+  const result = appendShadowOutcome(record, { shadowPath });
+  if (result.status === 'stored') {
+    state.settled.add(candidate.suggestionId);
+    writeShadowState(statePath, state.settled);
+    const calibration = maybeCalibrateShadow({
+      shadowPath, calibrationPath, manifestFingerprint, modeMapVersion, now,
+    });
+    return { ...result, outcome, calibration_status: calibration.status };
+  }
+  return result;
+}
+
+function emptyShadowCounts() {
+  return { accepted: 0, rejected: 0, no_signal: 0 };
+}
+
+function sortedShadowCounts(counts) {
+  return Object.fromEntries(Object.keys(counts).sort().map((key) => [key, counts[key]]));
+}
+
+export function buildShadowDivergenceReport({ shadowPath = SHADOW_LOG } = {}) {
+  const byMode = {};
+  const bySkill = {};
+  const rows = readShadowOutcomes({ shadowPath });
+  const add = (target, key, outcome) => {
+    if (!key) return;
+    if (!target[key]) target[key] = emptyShadowCounts();
+    target[key][outcome] += 1;
+  };
+  for (const row of rows) {
+    add(byMode, row.suggested_mode, row.outcome);
+    for (const skill of row.suggested_skills || []) add(bySkill, skill, row.outcome);
+  }
+  return {
+    schema_version: 1,
+    calibration_enabled: false,
+    total: rows.length,
+    by_mode: sortedShadowCounts(byMode),
+    by_skill: sortedShadowCounts(bySkill),
+  };
 }
 
 // Phase 3 / EVO-02: atomic counter + worker spawn (D-03). Increments the
@@ -2717,12 +3056,21 @@ export function telemetryEntryFromState(decision, startNs) {
   const top = decision.top || null;
   const weights = decision.weights || null;
   const entryId = top && top.entry && top.entry.id;
+  const ts = Date.now();
+  const prompt_signature = denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords || []);
+  const suggested_mode = decision.route ? decision.route.mode : null;
+  const suggested_skills = decision.route ? (decision.route.recommended_skills || []) : [];
+  const suggested_agents = decision.route ? (decision.route.recommended_agents || []) : [];
+  const cache_status = decision.cache?.status || 'miss';
   return {
-    ts: Date.now(),
-    prompt_signature: denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords || []),
-    suggested_mode: decision.route ? decision.route.mode : null,
-    suggested_skills: decision.route ? (decision.route.recommended_skills || []) : [],
-    suggested_agents: decision.route ? (decision.route.recommended_agents || []) : [],
+    ts,
+    prompt_signature,
+    suggested_mode,
+    suggested_skills,
+    suggested_agents,
+    cache_hit: cache_status === 'hit',
+    cache_status,
+    suggestion_id: shadowHash({ ts, prompt_signature, runtime: RUNTIME, suggested_mode, suggested_skills, suggested_agents }),
     confidence_tier: decision.tier,
     invoke_kind: decision.invoke_kind || null,
     graphify_queried: decision.graphify ? !!decision.graphify.queried : false,
@@ -2906,7 +3254,10 @@ export function inspectDecision(prompt, options = {}) {
     // loadEpochCalibration which never mutates the calibration file.
     const epochCal = loadEpochCalibration(
       opts.manifestFingerprint ?? manifest.manifest_fingerprint ?? '0',
-      { calibrationPath: opts.calibrationPath },
+      {
+        calibrationPath: opts.calibrationPath,
+        modeMapVersion: modeMap?.schema_version ?? modeMap?.version ?? null,
+      },
     );
     state.thresholds = epochCal.matched
       ? epochCal.thresholds
@@ -2991,7 +3342,7 @@ export function inspectDecision(prompt, options = {}) {
     }
     state.decision_trace.push('cache:miss');
 
-    const corpus = buildCorpus(manifest, modeMap);
+    const corpus = buildCorpus(manifest, modeMap, opts.cwd);
     const _sf = applySurfaceFilter(corpus, manifest, modeMap, opts.runtimeConfigDir);
     state.surface_status = _sf.surface_status;
     state.surface_disabled_count = _sf.surface_disabled_count;
@@ -3143,6 +3494,17 @@ function main(payload, { additionalContext = '', skipRouting = false } = {}) {
   const startNs = process.hrtime.bigint();
   if (typeof globalThis.__routerStartNs === 'undefined') globalThis.__routerStartNs = startNs;
   const prompt = payload?.prompt ?? payload?.message;
+  if (payload?.hook_event_name && payload.hook_event_name !== 'UserPromptSubmit') {
+    try {
+      const observerManifest = loadManifest();
+      const observerModeMap = loadModeMap();
+      observeShadowEvent(payload, {
+        manifestFingerprint: observerManifest?.manifest_fingerprint || '',
+        modeMapVersion: observerModeMap?.schema_version ?? observerModeMap?.version ?? 'unknown',
+      });
+    } catch { /* observer is strictly fail-open */ }
+    return;
+  }
   if (!payload || typeof prompt !== 'string') return;
   const decision = skipRouting ? { final_injected_context: '', pass_through_reason: 'context_handled' } : inspectDecision(prompt, {
     cwd: process.cwd(),

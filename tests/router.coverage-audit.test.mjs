@@ -127,6 +127,29 @@ test('classifies mapped and manifest-derived expected capabilities with typed id
   assert.equal(record(report, 'plugin_skills', 'shared').coverage_status, 'mapped');
 });
 
+test('slash routes accept present routeable skills as active targets', () => {
+  const route = {
+    schema_version: 4,
+    entries: [{
+      id: 'skill-route',
+      invoke_kind: 'slash',
+      mode: 'shared',
+      resolve: [{ name: 'shared', weight: 1 }],
+      signal_patterns: ['skill route'],
+      recommended_skills: [],
+      recommended_agents: [],
+    }],
+  };
+  const report = auditCoverage({
+    manifest: manifest(),
+    modeMap: route,
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.equal(record(report, 'skills', 'shared').coverage_status, 'mapped');
+  assert.equal(report.forward_diagnostics.some(item => item.code === 'stale_target'), false);
+});
+
 test('allows only explicit present reverse-gap policy acknowledgements', () => {
   const baseline = {
     schema_version: 1,

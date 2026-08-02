@@ -2,62 +2,65 @@
 gsd_state_version: 1.0
 milestone: v1.5
 milestone_name: Framework-Neutral Adaptive Routing
-current_phase: 31
-current_phase_name: runtime-tagging
-status: executing
-stopped_at: context exhaustion at 79% (2026-08-01)
-last_updated: "2026-08-01T13:21:58.730Z"
-last_activity: 2026-08-01
-last_activity_desc: Phase 31 execution started
+current_phase: 37.1
+current_phase_name: "Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence"
+status: complete
+stopped_at: Phase 37.1 complete; real-home activation remains safely quarantined
+last_updated: "2026-08-02T09:05:00.000Z"
+last_activity: 2026-08-02
+last_activity_desc: Phase 37.1 runtime, watcher, strict-gate, and requirements evidence closure
 progress:
-  total_phases: 7
-  completed_phases: 2
-  total_plans: 6
-  completed_plans: 6
-  percent: 29
+  total_phases: 10
+  completed_phases: 9
+  total_plans: 27
+  completed_plans: 27
+  percent: 100
 ---
 
 # Project State
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-07-31)
+See: .planning/PROJECT.md (updated 2026-08-01)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead and sub-100ms routing.
-**Current focus:** Phase 31 — runtime-tagging
+**Current focus:** v1.5 milestone complete; release evidence archived in Phase 36
 
 ## Current Position
 
-Phase: 31 (runtime-tagging) — EXECUTING
-Plan: 1 of 3
-Status: Executing Phase 31
-Last activity: 2026-08-01 — Phase 31 execution started
+Phase: 37.1 — Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence
+Plan: 01 complete
+Status: Complete
+Last activity: 2026-08-02 — Phase 37.1 runtime, watcher, strict-gate, and requirements evidence closure
 
-Progress: [██████████] 100%
+Progress: [████████████████████] 27/27 plans (100%)
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Previous milestone plans completed: 8 (v1.4, phases 27-29)
-- Current milestone plans completed: 0
-- Current milestone execution time: 0 hours
+- Current milestone plans completed: 26
+- Current milestone execution time: autonomous continuation completed 2026-08-01
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 30. Manifest Fingerprint + Watcher Narrowing | 0 | TBD | - |
-| 31. Runtime Tagging | 0 | TBD | - |
-| 32. Intent-First Routing | 0 | TBD | - |
-| 33. Shadow-Log Observer | 0 | TBD | - |
-| 34. Per-Install Auto-Calibration | 0 | TBD | - |
-| 35. Release-Gate Cleanup | 0 | TBD | - |
+| 30. Manifest Fingerprint + Watcher Narrowing | 3 | 3 | complete |
+| 31. Runtime Tagging | 3 | 3 | complete |
+| 32. Intent-First Routing | 4 | 4 | complete |
+| 33. Shadow-Log Observer | 3 | 3 | complete |
+| 34. Per-Install Auto-Calibration | 3 | 3 | complete |
+| 35. Per-Project Routing | 3 | 3 | complete |
+| 36. Release-Gate Cleanup | 3 | 3 | complete |
+| 31 | 3 | - | - |
+| 32.1 | 4 | - | - |
 
 **Recent Trend:**
 
-- Last 5 plans: none (v1.5 not started)
-- Trend: Not started
+- Last 5 plans: 33-03, 34-01, 34-02, 34-03, 36-03
+- Trend: Complete
 
 **Per-Plan Metrics:**
 
@@ -65,6 +68,14 @@ Progress: [██████████] 100%
 |------|----------|-------|-------|
 | Phase 30-foundation-manifest-fingerprint-watcher-narrowing P2 | 12 | 2 tasks | 3 files |
 | Phase 30 P3 | 14 | 2 tasks | 3 files |
+| Phase 32 P01 | 25m | 2 tasks | 3 files |
+| Phase 32 P02 | 25 | 3 tasks | 3 files |
+| Phase 32-intent-first-routing-mode-map-schema-v4-guard-hole-closure P03 | 720 | 3 tasks | 7 files |
+| Phase 32-intent-first-routing-mode-map-schema-v4-guard-hole-closure P04 | 35 | 3 tasks | 4 files |
+| Phase 32.1 P01 | 8 | 2 tasks | 3 files |
+| Phase 32.1 P03 | 10 | 3 tasks | 4 files |
+| Phase 32.1 P02 | 10 | 3 tasks | 3 files |
+| Phase 32.1 P04 | 2min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -83,6 +94,23 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase ?]: Calibration is epoch-keyed: fingerprint-matched calibration.json wins; mismatch/absent/corrupt -> mode-map defaults 0.591/0.291/0.191 (fail-open, never throws)
 - [Phase ?]: Hardcoded startup threshold fallback bumped from 0.6/0.3/0.2 to the roadmap defaults 0.591/0.291/0.191 so the named defaults are the literal defaults
 - [Phase ?]: Capability lifecycle (watcher -> rebuild -> coverage audit -> recompute -> re-calibrate) documented in docs/inventory-lifecycle.md and test-verified in the add direction (remove direction proven by 30-02)
+- [Phase ?]: resolveSlashRoute(entry, manifest, opts?) is the future resolve-first helper; undefined-import is the RED state
+- [Phase ?]: Cross-runtime manifest carries a per-runtime runtime_commands slice selected by ROUTER_RUNTIME
+- [Phase ?]: resolveSlashRoute exported framework-neutral; guard hole closed at both snapshot sites; schema_version no longer makes slash routes intentional
+- [Phase ?]: Resolve-aware audit closure at audit.mjs:142 (blanket schema_version pass removed); forward-orphan quarantine aligns audit and validateRouteTargets
+- [Phase ?]: ROUTE-04 generic fallback uses a fixed constant string, never derived from entry id or candidates (anti-fabrication)
+- [Phase ?]: ROUTE-05 tie-lint: near-tie within 0.05 (or rank tie) downgrades to med; absent resolve members quarantined; stdlib-only, framework-neutral
+- [Phase 32.1]: Use a non-empty runtime_commands[RUNTIME] slice for command indexes, with flat commands fallback for pre-runtime and empty-slice manifests.
+- [Phase 32.1]: Expose the active runtime on each built index for attribution without changing existing inventory set shapes.
+- [Phase 32.1]: Near-tie violations always fail strict coverage; stale resolve members fail only when no active command candidate resolves the route.
+- [Phase 32.1]: Resolvable routes retain absent optional members in quarantined_diagnostics while excluding them from forward_diagnostics and strict failure.
+- [Phase 32.1]: The sandbox fixture maps both present commands through typed routes so clean strict cases isolate tie-lint behavior.
+- [Phase 32.1]: Resolve slash routes from the raw manifest immediately before guards so runtime_commands[RUNTIME] controls emitted modes.
+- [Phase 32.1]: Propagate resolver tier to emitted routes so near-ties cannot remain high-confidence or enter the high-tier cache path.
+- [Phase 32.1]: Use stable weight-only sorting because the insertion-ordered candidate Map preserves authored mode and resolve-list order.
+- [Phase 32.1]: Render at most one fixed generic native fallback line with no slash mode when high-tier resolution has no present candidate.
+- [Phase 32.1]: Use the live hook in a stdlib subprocess with in-memory runtime fixtures and a temporary cache path to measure the real resolve-first route path without home-directory writes.
+- [Phase 32.1]: Keep the pure resolveSlashRoute benchmark as a separately named helper-level perf gate alongside the end-to-end render gate.
 
 ### Pending Todos
 
@@ -90,10 +118,14 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 30 planning must pick the composite-epoch granularity (one global fingerprint vs separate map/manifest/weights epochs) and the exact hash inputs — research flag (see ROADMAP Phase 30).
-- Phase 32 planning must define resolve-list per-runtime ordering + exact tie-handling/confidence-gap rule (near-tie → med), and whether forward-orphan audit semantics extend to resolve lists — research flag.
-- Phase 33 planning must verify PostToolUse slash-command visibility (Skill|Agent|Task only?) and pass a coexistence review — research flag; Stop-hook transcript scan is the deferred fallback.
-- Phase 34 planning must derive the exact threshold mapping formula (Wilson vs Beta/Jeffreys posterior mean; prior strength encoding shipped defaults) — research flag; overfit regression test is the guard.
+- Live operator activation remains unavailable because the real-home candidate is safely quarantined by native-identity and hook-descriptor collisions; this is recorded, not bypassed.
+- Calibration corpus carries two known low-tier misses; thresholds remain unchanged and sensitivity is recorded in Phase 36 evidence.
+
+### Roadmap Evolution
+
+- Phase 32.1 inserted after Phase 32: Phase-32 review closure: wire resolver into production hot path, runtime_commands parity on index path, tie-lint build gate, real hot-path perf test (URGENT)
+- Phase 37 added: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence
+- Phase 37.1 inserted after Phase 37: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence (URGENT)
 
 ## Deferred Items
 
@@ -106,16 +138,16 @@ None yet.
 | Advanced Routing | FUT-09 multi-intent / clarification triggers, boundary-aware substring matching | v2 | v1.5 requirements |
 | Advanced Routing | FUT-10 per-entry calibration | v2 (needs n≥200) | v1.5 requirements |
 | Advanced Routing | FUT-11 in-turn invocation tap | v2 (only if coexistence review passes) | v1.5 requirements |
-| Release | BLOCKER 2 — live-install release verification (REL-08) | In scope — Phase 35 | v1.5 roadmap |
-| Release | Orphaned watcher instances (REL-10) | In scope — Phase 35 | v1.5 roadmap |
-| Release | router.safety-release live-env failures (REL-10) | In scope — Phase 35 | v1.5 roadmap |
+| Release | BLOCKER 2 — live-install release verification (REL-08) | Complete — Phase 36 | v1.5 roadmap |
+| Release | Orphaned watcher instances (REL-10) | Complete — Phase 36 | v1.5 roadmap |
+| Release | router.safety-release live-env failures (REL-10) | Complete — Phase 36 | v1.5 roadmap |
 
 ## Session Continuity
 
-Last session: 2026-08-01T13:21:58.720Z
-Stopped at: context exhaustion at 79% (2026-08-01)
+Last session: 2026-08-01T22:00:00+01:00
+Stopped at: Phase 36 complete; v1.5 release verified
 Resume file: None
 
 ## Operator Next Steps
 
-- Review/approve the v1.5 roadmap, then start Phase 30 planning: `/gsd-plan-phase 30` (research-phase candidate — composite-epoch granularity).
+- No next phase in v1.5. If desired, the next action is a separate v2 milestone or a targeted operator-activation investigation.

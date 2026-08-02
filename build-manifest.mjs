@@ -21,12 +21,12 @@
 // exit 0 with a valid manifest and all-zero counts.
 
 import { existsSync, readFileSync, readdirSync, writeFileSync, renameSync, statSync, mkdirSync } from 'node:fs';
-import { join, dirname, basename, extname } from 'node:path';
+import { join, dirname, basename, extname, isAbsolute, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { auditCoverage } from './src/coverage/audit.mjs';
 import { computeCompositeEpoch } from './src/registry/fingerprint.mjs';
-import { commandInventory, lintModeMap } from './scripts/resolve-tie-lint.mjs';
+import { routeTargetInventory, lintModeMap } from './scripts/resolve-tie-lint.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const HOME = homedir();
@@ -73,17 +73,27 @@ function readJson(path, fallback) {
   try { return JSON.parse(readFileSync(path, 'utf8')); } catch { return fallback; }
 }
 
+// PROJ-01: Claude records project roots under ~/.claude.json. Include those
+// roots in the normal project-skill scan; the explicit env var remains an
+// additive compatibility path for callers that already provide one.
+const PROJECT_CONFIG_ROOTS = Object.keys(readJson(CLAUDE_JSON, {})?.projects || {})
+  .filter((root) => typeof root === 'string' && isAbsolute(root))
+  // Claude can record the user's home as a project key; its .claude/skills is
+  // the global skill directory, not a project-scoped corpus.
+  .filter((root) => resolve(join(root, '.claude', 'skills')) !== resolve(join(CLAUDE, 'skills')));
+const DISCOVERED_PROJECT_SKILL_DIRS = [...new Set([...PROJECT_SKILL_DIRS, ...PROJECT_CONFIG_ROOTS])];
+
 function stripLeadingSlash(name = '') {
   return String(name).replace(/^\/+/, '');
 }
 
-function entryResolvable(entryId, commands, modeMap) {
+function entryResolvable(entryId, routeTargets, modeMap) {
   const entry = (modeMap?.entries || []).find((candidate) =>
     (candidate?.id || candidate?.mode || '<no-id>') === entryId);
   if (!entry) return false;
-  return commands.has(stripLeadingSlash(entry.mode))
+  return routeTargets.has(stripLeadingSlash(entry.mode))
     || (Array.isArray(entry.resolve)
-      && entry.resolve.some(member => commands.has(stripLeadingSlash(member?.name))));
+      && entry.resolve.some(member => routeTargets.has(stripLeadingSlash(member?.name))));
 }
 
 // .skill-lock.json maps skill name -> {source, sourceUrl, ...}
@@ -172,7 +182,7 @@ const manifest = {
   registry_scope: {
     claude_home: CLAUDE,
     agents_skills_dir: AGENTS_SKILLS_DIR,
-    project_skill_dirs: PROJECT_SKILL_DIRS,
+    project_skill_dirs: DISCOVERED_PROJECT_SKILL_DIRS,
     skill_lock: SKILL_LOCK_PATH,
     note: 'skills[] = ~/.claude/skills (incl. symlinks into ~/.agents); agents_store_skills[] = ~/.agents/skills NOT already surfaced globally; project_scoped_skills[] = skills only in a project .claude/skills',
   },
@@ -417,7 +427,7 @@ if (existsSync(AGENTS_SKILLS_DIR)) {
 }
 
 // PROJECT-SCOPED SKILLS — skills only in a project's .claude/skills
-for (const proj of PROJECT_SKILL_DIRS) {
+for (const proj of DISCOVERED_PROJECT_SKILL_DIRS) {
   const psd = join(proj, '.claude', 'skills');
   if (!existsSync(psd)) continue;
   for (const e of safeReaddir(psd)) {
@@ -618,11 +628,11 @@ const tieLint = lintModeMap(coverageModeMap, manifest);
 for (const violation of tieLint.violations) {
   console.error(`[${violation.type}] ${violation.entry}${violation.target ? ` -> ${violation.target}` : ''}: ${violation.detail}`);
 }
-const commands = commandInventory(manifest);
+const routeTargets = routeTargetInventory(manifest);
 const blockingViolations = tieLint.violations.filter(violation =>
   violation.type === 'near_tie'
   || !(violation.type === 'stale_target'
-    && entryResolvable(violation.entry, commands, coverageModeMap)));
+    && entryResolvable(violation.entry, routeTargets, coverageModeMap)));
 mkdirSync(dirname(COVERAGE_REPORT_PATH), { recursive: true });
 const coverageTmp = `${COVERAGE_REPORT_PATH}.tmp.${process.pid}`;
 writeFileSync(coverageTmp, JSON.stringify(coverage, null, 2));

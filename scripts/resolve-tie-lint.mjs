@@ -43,15 +43,29 @@ export function commandInventory(manifest, opts = {}) {
   return set;
 }
 
+// Slash resolve lists can target a command or a routeable skill. Keep the strict gate's
+// presence predicate aligned with the hook's buildTargetIndexes routeTargets set.
+export function routeTargetInventory(manifest, opts = {}) {
+  const set = commandInventory(manifest, opts);
+  for (const collection of ['skills', 'plugin_skills', 'agents_store_skills']) {
+    for (const entry of (manifest && manifest[collection]) || []) {
+      if (collection === 'agents_store_skills' && entry?.scope !== 'global') continue;
+      const name = stripLeadingSlash(entry && (entry.name || entry.id));
+      if (name) set.add(name);
+    }
+  }
+  return set;
+}
+
 function memberWeight(member) {
   const w = member && member.weight;
   return typeof w === 'number' && Number.isFinite(w) ? w : null;
 }
 
-// Lint a single mode-map against a command inventory. Pure, deterministic.
+// Lint a single mode-map against the active route-target inventory. Pure, deterministic.
 // Returns { violations: [...], downgradedTiers: {id: tier}, quarantined: {id: [names]} }
 export function lintModeMap(modeMap, manifest, opts = {}) {
-  const commands = commandInventory(manifest, opts);
+  const commands = routeTargetInventory(manifest, opts);
   const violations = [];
   const downgradedTiers = {};
   const quarantined = {};

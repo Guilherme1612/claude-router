@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { watch } from 'node:fs';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { readFile, mkdir, rename, rm, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { scanFingerprintTree, loadFingerprintState, saveFingerprintState } from './fingerprint.mjs';
@@ -322,7 +322,9 @@ export function createRegistryWatcher(options) {
             const included = !(root.includeRelativePaths || []).length
               || root.includeRelativePaths.some(prefix => relative === prefix || relative.startsWith(`${prefix}/`));
             const ignored = (root.ignoredRelativePaths || []).some(prefix => (
-              relative === prefix || relative.startsWith(`${prefix}/`)
+              prefix.startsWith('*.')
+                ? relative.endsWith(prefix.slice(1))
+                : relative === prefix || relative.startsWith(`${prefix}/`)
             ));
             return included && !ignored;
           }).map(root => root.logicalRoot);
@@ -380,6 +382,41 @@ async function readJson(path) {
   try { return JSON.parse(await readFile(path, 'utf8')); } catch { return null; }
 }
 
+export function rebuildRuntimeArtifacts(config, { run = null } = {}) {
+  const artifacts = Array.isArray(config?.runtime_artifacts) ? config.runtime_artifacts : [];
+  if (artifacts.length === 0) return { status: 'skipped', builds: [] };
+  const runner = run || ((artifact, env) => spawnSync(process.execPath, [artifact.builder_path], {
+    env, encoding: 'utf8', timeout: config.runtime_artifact_timeout_ms ?? 30_000,
+  }));
+  const builds = artifacts.map((artifact) => {
+    const env = {
+      ...process.env,
+      ROUTER_RUNTIME: artifact.runtime,
+      ROUTER_CLAUDE_HOME: dirname(config.claude_root),
+      ROUTER_CODEX_HOME: dirname(config.codex_root),
+      ROUTER_AGENTS_SKILLS_DIR: join(dirname(config.claude_root), '.agents', 'skills'),
+      ROUTER_CLAUDE_JSON: join(dirname(config.claude_root), '.claude.json'),
+      ROUTER_MANIFEST_OUT: artifact.manifest_path,
+      ROUTER_MODE_MAP_PATH: artifact.mode_map_path,
+      ROUTER_COVERAGE_REPORT_PATH: artifact.coverage_report_path,
+      ROUTER_HOOK_PATH: artifact.hook_path,
+      ROUTER_PROJECT_SKILL_DIRS: config.project_root || '',
+      ROUTER_PROJECT_MCP_JSON: config.project_root ? join(config.project_root, '.mcp.json') : '',
+      ROUTER_PROJECT_CONFIG_PATH: config.project_root || '',
+    };
+    let result;
+    try { result = runner(artifact, env); }
+    catch (error) { result = { status: null, error }; }
+    return {
+      runtime: artifact.runtime,
+      status: result?.status ?? null,
+      ok: result?.status === 0 && !result?.error,
+      ...(result?.error ? { error: result.error.message || String(result.error) } : {}),
+    };
+  });
+  return { status: builds.every(build => build.ok) ? 'built' : 'failed', builds };
+}
+
 export async function finishWatcherShutdown(controller, publish, removeSignalHandlers) {
   try {
     await controller.close();
@@ -421,6 +458,8 @@ export async function runRegistryWatcher(options) {
         onPublished: () => publish('ready'),
       }
     : { onPublished: () => publish('ready') };
+  reconcileDependencies.refreshRuntimeArtifacts = options.refreshRuntimeArtifacts
+    || (context => rebuildRuntimeArtifacts(context.config));
   const reconcile = createRegistryReconciler(config, reconcileDependencies);
   controller = createRegistryWatcher({
     roots: config.roots,
@@ -529,6 +568,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const createEvidenceStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
   const compatibleFn = dependencies.compatible || compatible;
   const onPublished = dependencies.onPublished;
+  const refreshRuntimeArtifacts = dependencies.refreshRuntimeArtifacts;
   const writeJson = dependencies.writeJson || atomicJson;
   const readActive = dependencies.readActive || (async () => {
     const empty = () => {
@@ -615,6 +655,15 @@ export function createRegistryReconciler(config, dependencies = {}) {
     };
     await writeJson(config.candidate_path, candidatePublication);
     await writeJson(config.report_path, reportPublication);
+    if (refreshRuntimeArtifacts) {
+      const artifactResult = await refreshRuntimeArtifacts({ config, diff, trigger });
+      if (artifactResult?.status === 'failed') {
+        const error = new Error('runtime inventory artifact refresh failed');
+        error.code = 'runtime_artifact_refresh_failed';
+        error.builds = artifactResult.builds;
+        throw error;
+      }
+    }
     reconcile.lastReconciliation = {
       strategy: 'incremental',
       ...(trigger ? { trigger } : {}),

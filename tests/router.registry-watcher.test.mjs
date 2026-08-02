@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   createRegistryReconciler, createRegistryWatcher, createTestRegistryReconciler,
-  finishWatcherShutdown,
+  finishWatcherShutdown, rebuildRuntimeArtifacts,
 } from '../src/registry/watcher.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { mapCandidateRegistry } from '../src/registry/map.mjs';
@@ -36,6 +36,28 @@ test('watcher shutdown removes signal handlers when stopped publication fails', 
     () => calls.push('remove-listeners'),
   ), /status unavailable/);
   assert.deepEqual(calls, ['close', 'publish', 'remove-listeners']);
+});
+
+test('runtime artifact refresh builds Claude and Codex manifests with isolated outputs', () => {
+  const calls = [];
+  const result = rebuildRuntimeArtifacts({
+    claude_root: '/home/user/.claude', codex_root: '/home/user/.codex',
+    project_root: '/worktree',
+    runtime_artifacts: [
+      { runtime: 'claude', builder_path: '/owned/claude/build-manifest.mjs', manifest_path: '/owned/claude/manifest.json', mode_map_path: '/owned/claude/mode-map.json', coverage_report_path: '/owned/claude/coverage.json', hook_path: '/home/user/.claude/hooks/router.mjs' },
+      { runtime: 'codex', builder_path: '/owned/codex/build-manifest.mjs', manifest_path: '/owned/codex/manifest.json', mode_map_path: '/owned/codex/mode-map.json', coverage_report_path: '/owned/codex/coverage.json', hook_path: '/home/user/.codex/hooks/router.mjs' },
+    ],
+  }, {
+    run(artifact, env) {
+      calls.push({ runtime: env.ROUTER_RUNTIME, builder: artifact.builder_path, manifest: env.ROUTER_MANIFEST_OUT, modeMap: env.ROUTER_MODE_MAP_PATH, hook: env.ROUTER_HOOK_PATH });
+      return { status: 0 };
+    },
+  });
+  assert.equal(result.status, 'built');
+  assert.deepEqual(calls, [
+    { runtime: 'claude', builder: '/owned/claude/build-manifest.mjs', manifest: '/owned/claude/manifest.json', modeMap: '/owned/claude/mode-map.json', hook: '/home/user/.claude/hooks/router.mjs' },
+    { runtime: 'codex', builder: '/owned/codex/build-manifest.mjs', manifest: '/owned/codex/manifest.json', modeMap: '/owned/codex/mode-map.json', hook: '/home/user/.codex/hooks/router.mjs' },
+  ]);
 });
 
 function hashForTest(value) {
@@ -296,7 +318,7 @@ function reconcilerCapability(overrides = {}) {
 }
 
 test('installed reconciliation publishes eligible inactive candidate and deterministic report without activation', async () => {
-  const writes = [], activations = [], assemblyOptions = [];
+  const writes = [], activations = [], assemblyOptions = [], refreshes = [];
   const activeBytes = '{"active":true}\n';
   const reconcile = createRegistryReconciler({
     candidate_path: '/candidate',
@@ -313,6 +335,7 @@ test('installed reconciliation publishes eligible inactive candidate and determi
     readActive: async () => ({ bytes: activeBytes, fingerprint: createHash('sha256').update(activeBytes).digest('hex') }),
     activate: value => activations.push(value),
     writeJson: async (path, value) => writes.push({ path, value }),
+    refreshRuntimeArtifacts: context => { refreshes.push(context); return { status: 'built' }; },
   });
   await reconcile({ diff: { events: [], diagnostics: [] } });
   assert.deepEqual(writes.map(value => value.path), ['/candidate', '/report']);
@@ -320,6 +343,8 @@ test('installed reconciliation publishes eligible inactive candidate and determi
   assert.equal(writes[1].value.disposition, 'eligible');
   assert.equal(writes[1].value.active_bytes, activeBytes);
   assert.deepEqual(activations, []);
+  assert.equal(refreshes.length, 1);
+  assert.deepEqual(refreshes[0].diff, { events: [], diagnostics: [] });
   assert.equal(reconcile.lastReconciliation.disposition, 'eligible');
   assert.equal(assemblyOptions[0].modeMapPath, '/owned/mode-map.json');
   assert.equal(assemblyOptions[0].workflowDeclarationsPath, '/owned/workflow-declarations.json');
@@ -571,6 +596,7 @@ test('noise events never dirty roots while installed_plugins.json does (INVC-04 
     'plugins/cache',
     'plugins/data',
     'plugins/marketplaces',
+    '*.sqlite', '*.sqlite-wal', '*.sqlite-shm',
   ];
   const scheduler = clock();
   let callback;
@@ -595,6 +621,9 @@ test('noise events never dirty roots while installed_plugins.json does (INVC-04 
     'context-mode/content/foo.db',
     'context-mode/sessions/x.db-wal',
     'context-mode/sessions/x.db-shm',
+    'logs_2.sqlite',
+    'logs_2.sqlite-wal',
+    'state_5.sqlite-shm',
     'plugins/plugin-catalog-cache.json',
     'plugins/known_marketplaces.json',
     'plugins/cache/context-mode/x/y/1.0.0/file',
@@ -613,7 +642,7 @@ test('noise events never dirty roots while installed_plugins.json does (INVC-04 
   assert.deepEqual(reconciled, [], 'no further reconciles after installed_plugins.json');
 
   // The ignore list must be prefix-specific and exact — never cover installed_plugins.json.
-  assert.deepEqual(NOISE_IGNORES, ['router', 'context-mode', 'plugins/plugin-catalog-cache.json', 'plugins/known_marketplaces.json', 'plugins/cache', 'plugins/data', 'plugins/marketplaces']);
+  assert.deepEqual(NOISE_IGNORES, ['router', 'context-mode', 'plugins/plugin-catalog-cache.json', 'plugins/known_marketplaces.json', 'plugins/cache', 'plugins/data', 'plugins/marketplaces', '*.sqlite', '*.sqlite-wal', '*.sqlite-shm']);
   assert.equal(NOISE_IGNORES.includes('plugins'), false, 'bare plugins prefix must never be ignored');
 
   await controller.close();

@@ -201,15 +201,15 @@ test('SAF-02: routeTargetsExist accepts an intentional mode-map route alias', ()
   assert.equal(routeTargetsExist(route, manifest, modeMap), true);
 });
 
-test('SAF-02: routeTargetsExist accepts an intentional schema route', () => {
+test('SAF-02: routeTargetsExist rejects a stale schema route without a present target', () => {
   const manifest = fakeManifest();
-  const modeMap = { schema_version: 1, entries: [{ id: 'schema-route', mode: 'schema-route' }] };
+  const modeMap = { schema_version: 4, entries: [{ id: 'schema-route', mode: 'schema-route', resolve: [{ name: 'schema-route', weight: 1 }] }] };
   const route = {
     invoke_kind: 'slash', id: 'schema-route', mode: 'schema-route',
     recommended_skills: [], recommended_agents: [],
   };
   assert.equal(routeTargetsExist(route, manifest), false);
-  assert.equal(routeTargetsExist(route, manifest, modeMap), true);
+  assert.equal(routeTargetsExist(route, manifest, modeMap), false);
 });
 
 test('SAF-04 boundary: capRouteRender on exactly 3 skills and 2 agents does NOT set _render_cap_truncated', () => {

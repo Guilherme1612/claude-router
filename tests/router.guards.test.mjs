@@ -154,7 +154,7 @@ test('GRD-02: impeccable (scope:project) never in a global route (fixture)', () 
 
 test('GRD-02: real manifest excludes non-global skills from corpus', () => {
   const m = realManifest();
-  const corpus = buildCorpus(m);
+  const corpus = buildCorpus(m, null, '/tmp/router-global-corpus');
   assert.ok(!corpus.some(({ entry }) => (
     entry.scope === 'project'
     || entry.scope === 'agents-store (not globally symlinked)'

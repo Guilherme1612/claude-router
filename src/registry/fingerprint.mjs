@@ -115,7 +115,9 @@ async function walk(rootPath, logicalRoot, options, entries, diagnostics, curren
     const relativePath = portablePath(relative(rootPath, absolute).replaceAll(sep, '/'));
     if (!relativePath) throw new Error(`invalid portable path beneath ${logicalRoot}`);
     if ((options.ignoredRelativePaths || []).some(prefix => (
-      relativePath === prefix || relativePath.startsWith(`${prefix}/`)
+      prefix.startsWith('*.')
+        ? relativePath.endsWith(prefix.slice(1))
+        : relativePath === prefix || relativePath.startsWith(`${prefix}/`)
     ))) continue;
     let canonical;
     try {
@@ -238,7 +240,9 @@ export async function scanFingerprintTree(rootSpecs, options = {}) {
     schema_version: SCHEMA_VERSION, roots, root_hashes: rootHashes,
     subtree_hashes: subtreeHashes, entries, diagnostics,
   };
-  const incompleteCodes = new Set(['access_denied', 'read_error', 'scan_error', 'path_escape', 'unsafe_link', 'cycle', 'root_replaced']);
+  // Symlink escapes and cycles are safely excluded from the inventory and remain
+  // visible in diagnostics; they do not make an otherwise readable root stale.
+  const incompleteCodes = new Set(['access_denied', 'read_error', 'scan_error', 'unsafe_link', 'root_replaced']);
   const logicalRoots = normalizedSpecs.map((spec) => {
     const diagnosticCodes = [...new Set(diagnostics
       .filter((item) => item.logical_root === spec.logicalRoot)

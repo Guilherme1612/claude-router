@@ -75,17 +75,21 @@ export function resolveInstallGeneration(options, { repair = true } = {}) {
 
 function updateManagedBinding(p, options, enabled) {
   updateBindingAt(p.settingsPath, 'UserPromptSubmit', p.routerPath, options, enabled, 5);
+  updateBindingAt(p.settingsPath, 'UserPromptExpansion', p.routerPath, options, enabled, 5);
+  updateBindingAt(p.settingsPath, 'PostToolUse', p.routerPath, options, enabled, 5, 'Skill|Agent|Task');
+  updateBindingAt(p.settingsPath, 'PostToolUseFailure', p.routerPath, options, enabled, 5, 'Skill|Agent|Task');
+  updateBindingAt(p.settingsPath, 'Stop', p.routerPath, options, enabled, 5);
 }
 
 function updateCodexBinding(p, options, enabled) {
   updateBindingAt(p.codexHooksPath, 'UserPromptSubmit', p.codexRouterPath, options, enabled, 10);
 }
 
-function updateBindingAt(settingsPath, event, routerPath, options, enabled, timeout) {
+function updateBindingAt(settingsPath, event, routerPath, options, enabled, timeout, matcher = null) {
   const settings = validatedSettings(settingsPath);
   const groups = settings.hooks[event] || [];
   const filtered = groups.filter(group => !isRouterEntry(group, routerPath));
-  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, routerPath, timeout));
+  if (enabled) filtered.push(routerEntry(options.nodeBinary || process.execPath, routerPath, timeout, matcher));
   if (filtered.length) settings.hooks[event] = filtered;
   else delete settings.hooks[event];
   durableAtomicWrite(settingsPath, JSON.stringify(settings, null, 2) + '\n');
@@ -153,8 +157,9 @@ function readJson(file, fallback, label = file) {
   }
 }
 
-function routerEntry(nodeBinary, routerPath, timeout = 5) {
+function routerEntry(nodeBinary, routerPath, timeout = 5, matcher = null) {
   return {
+    ...(matcher ? { matcher } : {}),
     hooks: [{ type: 'command', command: `"${nodeBinary}" "${routerPath}"`, timeout }],
   };
 }
@@ -165,6 +170,14 @@ function isRouterEntry(group, routerPath) {
     && typeof hook.command === 'string'
     && hook.command.includes(routerPath)
   ));
+}
+
+function noisePaths(extra = []) {
+  return [
+    'router', 'context-mode', 'plugins/plugin-catalog-cache.json', 'plugins/known_marketplaces.json',
+    'plugins/cache', 'plugins/data', 'plugins/marketplaces', '*.sqlite', '*.sqlite-wal', '*.sqlite-shm',
+    ...extra,
+  ];
 }
 
 function paths(options) {
@@ -252,6 +265,13 @@ async function stopController(p, configurationFingerprint, options = {}) {
   while (Date.now() <= deadline && processAlive(status.pid)) await sleep(20);
   if (processAlive(status.pid)) {
     try { process.kill(status.pid, 'SIGTERM'); } catch { /* process exited */ }
+    const killDeadline = Date.now() + 1_000;
+    while (Date.now() <= killDeadline && processAlive(status.pid)) await sleep(20);
+  }
+  if (processAlive(status.pid)) {
+    try { process.kill(status.pid, 'SIGKILL'); } catch { /* process exited */ }
+    const forceDeadline = Date.now() + 1_000;
+    while (Date.now() <= forceDeadline && processAlive(status.pid)) await sleep(20);
   }
 }
 
@@ -401,7 +421,7 @@ export async function installRouter(options) {
   // inherits the real HOME so fixtures find the deployed hook via homedir().
   const gateEntryNames = [
     'router.calibrate.mjs', 'calibration-tasks.json', 'build-manifest.mjs',
-    'coverage-baseline.json',
+    'coverage-baseline.json', 'scripts/resolve-tie-lint.mjs',
   ];
   const gateFixtureNames = [
     'tests/router.registry-schema.test.mjs',
@@ -422,6 +442,12 @@ export async function installRouter(options) {
     // fixtures and router.calibrate.mjs resolve in production.
     ...moduleNames.map(name => [join(runtimeRoot, 'src', name), readFileSync(join(sourceRoot, name))]),
   ]);
+  // Seed the curated route map only when a runtime does not already have one.
+  // Existing maps are user/runtime state and remain untouched; a fresh Claude or
+  // Codex account still gets a routeable cold-start map in its local config root.
+  const routingSeedValues = [p.ownedRoot, p.codexOwnedRoot]
+    .map(runtimeRoot => [join(runtimeRoot, 'mode-map.json'), readFileSync(join(repoRoot, 'mode-map.json'))])
+    .filter(([file]) => !existsSync(file));
   const controllerConfig = {
     schema_version: 1,
     claude_root: p.claudeRoot,
@@ -435,28 +461,15 @@ export async function installRouter(options) {
         // plugin-catalog/marketplace caches. Prefix-specific so
         // plugins/installed_plugins.json (the authoritative add/remove signal)
         // stays visible to the watcher — a bare 'plugins' prefix is never used.
-        ignoredRelativePaths: [
-          'router',
-          'context-mode',
-          'plugins/plugin-catalog-cache.json',
-          'plugins/known_marketplaces.json',
-          'plugins/cache',
-          'plugins/data',
-          'plugins/marketplaces',
-        ],
+        ignoredRelativePaths: noisePaths(),
       },
       {
         logicalRoot: 'codex_home',
         path: p.codexRoot,
-        ignoredRelativePaths: [
-          'router',
-          'context-mode',
-          'plugins/plugin-catalog-cache.json',
-          'plugins/known_marketplaces.json',
-          'plugins/cache',
-          'plugins/data',
-          'plugins/marketplaces',
-        ],
+        ignoredRelativePaths: noisePaths([
+          'sessions', 'history.jsonl', 'session_index.jsonl', 'models_cache.json',
+          'cache/codex_apps_tools', 'cache/codex_apps_server_info',
+        ]),
       },
       ...(options.projectRoot ? [
         { logicalRoot: `project:${options.scopeId || 'project'}:claude`, path: join(resolve(options.projectRoot), '.claude'), watchPath: resolve(options.projectRoot), includeRelativePaths: ['.claude'] },
@@ -485,6 +498,10 @@ export async function installRouter(options) {
     // store. The hook appends to ~/.claude/router/telemetry.jsonl which equals
     // join(ownedRoot, 'telemetry.jsonl') for a global install.
     telemetry_path: join(p.ownedRoot, 'telemetry.jsonl'),
+    runtime_artifacts: [
+      { runtime: 'claude', builder_path: join(p.ownedRoot, 'build-manifest.mjs'), manifest_path: join(p.ownedRoot, 'claude-inventory-manifest.json'), mode_map_path: join(p.ownedRoot, 'mode-map.json'), coverage_report_path: join(p.ownedRoot, 'coverage-report.json'), hook_path: p.routerPath },
+      { runtime: 'codex', builder_path: join(p.codexOwnedRoot, 'build-manifest.mjs'), manifest_path: join(p.codexOwnedRoot, 'claude-inventory-manifest.json'), mode_map_path: join(p.codexOwnedRoot, 'mode-map.json'), coverage_report_path: join(p.codexOwnedRoot, 'coverage-report.json'), hook_path: p.codexRouterPath },
+    ],
     status_path: p.controllerStatusPath,
     control_path: p.controllerControlPath,
     debounce_ms: options.debounceMs ?? 250,
@@ -507,11 +524,19 @@ export async function installRouter(options) {
   const { verification_runners: _strippedRunners, ...serializableConfig } = controllerConfig;
   const controllerConfigValue = stableStringify(serializableConfig) + '\n';
   const configurationFingerprint = fingerprint(stableStringify(serializableConfig));
+  const existingControllerConfig = readJson(p.controllerConfigPath, null, 'controller config');
+  const existingControllerFingerprint = existingControllerConfig
+    ? fingerprint(stableStringify(existingControllerConfig)) : null;
+  const existingControllerStatus = controllerStatus(p);
+  if (existingControllerFingerprint && existingControllerStatus && processAlive(existingControllerStatus.pid)
+    && (existingControllerFingerprint !== configurationFingerprint || existingControllerStatus.state !== 'ready')) {
+    await stopController(p, existingControllerFingerprint, options);
+  }
   const readinessValues = [
     ...moduleValues, ...gateFixtureValues, [p.controllerConfigPath, controllerConfigValue],
   ];
   const ownedValues = [
-    ...readinessValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue],
+    ...readinessValues, [p.candidatePath, candidateValue], [p.reportPath, reportValue], ...routingSeedValues,
   ];
   for (const [file] of ownedValues) {
     const owned = existingManifest?.files?.some(entry => entry.path === file);
@@ -582,6 +607,10 @@ export async function installRouter(options) {
       ];
       atomicWrite(p.codexHooksPath, JSON.stringify(codexSettings, null, 2) + '\n');
     }
+    // Keep the existing Claude prompt binding path above for compatibility,
+    // then reconcile the observer events additively. Each pass removes only
+    // groups owned by this router path and preserves every other hook group.
+    updateManagedBinding(p, options, true);
     for (const [file, value] of ownedValues) {
       if (!fileMatches(file, fingerprint(value))) { atomicWrite(file, value); created.push(file); }
     }
@@ -620,6 +649,8 @@ export async function installRouter(options) {
         join(p.ownedRoot, 'modules'), join(p.codexOwnedRoot, 'modules'),
         ...[...new Set(moduleNames.map(name => dirname(join(p.ownedRoot, 'modules', name))))],
         ...[...new Set(moduleNames.map(name => dirname(join(p.codexOwnedRoot, 'modules', name))))],
+        ...[...new Set(gateEntryNames.map(name => dirname(join(p.ownedRoot, name))))],
+        ...[...new Set(gateEntryNames.map(name => dirname(join(p.codexOwnedRoot, name))))],
         // Blocker-2: prune the deployed gate-fixture trees. `src` mirrors
         // modules/ (isomorphic subdir layout) and `tests` holds the 10 gate
         // fixtures; both must be empty before the owned root can be removed.
@@ -633,6 +664,10 @@ export async function installRouter(options) {
       },
       bindings: [
         { settings_path: p.settingsPath, event: 'UserPromptSubmit', router_path: p.routerPath },
+        { settings_path: p.settingsPath, event: 'UserPromptExpansion', router_path: p.routerPath },
+        { settings_path: p.settingsPath, event: 'PostToolUse', router_path: p.routerPath },
+        { settings_path: p.settingsPath, event: 'PostToolUseFailure', router_path: p.routerPath },
+        { settings_path: p.settingsPath, event: 'Stop', router_path: p.routerPath },
         { settings_path: p.codexHooksPath, event: 'UserPromptSubmit', router_path: p.codexRouterPath },
       ],
     };
@@ -656,25 +691,36 @@ export async function installRouter(options) {
       && readinessValues.every(([file, value]) => fileMatches(file, fingerprint(value)))
       && existsSync(p.manifestPath);
     if (!ready) throw new Error('readiness verification failed');
-    // Fresh-account onboarding: run the inventory manifest builder once after a
-    // verified deploy so the router can route on a brand-new account. Warn-and-
-    // continue on failure (router fail-opens on a missing manifest). Runs once for
-    // claude's ownedRoot; codex's hook imports claude's router.mjs → shares it.
-    let manifestBuilt = false;
+    // Fresh-account onboarding: run the inventory manifest builder for each runtime
+    // after a verified deploy. Warn-and-continue on failure (the hook fail-opens on
+    // a missing manifest), but never report success unless both runtime outputs build.
+    let manifestBuilt = true;
     try {
       const defaultManifestBuilder = (nodeBinary, scriptPath, env) =>
         spawnSync(nodeBinary, [scriptPath], { env, encoding: 'utf8', timeout: 30_000 });
-      const build = (options.manifestBuilder || defaultManifestBuilder)(
-        options.nodeBinary || process.execPath,
-        join(p.ownedRoot, 'build-manifest.mjs'),
-        { ...process.env,
-          ROUTER_CLAUDE_HOME: p.claudeRoot,
-          ROUTER_AGENTS_SKILLS_DIR: join(dirname(p.claudeRoot), '.agents', 'skills'),
-          ROUTER_CLAUDE_JSON: join(dirname(p.claudeRoot), '.claude.json'),
-          ROUTER_MANIFEST_OUT: join(p.ownedRoot, 'claude-inventory-manifest.json'),
-          ROUTER_PROJECT_SKILL_DIRS: '', ROUTER_PROJECT_MCP_JSON: '', ROUTER_PROJECT_CONFIG_PATH: '' });
-      manifestBuilt = !(build && (build.status !== 0 || build.error));
-      if (!manifestBuilt) console.warn(`router: manifest builder failed — run: node ~/.claude/router/build-manifest.mjs (status=${build?.status ?? 'no-exit'})`);
+      const runtimeBuilds = [
+        { runtime: 'claude', ownedRoot: p.ownedRoot, hookPath: p.routerPath },
+        { runtime: 'codex', ownedRoot: p.codexOwnedRoot, hookPath: p.codexRouterPath },
+      ];
+      for (const runtimeBuild of runtimeBuilds) {
+        const build = (options.manifestBuilder || defaultManifestBuilder)(
+          options.nodeBinary || process.execPath,
+          join(runtimeBuild.ownedRoot, 'build-manifest.mjs'),
+          { ...process.env,
+            ROUTER_RUNTIME: runtimeBuild.runtime,
+            ROUTER_CODEX_HOME: p.codexRoot,
+            ROUTER_CLAUDE_HOME: p.claudeRoot,
+            ROUTER_AGENTS_SKILLS_DIR: join(dirname(p.claudeRoot), '.agents', 'skills'),
+            ROUTER_CLAUDE_JSON: join(dirname(p.claudeRoot), '.claude.json'),
+            ROUTER_MANIFEST_OUT: join(runtimeBuild.ownedRoot, 'claude-inventory-manifest.json'),
+            ROUTER_MODE_MAP_PATH: join(runtimeBuild.ownedRoot, 'mode-map.json'),
+            ROUTER_COVERAGE_REPORT_PATH: join(runtimeBuild.ownedRoot, 'coverage-report.json'),
+            ROUTER_HOOK_PATH: runtimeBuild.hookPath,
+            ROUTER_PROJECT_SKILL_DIRS: '', ROUTER_PROJECT_MCP_JSON: '', ROUTER_PROJECT_CONFIG_PATH: '' });
+        const passed = !(build && (build.status !== 0 || build.error));
+        manifestBuilt = manifestBuilt && passed;
+        if (!passed) console.warn(`router: ${runtimeBuild.runtime} manifest builder failed — run: node ~/.claude/router/build-manifest.mjs (status=${build?.status ?? 'no-exit'})${build?.stderr?.trim() ? `: ${build.stderr.trim()}` : ''}`);
+      }
     } catch (buildError) {
       manifestBuilt = false;
       console.warn(`router: manifest builder errored — ${buildError.message}`);

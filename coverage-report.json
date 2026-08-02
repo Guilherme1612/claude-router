@@ -958,6 +958,13 @@
     },
     {
       "category": "hooks",
+      "id": "lib/cursor-workspace",
+      "coverage_status": "unmapped",
+      "classification": "expected_hook",
+      "reason": "hooks are event-bound, not route targets"
+    },
+    {
+      "category": "hooks",
       "id": "lib/git-cmd",
       "coverage_status": "unmapped",
       "classification": "expected_hook",
@@ -1393,6 +1400,27 @@
       "reason": "safe global capability remains available to BM25 routing"
     },
     {
+      "category": "project_scoped_skills",
+      "id": "excalidraw-diagram",
+      "coverage_status": "unmapped",
+      "classification": "expected_scope_project",
+      "reason": "project-scoped capability is not globally routeable"
+    },
+    {
+      "category": "project_scoped_skills",
+      "id": "graphify",
+      "coverage_status": "unmapped",
+      "classification": "expected_scope_project",
+      "reason": "project-scoped capability is not globally routeable"
+    },
+    {
+      "category": "project_scoped_skills",
+      "id": "impeccable",
+      "coverage_status": "unmapped",
+      "classification": "expected_scope_project",
+      "reason": "project-scoped capability is not globally routeable"
+    },
+    {
       "category": "skills",
       "id": "brandkit",
       "coverage_status": "mapped",
@@ -1438,9 +1466,8 @@
     {
       "category": "skills",
       "id": "gsd-add-tests",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1452,9 +1479,8 @@
     {
       "category": "skills",
       "id": "gsd-audit-fix",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1494,9 +1520,8 @@
     {
       "category": "skills",
       "id": "gsd-code-review",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1514,9 +1539,8 @@
     {
       "category": "skills",
       "id": "gsd-debug",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1528,9 +1552,8 @@
     {
       "category": "skills",
       "id": "gsd-docs-update",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1548,9 +1571,8 @@
     {
       "category": "skills",
       "id": "gsd-explore",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1576,9 +1598,8 @@
     {
       "category": "skills",
       "id": "gsd-graphify",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1625,9 +1646,8 @@
     {
       "category": "skills",
       "id": "gsd-map-codebase",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1743,9 +1763,8 @@
     {
       "category": "skills",
       "id": "gsd-plan-phase",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1804,9 +1823,8 @@
     {
       "category": "skills",
       "id": "gsd-secure-phase",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1831,9 +1849,8 @@
     {
       "category": "skills",
       "id": "gsd-spec-phase",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1866,16 +1883,14 @@
     {
       "category": "skills",
       "id": "gsd-ui-phase",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
       "id": "gsd-ui-review",
-      "coverage_status": "unmapped",
-      "classification": "expected_bm25_only",
-      "reason": "safe global capability remains available to BM25 routing"
+      "coverage_status": "mapped",
+      "classification": null
     },
     {
       "category": "skills",
@@ -1986,24 +2001,106 @@
     }
   ],
   "forward_diagnostics": [],
-  "baseline_diagnostics": [],
+  "quarantined_diagnostics": [],
+  "baseline_diagnostics": [
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-add-tests",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-audit-fix",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-code-review",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-debug",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-docs-update",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-explore",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-graphify",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-map-codebase",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-plan-phase",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-secure-phase",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-spec-phase",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-ui-phase",
+      "reason": "capability is not a current reverse coverage gap"
+    },
+    {
+      "code": "baseline_stale",
+      "category": "skills",
+      "id": "gsd-ui-review",
+      "reason": "capability is not a current reverse coverage gap"
+    }
+  ],
   "counts": {
-    "total": 289,
-    "mapped": 40,
-    "unmapped": 249,
+    "total": 293,
+    "mapped": 53,
+    "unmapped": 240,
     "forward_diagnostics": 0,
-    "baseline_diagnostics": 0,
+    "quarantined_diagnostics": 0,
+    "baseline_diagnostics": 13,
     "by_classification": {
-      "expected_bm25_only": 210,
-      "expected_hook": 31,
+      "expected_bm25_only": 197,
+      "expected_hook": 32,
+      "expected_scope_project": 3,
       "expected_warn_mcp": 8,
-      "mapped": 40
+      "mapped": 53
     }
   },
   "unacknowledged_gaps": [],
   "fingerprints": {
-    "manifest": "79aee07fb73ec47c3a238d8d9490e8d715e950b6cdeda5d7f04e054eda4f0893",
-    "mode_map": "0ba92c28d846ab46273f9a99e4eb3f5a1c420797362a417ea0ccaf750489aa38",
-    "baseline": "599497e0fc611fc5f04cb63e250dd4801a6b54e4a9c5a3833ec4b2660dae41ad"
+    "manifest": "6fde0d512864045415552a5fc8d821191c3d600921f6a81d6d6e5b7bed5b4c90",
+    "mode_map": "15b270488028e2f375d424c07e5bca3e95ec2173cd029df4544f8a7b15a4662d",
+    "baseline": "4c6902e29861d9e4c0e96191cf7b495c59148c8738e0802fe595a490ff161fa6"
   }
 }

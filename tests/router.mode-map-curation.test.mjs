@@ -128,9 +128,9 @@ test('canonical schema-v3 map has no undeclared canonical collision', () => {
   assert.deepEqual(diagnostics.filter(({ status }) => status === 'pattern_collision'), []);
 });
 
-test('schema-v3 map caps every entry at six output-anchored patterns', () => {
+test('schema-v4 map caps every entry at six output-anchored patterns', () => {
   const modeMap = canonicalModeMap;
-  assert.equal(modeMap.schema_version, 3);
+  assert.equal(modeMap.schema_version, 4);
   for (const entry of modeMap.entries) {
     assert.ok(entry.signal_patterns.length >= 1 && entry.signal_patterns.length <= 6, entry.id);
     for (const pattern of entry.signal_patterns) {

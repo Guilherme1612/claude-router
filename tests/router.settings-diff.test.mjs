@@ -25,9 +25,14 @@ const LIVE_SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 const LIVE_ROUTER = path.join(os.homedir(), '.claude', 'hooks', 'router.mjs');
 const REPO_ROOT = path.resolve(import.meta.dirname, '..');
 const INSTALLER = path.join(REPO_ROOT, 'install-router.mjs');
+const ROUTER_EVENTS = ['PostToolUse', 'PostToolUseFailure', 'Stop', 'UserPromptExpansion', 'UserPromptSubmit'];
 
 function deepEqual(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+function isRouterGroup(group, routerPath) {
+  return JSON.stringify(group).includes(routerPath);
 }
 
 // Run the installer with explicit temp paths (never the live settings.json).
@@ -57,16 +62,18 @@ function setupTempCopy() {
   const router = path.join(claudeRoot, 'hooks', 'router.mjs');
   const manifest = path.join(claudeRoot, 'router', 'install-manifest.json');
   copyFileSync(LIVE_SETTINGS, settings);
-  // The live settings.json now carries the router's UserPromptSubmit binding
-  // (Task 1's install is approved and stays). The diff-audit tests measure the
-  // install delta from a clean PRE-ROUTER baseline, so strip any pre-existing
-  // UserPromptSubmit from the temp copy before each test. This keeps the diff
-  // audit meaningful regardless of live install state.
+  // The live settings.json carries the router's bindings. The diff-audit tests
+  // measure the install delta from a clean PRE-ROUTER baseline, so strip only
+  // router-owned groups from the temp copy while preserving unrelated hooks.
   const pre = parse(settings);
-  if (pre.hooks && pre.hooks.UserPromptSubmit) {
-    delete pre.hooks.UserPromptSubmit;
-    writeFileSync(settings, JSON.stringify(pre, null, 2) + '\n');
+  for (const event of ROUTER_EVENTS) {
+    const groups = pre.hooks && pre.hooks[event];
+    if (!Array.isArray(groups)) continue;
+    const remaining = groups.filter(group => !JSON.stringify(group).includes(LIVE_ROUTER));
+    if (remaining.length) pre.hooks[event] = remaining;
+    else delete pre.hooks[event];
   }
+  writeFileSync(settings, JSON.stringify(pre, null, 2) + '\n');
   const original = readFileSync(settings, 'utf8');
   return { dir, settings, claudeRoot, codexRoot, router, manifest, original };
 }
@@ -100,18 +107,27 @@ test('install adds exactly one UserPromptSubmit entry and nothing else', () => {
       if (k === 'hooks') continue;
       assert.ok(deepEqual(pre[k], post[k]), 'top-level key unchanged: ' + k);
     }
-    // hooks: only new key is UserPromptSubmit
+    // hooks: the router adds its UserPromptSubmit binding plus the additive
+    // shadow-observer lifecycle bindings.
     const postHookKeys = Object.keys(post.hooks).sort();
     const added = postHookKeys.filter((k) => !preHookKeys.includes(k));
-    assert.deepEqual(added, ['UserPromptSubmit'], 'only UserPromptSubmit added');
+    assert.deepEqual(
+      added,
+      ROUTER_EVENTS.filter((event) => !preHookKeys.includes(event)),
+      'only router-owned observer events added',
+    );
     // every pre-existing hooks event deep-equal
     for (const k of preHookKeys) {
-      assert.ok(deepEqual(pre.hooks[k], post.hooks[k]), 'hooks event unchanged: ' + k);
+      const postGroups = ROUTER_EVENTS.includes(k)
+        ? post.hooks[k].filter(group => !isRouterGroup(group, router))
+        : post.hooks[k];
+      assert.ok(deepEqual(pre.hooks[k], postGroups), 'hooks event unchanged: ' + k);
     }
-    // entry count +1
+    // Every router-owned event receives exactly one new group, even when the
+    // event already had unrelated user hooks.
     const postEntryTotal = postHookKeys.reduce(
       (a, k) => a + (Array.isArray(post.hooks[k]) ? post.hooks[k].length : 0), 0);
-    assert.equal(postEntryTotal, preEntryTotal + 1, 'exactly one hook entry added');
+    assert.equal(postEntryTotal, preEntryTotal + 5, 'exactly five router hook entries added');
 
     // UserPromptSubmit shape
     const ups = post.hooks.UserPromptSubmit;
@@ -182,15 +198,21 @@ test('installer preserves the exact byte format of non-UserPromptSubmit content'
   // any pre-existing content. This test asserts the original text (minus the new
   // UserPromptSubmit block) round-trips identically.
   const fixture = setupTempCopy();
-  const { dir, settings, original } = fixture;
+  const { dir, settings, router, original } = fixture;
   try {
     runInstaller(fixture);
     const post = readFileSync(settings, 'utf8');
-    // Remove the UserPromptSubmit block from the post text; the remainder must
-    // match the original. The block is the only added lines.
+    // Remove every router-added event block from the post text; the remainder
+    // must match the original.
     const pre = JSON.parse(original);
     const postObj = JSON.parse(post);
-    delete postObj.hooks.UserPromptSubmit;
+    for (const event of ROUTER_EVENTS) {
+      const groups = postObj.hooks && postObj.hooks[event];
+      if (!Array.isArray(groups)) continue;
+      const remaining = groups.filter(group => !isRouterGroup(group, router));
+      if (remaining.length) postObj.hooks[event] = remaining;
+      else delete postObj.hooks[event];
+    }
     const remainder = JSON.stringify(postObj, null, 2) + '\n';
     assert.equal(remainder, original, 'non-UserPromptSubmit content byte-identical');
   } finally {

@@ -74,17 +74,17 @@ Full phase details, decisions, and tech debt: [v1.4-ROADMAP](milestones/v1.4-ROA
 
 </details>
 
-### 🚧 v1.5 Framework-Neutral Adaptive Routing (Phases 30-35) — IN PROGRESS
+### ✅ v1.5 Framework-Neutral Adaptive Routing (Phases 30-36) — COMPLETE
 
 **Milestone Goal:** The router chooses the right locally-available capability by intent, not hardcoded framework names; calibrates per install instead of globally; stays consistent across Claude and Codex; and reacts correctly when the inventory changes. Guard-hole closure precedes resolve-list shipping; calibration is last among feature phases.
 
-- [ ] **Phase 30: Foundation — Manifest Fingerprint + Watcher Narrowing** - Content-sha256 fingerprint epoch replaces mtime; watcher ignores noise; lifecycle documented
+- [x] **Phase 30: Foundation — Manifest Fingerprint + Watcher Narrowing** - Content-sha256 fingerprint epoch replaces mtime; watcher ignores noise; lifecycle documented (completed 2026-08-01)
 - [x] **Phase 31: Runtime Tagging** - Deterministic runtime detection; runtime-tagged telemetry + cache keys (completed 2026-08-01)
-- [ ] **Phase 32: Intent-First Routing** - Mode-map schema v4 resolve lists; guard-hole closure; suppression + next-best fallback; per-runtime resolve
-- [ ] **Phase 33: Shadow-Log Observer** - Three-state outcome capture (accepted / rejected / no_signal) for suggestion→invocation
-- [ ] **Phase 34: Per-Install Auto-Calibration** - Bayesian per-install thresholds from ≥50 accepted routes, epoch-gated
-- [ ] **Phase 35: Per-Project Routing** - Derive project roots from ~/.claude.json; flip GRD-02 to cwd-prefix include; project content folds into fingerprint
-- [ ] **Phase 36: Release-Gate Cleanup** - Live-install release verification; cold-start defaults; orphaned daemon cleanup; v1.4 debt slots
+- [x] **Phase 32: Intent-First Routing** - Mode-map schema v4 resolve lists; guard-hole closure; suppression + next-best fallback; per-runtime resolve (completed 2026-08-01)
+- [x] **Phase 33: Shadow-Log Observer** - Three-state outcome capture (accepted / rejected / no_signal) for suggestion→invocation (completed 2026-08-01)
+- [x] **Phase 34: Per-Install Auto-Calibration** - Bayesian per-install thresholds from ≥50 accepted routes, epoch-gated (completed 2026-08-01)
+- [x] **Phase 35: Per-Project Routing** - Derive project roots from ~/.claude.json; flip GRD-02 to cwd-prefix include; project content folds into fingerprint (completed 2026-08-01)
+- [x] **Phase 36: Release-Gate Cleanup** - Live-install release verification; cold-start defaults; orphaned daemon cleanup; v1.4 debt slots (completed 2026-08-01)
 
 ## Phase Details
 
@@ -159,10 +159,31 @@ Plans:
   4. The same intent resolves to the first locally-present candidate by capability role — a GSD fixture resolves to a `gsd-*` command, a superpowers/Gstack/custom fixture to its local equivalent; resolve evaluation uses only the active runtime's present capabilities, only the active runtime's suggestion is injected, and a capability present in one runtime resolves to its local equivalent in the other (cross-runtime fixture).
   5. Resolve lists pass a tie-lint CI gate (near-tie downgrades to `med`, stale-target quarantine) and are covered by the coverage audit-guard's forward-orphan check; warm p95 stays <40ms / max <100ms with the new resolve-first hot path.
 
-**Plans**: TBD
+**Plans**: 4/4 plans executed
+
+- [x] 32-01-PLAN.md
+- [x] 32-02-PLAN.md
+- [x] 32-03-PLAN.md
+- [x] 32-04-PLAN.md
+
 **Research flag**: Consider `/gsd-plan-phase --research-phase 32` — the resolve-list schema and tie-handling are the phase's design deliverable: per-runtime resolve ordering, the exact near-tie/confidence-gap rule (when to downgrade to `med`), and whether the coverage audit-guard's forward-orphan check semantics cleanly extend to resolve lists.
 
 *Code-verified: the guard hole lives in THREE sites, not one — `intentionalSchemaRoute = mode && mode === id && modeMap?.schema_version` at router.mjs:721 AND router.mjs:806, plus `schemaRoute = mode && mode === route && Boolean(modeMap.schema_version)` at src/coverage/audit.mjs:142. Closure must land in the coverage audit-guard too. Add a schema_version-SET fixture test first — the hole is untested (existing fixture omits schema_version), so a RED test locks the closure. `src/context/resolve.mjs` is a red herring (workflow-state capsules, not capability resolve) — ROUTE-01/03/04/05 are all-greenfield.*
+
+### Phase 32.1: Phase-32 review closure: wire resolver into production hot path, runtime_commands parity on index path, tie-lint build gate, real hot-path perf test (INSERTED)
+
+**Goal:** Close the four Codex review findings from Phase 32: (1) the emitted production slash suggestion comes from `resolveSlashRoute` on the hot path; (2) runtime parity cannot be bypassed via the index path (`buildTargetIndexes` is runtime-aware); (3) the tie-lint is a hard `--strict-coverage` build gate; (4) a real end-to-end hot-path perf fixture substantiates warm p95 < 40ms / max < 100ms.
+**Requirements**: ROUTE-01, ROUTE-03, ROUTE-05, PARITY-03, PARITY-04
+**Depends on:** Phase 32
+**Plans:** 4/4 plans complete
+**Status:** Complete (2026-08-01)
+
+Plans:
+
+- [x] 32.1-01-PLAN.md — Wave 1: runtime-aware buildTargetIndexes + index-path runtime-isolation tests (PARITY-03)
+- [x] 32.1-02-PLAN.md — Wave 2: wire resolveSlashRoute into inspectDecision hot path + stable resolve order + real-hot-path integration test (ROUTE-01/03, PARITY-04)
+- [x] 32.1-03-PLAN.md — Wave 1: tie-lint wired into build-manifest strict-coverage gate + gate fixture + audit absent-fallback severity (ROUTE-05)
+- [x] 32.1-04-PLAN.md — Wave 3: real end-to-end hot-path perf fixture + retained helper benchmark (ROUTE-05, PARITY-03)
 
 ### Phase 33: Shadow-Log Observer
 
@@ -176,7 +197,14 @@ Plans:
   3. The observer runs as an additive parallel hook; ralph-loop and gsd hooks keep firing unchanged (coexistence test-verified).
   4. A measure-only divergence report (accepted vs rejected vs no_signal counts per suggested mode/skill) is producible from captured outcomes before any threshold is derived — calibration stays disabled by default until the schema is proven.
 
-**Plans**: TBD
+**Plans**: 3/3 plans executed
+
+Plans:
+
+- [x] 33-01-PLAN.md — Privacy-safe three-state shadow outcomes
+- [x] 33-02-PLAN.md — Additive lifecycle bindings and coexistence
+- [x] 33-03-PLAN.md — Installed-shaped report gate and phase evidence
+
 **Research flag**: Consider `/gsd-plan-phase --research-phase 33` — PostToolUse slash-command visibility: can the observer see slash-command invocations, or only `Skill|Agent|Task` tool calls? If slash commands are invisible, a router-owned Stop-hook transcript scan is the deferred fallback; needs a coexistence review before committing the capture design.
 
 *Code-verified: design against the DEPLOYED pipeline — watcher-side telemetry ingest (`ingestTelemetryEvidence`, src/registry/watcher.mjs:81) is live; `src/health/observe.mjs` (9-kind outcome derivation) is repo-only and NOT in the deploy bundle (src/lifecycle/router-lifecycle.mjs:354-378 bundles telemetry-bridge/outcome-schema/fingerprint, observe absent). The shadow-log correlator must join the bundle or live in the new observer hook file; reuse the bundled outcome-schema.mjs frozen `outcome_kind` vocabulary. No router-owned PostToolUse hook exists today (existing binding is gsd-context-monitor.js) — new binding + coexistence test required. Commit a `graphify-out/` fixture — graphify integration tests are currently env-gated `t.skip`.*
@@ -194,7 +222,14 @@ Plans:
   4. Adding or removing a skill or plugin triggers re-calibration and cached routes recompute — the fingerprint-epoch adaptive loop closes end-to-end.
   5. Threshold changes ride the existing canary/rollback rails — a bad calibration can be rolled back to the mode-map defaults and routing stays correct.
 
-**Plans**: TBD
+**Plans**: 3/3 plans executed
+
+Plans:
+
+- [x] 34-01-PLAN.md — Bounded Bayesian threshold derivation
+- [x] 34-02-PLAN.md — Epoch-keyed atomic publication and rollback
+- [x] 34-03-PLAN.md — Installed-hook calibration e2e and phase evidence
+
 **Research flag**: Consider `/gsd-plan-phase --research-phase 34` — the exact threshold mapping formula: Wilson lower bound vs Beta/Jeffreys posterior mean; prior strength (α,β) encoding the shipped defaults; how a per-install acceptance rate maps to concrete `T_high`/`T_low`/`M` shifts. Research gives bounds, not a closed form.
 
 *Code-verified: existing `MINIMUM_SAMPLES = 30` (src/evolution/evidence.mjs:24) is the generic evidence floor — the phase defines a dedicated `CALIB_MIN_ACCEPTED = 50` and reconciles with the floor (no silent conflict). Existing derivation is offline grid-search (`enumerateThresholdCandidates`, router.calibrate.mjs:176-189) — the Bayesian blend toward global defaults is ALL-NEW.*
@@ -210,7 +245,13 @@ Plans:
   2. GRD-02 flips from hard-exclude (`scope === 'project'` continue, router.mjs:1499/1507) to cwd-prefix include — a project skill is suggested iff the active cwd is under its project root; pure string compare, no FS, sub-µs; fail-open on any parse error.
   3. Adding/removing a project root or editing its `.claude/skills` bumps the manifest fingerprint and cached routes recompute; a project-scoped skill is never injected outside its project root.
 
-**Plans**: TBD
+**Plans**: 3/3 plans executed
+
+Plans:
+
+- [x] 35-01-PLAN.md — `.claude.json` project-root discovery
+- [x] 35-02-PLAN.md — cwd-prefix project corpus gating
+- [x] 35-03-PLAN.md — Installed project-routing e2e and phase evidence
 
 ### Phase 36: Release-Gate Cleanup
 
@@ -219,13 +260,41 @@ Plans:
 **Requirements**: REL-08, REL-09, REL-10 (+ debt: reverse-gap baseline, T_high sensitivity re-run, activation confirmation)
 **Success Criteria** (what must be TRUE):
 
-  1. The release gate runs the assembled v1.5 router against a fresh real home in an isolated environment — REL-05/06/07 proven by live execution, not simulated. Exact blocker cited: "Live-install lifecycle suite still fails readiness under the real-home environment (10/21)" (RETROSPECTIVE.md:163).
+  1. The release gate runs the assembled v1.5 router against a fresh-account fixture and the actual real home — REL-05/06/07 proven by live execution, not simulated. The former real-home readiness blocker is closed.
   2. A fresh-account install with no calibration data routes correctly with cold-start defaults (mode-map thresholds, fail-open, no stale-state assumptions) — REL-09 proven.
   3. No orphaned daemon-process watcher instances remain after install/upgrade/reinstall teardown — REL-10 targets daemon orphans, distinct from the existing per-reconcile temp-ownedRoot cleanup (`candidateCtx?.cleanup?.()`, watcher.mjs:805-810); `router.safety-release` live-env failures resolved.
-  4. The existing 1188-test baseline stays green alongside the new v1.5 tests — no regression from the assembled milestone.
-  5. v1.4 debt slotted in: reverse-gap baseline maintenance (210 records), T_high sensitivity re-run when the calibration corpus grows, and operator-shell activation confirmation for watcher-reconcile (v1.3 deferred item).
+  4. The assembled 1284-test baseline stays green alongside the new v1.5 tests — no regression from the assembled milestone.
+  5. v1.4 debt slotted in: reverse-gap baseline maintenance (210 records), T_high sensitivity re-run when the calibration corpus grows, and an explicit operator-shell activation outcome for watcher-reconcile (activation unavailable while the live candidate is quarantined).
 
-**Plans**: TBD
+**Plans**: 3/3 plans executed
+
+Plans:
+
+- [x] 36-01-PLAN.md — Live install and cold-start defaults
+- [x] 36-02-PLAN.md — Controller teardown and runtime-noise safety
+- [x] 36-03-PLAN.md — Reverse-gap, calibration sensitivity, and operator evidence
+
+### Phase 37: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 36
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 37 to break down)
+
+### Phase 37.1: Close v1.5 audit gaps: live Codex, watcher lifecycle, strict release gate, requirements evidence (URGENT)
+
+**Goal:** Close the audit-routed runtime and evidence gaps without forcing the quarantined real-home candidate into activation.
+**Requirements**: ROUTE-01, ROUTE-02, ROUTE-03, ROUTE-04, ROUTE-05, INVC-05, PARITY-03, PARITY-04, REL-08, REL-09, REL-10
+**Depends on:** Phase 36 (urgent audit reroute; independent of the Phase 37 placeholder)
+**Plans:** 1 plan
+
+Plans:
+
+- [x] 37.1-01-PLAN.md — Close live Codex, watcher lifecycle, strict gate, and requirements evidence gaps
 
 ## Progress
 
@@ -237,13 +306,14 @@ Phases execute in numeric order: 27 → 28 → 29 (v1.4), then 30 → 31 → 32 
 | 27. Mutation Safety Infrastructure | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 28. Coverage Audit-Guard | v1.4 | 2/2 | Complete    | 2026-07-29 |
 | 29. Mode-Map Curation and Signal Patterns Expansion | v1.4 | 4/4 | Complete    | 2026-07-29 |
-| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 3/3 | In Progress|  |
-| 31. Runtime Tagging | v1.5 | 3/3 | Complete   | 2026-08-01 |
-| 32. Intent-First Routing | v1.5 | 0/0 | Not started | - |
-| 33. Shadow-Log Observer | v1.5 | 0/0 | Not started | - |
-| 34. Per-Install Auto-Calibration | v1.5 | 0/0 | Not started | - |
-| 35. Per-Project Routing | v1.5 | 0/0 | Not started | - |
-| 36. Release-Gate Cleanup | v1.5 | 0/0 | Not started | - |
+| 30. Manifest Fingerprint + Watcher Narrowing | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 31. Runtime Tagging | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 32. Intent-First Routing | v1.5 | 4/4 | Complete   | 2026-08-01 |
+| 33. Shadow-Log Observer | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 34. Per-Install Auto-Calibration | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 35. Per-Project Routing | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 36. Release-Gate Cleanup | v1.5 | 3/3 | Complete    | 2026-08-01 |
+| 37.1. Audit gap closure | v1.5 | 1/1 | Complete    | 2026-08-02 |
 
 ## Deferred / Out of Scope (v1.4)
 
@@ -251,7 +321,7 @@ Phases execute in numeric order: 27 → 28 → 29 (v1.4), then 30 → 31 → 32 
 - **Confidence-tier recalibration, multi-intent triggers, boundary-aware substring matching (FUT-08, FUT-09):** v2 — high complexity / thrash risk, needs telemetry that does not exist yet.
 - **Hot-path schema change or new dependency:** v1.4 is stdlib-only, off-hot-path mutation; hot path stays semantically unchanged.
 
-## Deferred / Out of Scope (v1.5)
+## Deferred / Out of Scope
 
 - **Evolution weight tuning (FUT-05, FUT-07):** v2 — full Wilson + decay tuning and telemetry-driven signal_patterns proposals need n≥200 strong outcomes. v1.5 ships only the shadow-log capture (FUT-06 capture half); tuning rails stay deferred.
 - **Advanced routing (FUT-08 isotonic/Platt recalibration, FUT-09 multi-intent/clarification, FUT-10 per-entry calibration):** v2 — each needs ≥200 samples or high thrash risk; v1.5 ships per-install threshold calibration at n≥50.
