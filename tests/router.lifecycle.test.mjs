@@ -139,19 +139,20 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 1 = codex router.mjs (Task 260723-l9s: codex UserPromptSubmit binding)
     // + 24 = 12 Phase 22-25 dependency-closure modules × 2 roots
     // + 2 = coverage/audit.mjs × 2 roots
-    // = 93 (modules-only deploy)
-    // + 92 = 46 moduleNames mirrored to src/ × 2 roots (including the complete
+    // + 8 = 4 Phase 38 dispatch adapter modules (contract, receipt, claude, codex) × 2 roots
+    // = 101 (modules-only deploy)
+    // + 100 = 50 moduleNames mirrored to src/ × 2 roots (including the complete
     //   registry, health, steward, and approval dependency closure)
     //   gate fixtures + router.calibrate.mjs `../src/...` imports resolve in production)
     // + 10 = 5 gate entrypoints (router.calibrate.mjs, calibration-tasks.json,
     //   build-manifest.mjs, coverage-baseline.json, scripts/resolve-tie-lint.mjs) × 2 roots (fresh-account onboarding: builder deployed
     //   to both owned roots, runs once for claude's ownedRoot post-readiness)
-    // + 20 = 10 gate fixtures (tests/*.test.mjs) × 2 roots (Blocker-2b: production
-    //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality)
+    // + 32 = 16 gate fixtures (10 tests/*.test.mjs + 6 Phase 38 dispatch tests/fixture) × 2 roots (Blocker-2b: production
+    //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality + HOST-01..04 dispatch evidence)
     // + 6 = 3 shared gate helpers (tests/helpers/*.mjs) × 2 roots
     // + 2 = fresh-install mode-map seed, one per runtime
-    // = 231
-    assert.equal(manifest.files.length, 231);
+    // = 259
+    assert.equal(manifest.files.length, 259);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

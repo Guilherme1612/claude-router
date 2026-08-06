@@ -389,6 +389,14 @@ export async function installRouter(options) {
     'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
     'coverage/audit.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
+    // Phase 38 / HOST-01-04 + Assumption A4: dispatch adapters + receipt module
+    // deployed to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap
+    // below (single deployed module set serves both runtimes; receipts partition
+    // by runtime at read time per RESEARCH §Pitfall 3 / PARITY-02). The hook
+    // trigger (router.mjs) resolves the deployed claude.mjs worker off the hot
+    // path; the codex.mjs worker is the Codex variant.
+    'adapters/dispatch/contract.mjs', 'adapters/dispatch/receipt.mjs',
+    'adapters/dispatch/claude.mjs', 'adapters/dispatch/codex.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
@@ -447,6 +455,17 @@ export async function installRouter(options) {
     'tests/helpers/inventory-fixture.mjs',
     'tests/helpers/latency-isolated.mjs',
     'tests/helpers/test-mode-seam.mjs',
+    // Phase 38 / HOST-01-04 + Assumption A4: dispatch fixture + the five
+    // phase-38 tests ship in the deploy bundle so the production-verify gate
+    // can run the native-dispatch / adapter / parity / budget suite from the
+    // deployed ownedRoot. The harmless fixture is the real spawn target the
+    // adapters invoke; the five tests are the HOST-01..04 gate evidence.
+    'tests/phase-38/fixtures/harmless.mjs',
+    'tests/phase-38/native-dispatch.test.mjs',
+    'tests/phase-38/claude-adapter.test.mjs',
+    'tests/phase-38/codex-adapter.test.mjs',
+    'tests/phase-38/recommendation-only.test.mjs',
+    'tests/phase-38/budget.test.mjs',
   ];
   const gateFixtureValues = [p.ownedRoot, p.codexOwnedRoot].flatMap(runtimeRoot => [
     ...gateEntryNames.map(name => [join(runtimeRoot, name), readFileSync(join(repoRoot, name))]),
