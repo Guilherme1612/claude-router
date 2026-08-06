@@ -16,6 +16,7 @@ import { buildClaudeHeavyProfile, contractEvidence } from './helpers/inventory-f
 const approvalModule = import('../src/orchestrator/approval.mjs');
 const actionsModule = import('../src/orchestrator/actions.mjs');
 const classifyModule = import('../src/intent/classify.mjs');
+const authorityModule = import('../src/intent/authority.mjs');
 
 // Fixture: a capability whose contract surface can be overridden to
 // destructive / irreversible / high-risk via the side_effects /
@@ -278,6 +279,92 @@ test('[phase23-fix:approval] verifyApproval fail-closes when expected is malform
     assert.equal(r.status, 'blocked', `expected blocked for malformed expected=${JSON.stringify(malformed)}`);
     assert.equal(r.dispatch_eligible, false);
     assert.notEqual(r.reason_code, 'approval_bound', `must NOT approve for malformed expected=${JSON.stringify(malformed)}`);
+  }
+});
+
+// --- Phase 39 AUTH-05: expanded protected-effect vocabulary (single source of
+// truth in src/intent/authority.mjs PROTECTED_EFFECT_TOKENS, imported by
+// approval.mjs). Each new token gets a dedicated [phase39:approval] test so
+// the vocabulary expansion is pinned at the approval gate boundary.
+
+test('[phase39:approval] needsApproval true for side_effects credentialed (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'credentialed-cap', sideEffects: ['credentialed'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects billing (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'billing-cap', sideEffects: ['billing'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects publication (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'publication-cap', sideEffects: ['publication'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects published (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'published-cap', sideEffects: ['published'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects deploy (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'deploy-cap', sideEffects: ['deploy'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects deployed (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'deployed-cap', sideEffects: ['deployed'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects deployment (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'deployment-cap', sideEffects: ['deployment'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects push (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'push-cap', sideEffects: ['push'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects pr (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'pr-cap', sideEffects: ['pr'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects costly (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'costly-cap', sideEffects: ['costly'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for side_effects scope-expanding (AUTH-05 vocab)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'scope-expanding-cap', sideEffects: ['scope-expanding'] });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] needsApproval true for reversibility difficult-to-recover (AUTH-05 vocab, backstop via IRREVERSIBLE)', async () => {
+  const { needsApproval } = await approvalModule;
+  const cap = makeCapability({ name: 'difficult-cap', reversibility: 'irreversible' });
+  assert.equal(needsApproval(cap.contract), true);
+});
+
+test('[phase39:approval] AUTH-05 vocab is frozen + imported from authority.mjs (single source of truth)', async () => {
+  const authority = await authorityModule ?? import('../src/intent/authority.mjs');
+  assert.ok(Array.isArray(authority.PROTECTED_EFFECT_TOKENS));
+  assert.ok(Object.isFrozen(authority.PROTECTED_EFFECT_TOKENS));
+  for (const token of ['credentialed', 'billing', 'publication', 'deploy', 'push', 'costly', 'scope-expanding']) {
+    assert.ok(authority.PROTECTED_EFFECT_TOKENS.includes(token), `PROTECTED_EFFECT_TOKENS must include ${token}`);
   }
 });
 
