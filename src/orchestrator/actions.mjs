@@ -218,3 +218,84 @@ export function resolveAction({ intent, prompt, state, registry, roadmap, transi
   const matches = collectCandidates(registry, transitionIds);
   return selectOne(matches);
 }
+
+/**
+ * Phase 39 AUTH-04/05: thin post-processor that maps an
+ * evaluateAuthorityPolicy decision onto the existing action-mapper status
+ * vocabulary. Composes OVER resolveAction's output — never re-implements
+ * it. Only runs when resolveAction returns status 'selected'; blocked and
+ * clarify results pass through unchanged (with the policy attached for
+ * telemetry).
+ *
+ * Mapping:
+ *   proceed → { status: 'proceed', dispatch_eligible: true,  reason_code, capability, policy }
+ *   pause   → { status: 'paused',  dispatch_eligible: false, reason_code, capability, approval_token, policy }
+ *   ask     → { status: 'clarify', dispatch_eligible: false, reason_code, policy }
+ *   block   → { status: 'blocked', dispatch_eligible: false, reason_code, policy }
+ *
+ * `approval` (optional) is { bind: ({ capability }) => boundTokenObject },
+ * exposed so the router hot path can supply bindApproval without actions.mjs
+ * importing approval.mjs (avoid a cycle; approval already imports authority).
+ * On pause, approval.bind is called with the resolved capability and the
+ * returned token's `.token` string is surfaced as `approval_token` so the
+ * paused receipt state is recoverable via verifyApproval.
+ */
+export function gateAction({ resolved, policy, approval = null } = {}) {
+  if (!resolved || typeof resolved !== 'object') {
+    return blocked('invalid_resolved');
+  }
+  // Pass through non-selected results (low-fit / conflicting evidence already
+  // blocked/clarified by resolveAction). Attach the policy for telemetry.
+  if (resolved.status !== 'selected') {
+    return { ...resolved, policy };
+  }
+
+  const decision = policy && typeof policy === 'object' ? policy.decision : null;
+  const reasonCode = policy && typeof policy.reason_code === 'string' ? policy.reason_code : 'no_policy_reason';
+  const capability = resolved.capability;
+
+  if (decision === 'proceed') {
+    return {
+      status: 'proceed',
+      dispatch_eligible: true,
+      reason_code: reasonCode,
+      capability,
+      policy,
+    };
+  }
+  if (decision === 'pause') {
+    let approvalToken = null;
+    if (approval && typeof approval.bind === 'function') {
+      try {
+        const bound = approval.bind({ capability });
+        approvalToken = bound && typeof bound.token === 'string' ? bound.token : null;
+      } catch {
+        approvalToken = null; // fail-open: gate still pauses; resume requires a fresh bind
+      }
+    }
+    return {
+      status: 'paused',
+      dispatch_eligible: false,
+      reason_code: reasonCode,
+      capability,
+      approval_token: approvalToken,
+      policy,
+    };
+  }
+  if (decision === 'ask') {
+    return {
+      status: 'clarify',
+      dispatch_eligible: false,
+      reason_code: reasonCode,
+      policy,
+    };
+  }
+  // block (including compatibility_unfit and authority_not_granted) or
+  // unknown decision — reuse the blocked() helper shape.
+  return {
+    status: 'blocked',
+    dispatch_eligible: false,
+    reason_code: reasonCode,
+    policy,
+  };
+}

@@ -8,13 +8,22 @@ import { createHash } from 'node:crypto';
 import { contentFingerprint, stableCapabilityId } from '../registry/identity.mjs';
 import { stableStringify } from '../registry/schema.mjs';
 import { validateContractFieldValue } from '../registry/contract.mjs';
+// Phase 39 AUTH-05: PROTECTED_EFFECT_TOKENS is the single source of truth
+// for the protected-effect class. approval.mjs imports it so the
+// vocabulary is not duplicated across modules (authority.mjs is the
+// canonical owner; the deploy bundle ships both modules).
+import { PROTECTED_EFFECT_TOKENS } from '../intent/authority.mjs';
 
 export const APPROVAL_POLICY_VERSION = 'approval-policy-v1';
 export const APPROVAL_SCHEMA_VERSION = 1;
 
-// Same token vocabulary as eligibility.mjs:165-175 — destructive/privileged
-// surface requires a separately bound approval token.
-const DESTRUCTIVE_SIDE_EFFECTS = new Set(['destructive', 'unbounded', 'external', 'privileged']);
+// AUTH-05: the protected-effect vocabulary is centralized in
+// src/intent/authority.mjs PROTECTED_EFFECT_TOKENS (frozen). The Set here
+// is derived from that single source so any vocabulary change ships
+// through one canonical owner. IRREVERSIBLE and HIGH_RISK stay local
+// because they cover reversibility/risk enum values, not side_effects
+// tokens. See RESEARCH Open Question 3.
+const DESTRUCTIVE_SIDE_EFFECTS = new Set(PROTECTED_EFFECT_TOKENS);
 const IRREVERSIBLE = new Set(['irreversible']);
 const HIGH_RISK = new Set(['high', 'critical', 'unacceptable']);
 

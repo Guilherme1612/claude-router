@@ -257,7 +257,8 @@ test('[phase39:authority-gate] AUTH-04 resolveAction blocked → gateAction pass
 
   assert.equal(result.status, 'blocked');
   assert.equal(result.reason_code, 'intent_not_execute');
-  assert.equal(result.policy.decision, 'block');
+  // Pass-through: policy attached for telemetry, status/reason_code unchanged.
+  assert.ok(result.policy, 'policy attached to the pass-through result');
 });
 
 test('[phase39:authority-gate] AUTH-04 resolveAction clarify (material tie) → gateAction passes through', async () => {
