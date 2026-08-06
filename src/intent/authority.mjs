@@ -153,3 +153,124 @@ export function classifyAuthority(prompt, { intent } = {}) {
 
   return outcome('non_authorizing_discussion', disposition, 'no_authority_marker');
 }
+
+/**
+ * Independent-input authority-policy evaluator (AUTH-03/04/05).
+ *
+ * AUTH-03 independence invariant: confidence and historical-success weight
+ * never grant permission. Enforced at the type level by a SEALED input —
+ * the signature destructures only { confidence, authority, risk,
+ * compatibility }; `weights` is not a parameter, and `confidence` is the
+ * tier STRING ('high'|'medium'|'low'), never the numeric confidenceTier
+ * score and never weights. The authority and risk legs cannot read
+ * confidence or weights; only the proceed/ask branch reads the confidence
+ * string, and only to modulate (never to permit).
+ *
+ * Decision legs checked in order (fail-closed; first match wins):
+ *   1. compatibility unfit   -> block  (compatibility_unfit)
+ *   2. protected effect      -> pause  (protected_effect_requires_confirmation)
+ *   3. authority not granted -> block  (authority_not_granted)
+ *   4. reversible + local + authorized
+ *        high|medium        -> proceed (reversible_local_authorized)
+ *        low                -> ask    (low_confidence_clarify)
+ *   5. non-reversible or external + authorized
+ *                           -> pause  (non_reversible_or_external_requires_confirmation)
+ *
+ * Pure function: no side effects, no I/O, no shared mutable state. The
+ * same input object yields the same decision on every call (idempotent;
+ * safe under concurrent invocation). Mirrors verifyApproval's
+ * sealed-input + reason_code return shape (src/orchestrator/approval.mjs:120).
+ */
+export function evaluateAuthorityPolicy({
+  confidence,
+  authority = {},
+  risk = {},
+  compatibility = {},
+} = {}) {
+  const confidenceTier = typeof confidence === 'string' ? confidence : 'low';
+  const authGranted = !!(authority && authority.authGranted);
+  const protected_ = !!(authority && authority.protected_);
+  const reversible = !!(risk && risk.reversible);
+  const local = !!(risk && risk.local);
+  const eligible = !!(compatibility && compatibility.eligible);
+  const disposition = compatibility && typeof compatibility.disposition === 'string'
+    ? compatibility.disposition
+    : 'ambiguous';
+
+  // Leg 1: compatibility unfit. eligible=false OR a non-dispatch disposition
+  // means the capability cannot run regardless of authority. Fail-closed.
+  if (!eligible || disposition !== 'dispatch-candidate') {
+    return {
+      decision: 'block',
+      reason_code: 'compatibility_unfit',
+      confidence: confidenceTier,
+      policy_version: AUTHORITY_POLICY_VERSION,
+      eligibility: eligible,
+      disposition,
+    };
+  }
+
+  // Leg 2: protected effect (AUTH-05 precursor). Protected surface requires
+  // confirmation regardless of confidence or authority source — the
+  // protected flag is the trust-boundary signal that human review is
+  // required before the action proceeds.
+  if (protected_) {
+    return {
+      decision: 'pause',
+      reason_code: 'protected_effect_requires_confirmation',
+      confidence: confidenceTier,
+      policy_version: AUTHORITY_POLICY_VERSION,
+      authGranted,
+      protected_: true,
+    };
+  }
+
+  // Leg 3: authority not granted. No amount of confidence or weight can
+  // upgrade this — the AUTH-03 elevation-of-privilege prohibition.
+  if (!authGranted) {
+    return {
+      decision: 'block',
+      reason_code: 'authority_not_granted',
+      confidence: confidenceTier,
+      policy_version: AUTHORITY_POLICY_VERSION,
+      authGranted: false,
+    };
+  }
+
+  // Leg 4: reversible + local + authorized. High/medium confidence proceeds;
+  // low confidence asks for clarification (never auto-proceeds on low
+  // confidence even when authority is granted and the action is safe).
+  if (reversible && local) {
+    if (confidenceTier === 'high' || confidenceTier === 'medium') {
+      return {
+        decision: 'proceed',
+        reason_code: 'reversible_local_authorized',
+        confidence: confidenceTier,
+        policy_version: AUTHORITY_POLICY_VERSION,
+        authGranted: true,
+        reversible: true,
+        local: true,
+      };
+    }
+    return {
+      decision: 'ask',
+      reason_code: 'low_confidence_clarify',
+      confidence: confidenceTier,
+      policy_version: AUTHORITY_POLICY_VERSION,
+      authGranted: true,
+      reversible: true,
+      local: true,
+    };
+  }
+
+  // Leg 5: non-reversible or external + authorized. Pause for confirmation.
+  return {
+    decision: 'pause',
+    reason_code: 'non_reversible_or_external_requires_confirmation',
+    confidence: confidenceTier,
+    policy_version: AUTHORITY_POLICY_VERSION,
+    authGranted: true,
+    reversible,
+    local,
+  };
+}
