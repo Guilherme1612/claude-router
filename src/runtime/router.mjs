@@ -23,7 +23,7 @@
 import { closeSync, openSync, readFileSync, unlinkSync, writeFileSync, writeSync, existsSync, statSync, renameSync, appendFileSync, chmodSync, mkdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -118,6 +118,33 @@ const TRIGGER = join(ROUTER_DIR, '.evolve-trigger');
 const HOOKS_DIR = join(RUNTIME_CONFIG_DIR, 'hooks');
 const WORKER_PATH = join(HOOKS_DIR, 'router.evolve.mjs');
 const EVOLVE_TRIGGER_N = 200;
+
+// Phase 38 / HOST-01: native dispatch trigger plumbing. The dispatch worker
+// (src/adapters/dispatch/claude.mjs run as main) is spawned OFF the prompt
+// hot path — fire-and-forget detached + stdio:'ignore' + unref() — exactly
+// like bumpEvolveTrigger's worker spawn (analog: lines 2307-2343). The
+// trigger fires ONLY when a `dispatch-lease.json` marker exists under
+// ~/.<runtime>/router/; absent the marker, no spawn, no work, no latency.
+// The worker captures completion (spawns the fixture with stdio:'pipe',
+// waits for exit, writes the receipt) — the hook itself never blocks on
+// the fixture. T-38-05: spawn is off the hot path; HOST-04 <100ms preserved.
+const DISPATCH_LEASE_MARKER = join(ROUTER_DIR, 'dispatch-lease.json');
+function resolveDispatchWorkerPath() {
+  // Production layout: <ROUTER_DIR>/modules/adapters/dispatch/claude.mjs
+  const deployed = join(ROUTER_DIR, 'modules', 'adapters', 'dispatch', 'claude.mjs');
+  if (existsSync(deployed)) return deployed;
+  // Dev layout: src/adapters/dispatch/claude.mjs relative to this hook.
+  // router.mjs lives at src/runtime/router.mjs, so the adapter is two levels
+  // up then down into adapters/dispatch/.
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const dev = join(here, '..', 'adapters', 'dispatch', 'claude.mjs');
+    if (existsSync(dev)) return dev;
+  } catch { /* fall through to override path */ }
+  // Env override (tests / explicit operator config).
+  return process.env.ROUTER_DISPATCH_WORKER_PATH || deployed;
+}
+const DISPATCH_WORKER_PATH = resolveDispatchWorkerPath();
 
 // Phase 4 / ANC-01: surface filter plumbing. RUNTIME_CONFIG_DIR is the home of
 // the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
@@ -2342,6 +2369,34 @@ export function bumpEvolveTrigger({ triggerPath = TRIGGER, workerPath = WORKER_P
   }
 }
 
+// Phase 38 / HOST-01: native dispatch trigger — fire-and-forget worker spawn
+// OFF the prompt hot path (T-38-05). Modeled on bumpEvolveTrigger: spawn the
+// dispatch worker detached + stdio:'ignore' + unref() so the hook returns
+// immediately. The worker (src/adapters/dispatch/claude.mjs run as main)
+// reads dispatch-lease.json, spawns the harmless fixture with stdio:'pipe',
+// waits for exit, and publishes the receipt. The hook NEVER blocks on the
+// fixture and NEVER spawns synchronously on the prompt path (HOST-04).
+//
+// Guarded by DISPATCH_LEASE_MARKER: no marker → no spawn → no-op. Fail-open:
+// any throw is swallowed so the prompt always proceeds (never exit 2, never
+// decision:'block'). The command is the fixed DISPATCH_WORKER_PATH — never
+// derived from prompt text (T-38-01).
+export function triggerNativeDispatch({ leasePath = DISPATCH_LEASE_MARKER, workerPath = DISPATCH_WORKER_PATH } = {}) {
+  try {
+    if (!existsSync(leasePath)) return null;
+    const child = spawn(process.execPath, [workerPath], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, ROUTER_RUNTIME: RUNTIME },
+    });
+    child.unref();
+    return child.pid;
+  } catch {
+    // fail-open: never block the prompt on a dispatch trigger failure
+    return null;
+  }
+}
+
 // --- Graphify stub heuristic (GRF-01/§12) ---------------------------------
 
 // Phase 1 stub: heuristic fires on codebase prompts (symbols/file paths/
@@ -3777,6 +3832,11 @@ if (isMain()) {
     // and try/catch-wrapped so any error in the trigger path is a no-op.
     // Production mutation is handled inside inspectDecision({ bumpEvolution:true }) for CLI-safe gating.
     try { bumpEvolveTrigger(); } catch {}
+    // Phase 38 / HOST-01: native dispatch trigger — fire-and-forget worker
+    // spawn OFF the prompt hot path (T-38-05). Gated by the dispatch-lease.json
+    // marker; no marker → no-op. Fail-open try/catch so the prompt always
+    // proceeds. The worker captures completion; the hook never blocks on it.
+    try { triggerNativeDispatch(); } catch {}
     // Debug-only latency line (guarded by env so production is silent).
     // Consumed by tests/router.perf.test.mjs to assert in-process < 100ms.
     if (process.env.ROUTER_DEBUG_LATENCY === '1' && globalThis.__routerStartNs) {
