@@ -146,6 +146,30 @@ function resolveDispatchWorkerPath() {
 }
 const DISPATCH_WORKER_PATH = resolveDispatchWorkerPath();
 
+// Phase 39 AUTH-04/05: authority.mjs (classifyAuthority + evaluateAuthorityPolicy)
+// is deployed via the lifecycle bundle to <ROUTER_DIR>/modules/intent/authority.mjs
+// (production) or src/intent/authority.mjs (dev). Loaded once at module init via
+// top-level await (ESM-safe; one-time cost at process start, never on the hot
+// path) and cached. Fail-open: a missing/stale module sets _authorityMod = null
+// and the policy call becomes a no-op (the prompt proceeds). Mirrors the
+// resolveDispatchWorkerPath search pattern. AUTHORITY_POLICY_VERSION is read
+// off the loaded module so the canonical source stays authority.mjs.
+function resolveAuthorityModulePath() {
+  const deployed = join(ROUTER_DIR, 'modules', 'intent', 'authority.mjs');
+  if (existsSync(deployed)) return deployed;
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const dev = join(here, '..', 'intent', 'authority.mjs');
+    if (existsSync(dev)) return dev;
+  } catch { /* fall through */ }
+  return deployed;
+}
+let _authorityMod = null;
+try {
+  _authorityMod = await import(pathToFileURL(resolveAuthorityModulePath()).href);
+} catch (_) { _authorityMod = null; }
+function getAuthorityMod() { return _authorityMod; }
+
 // Phase 4 / ANC-01: surface filter plumbing. RUNTIME_CONFIG_DIR is the home of
 // the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
 // SURFACE_FILE is the cache-key path (mtime only — never read directly; the
@@ -1822,6 +1846,82 @@ export function normalize(scored) {
 // Low = top < T_low OR top-2 within tie margin (margin < M).
 // Medium = everything else (T_low ≤ top < T_high with decisive margin, or
 // top ≥ T_high but margin < M = decisive-but-moderate).
+// Phase 39 AUTH-04/05: evaluate the authority policy on the hot path and
+// return a sentinel-wrapped suggestion hint for pause/ask decisions. The
+// router NEVER emits decision:'block' (fail-open) — a block policy is
+// silently dropped (no hint). Pure function over already-loaded state:
+// no readFileSync/spawn inside this helper (Pitfall 4). Any throw returns
+// null (fail-open: the existing outer try/catch in inspectDecision is the
+// belt-and-braces backstop; this helper never propagates a throw).
+//
+// `tier` is the confidenceTier string ('high'|'medium'|'low'). The policy
+// evaluator's sealed input receives the tier as `confidence` (never the
+// numeric score, never weights — AUTH-03). `route` is the current
+// finalRoute (or null) used to derive compatibility { eligible,
+// disposition } from invoke_kind + tier. authority.protected_ is derived
+// from route.invoke_kind === 'warn' OR tier === 'deny_filtered' (the
+// existing guarded surface); an executing route with no warning is
+// treated as protected=false (the policy's protected_ flag is the
+// backstop, not the only signal).
+function evaluateAuthorityHint({ prompt, tier, route }) {
+  try {
+    const mod = getAuthorityMod();
+    if (!mod) return null; // module missing → fail-open no-op
+    const text = typeof prompt === 'string' ? prompt : '';
+    // Derive a minimal intent.disposition for classifyAuthority. The
+    // router.mjs hot path does not call classifyIntent (it uses BM25 +
+    // confidenceTier); map the tier/invoke_kind to the closest
+    // disposition. An executing high/medium route → 'execute'; low →
+    // 'ambiguous'; warn route → 'prohibited' (warn = guarded surface).
+    const invokeKind = route && route.invoke_kind ? route.invoke_kind : null;
+    let disposition = 'ambiguous';
+    if (invokeKind === 'warn') disposition = 'prohibited';
+    else if (tier === 'high' || tier === 'medium') disposition = 'execute';
+    else if (tier === 'low') disposition = 'ambiguous';
+
+    const authorityOut = mod.classifyAuthority(text, { intent: { disposition } });
+    // compatibility: eligible when there is a dispatchable route; disposition
+    // is 'dispatch-candidate' when invoke_kind is slash/skill/agent (not
+    // warn/null).
+    const eligible = !!(route && invokeKind && invokeKind !== 'warn');
+    const compatDisposition = eligible ? 'dispatch-candidate' : 'non-dispatch';
+    // authority.granted: the route is operator-authorized when it is a
+    // dispatchable (non-warn) route. protected_ follows the warn/guarded
+    // surface; the policy's protected leg is the backstop.
+    const authGranted = eligible;
+    const protected_ = invokeKind === 'warn' || tier === 'deny_filtered';
+    // risk: reversible+local default for the suggestion path (the hot path
+    // does not read the contract's risk envelope — that is the action-mapper
+    // path's job). The policy's protected_ leg is what gates pause here.
+    const policy = mod.evaluateAuthorityPolicy({
+      confidence: tier,
+      authority: { authGranted, protected_ },
+      risk: { reversible: true, local: true },
+      compatibility: { eligible, disposition: compatDisposition },
+    });
+    return { authority: authorityOut, policy, policy_version: mod.AUTHORITY_POLICY_VERSION };
+  } catch {
+    return null; // fail-open: never block the prompt on a policy throw
+  }
+}
+
+// Format a pause/ask policy hint as a sentinel-wrapped suggestion block.
+// Never returns decision:'block' — block policies produce no hint (the
+// existing route block already conveys the suggestion; a block policy
+// would be redundant). pause → "paused: confirm X"; ask → "ask: clarify X".
+function formatAuthorityHint(authorityHint, sigHash = '') {
+  if (!authorityHint || !authorityHint.policy) return '';
+  const decision = authorityHint.policy.decision;
+  if (decision !== 'pause' && decision !== 'ask') return '';
+  const reason = authorityHint.policy.reason_code || 'authority_policy';
+  const open = `<!-- router-inject mode= tier= sig=${sigHash} -->`;
+  const body = decision === 'pause'
+    ? `paused: confirm before proceeding (${reason}).`
+    : `ask: clarify intent (${reason}).`;
+  const close = `<!-- /router-inject -->`;
+  return `${open}\n${body}\n${close}`;
+}
+
 export function confidenceTier(topScore, runnerUpScore, thresholds, hasCanonicalMatch = false) {
   const T = thresholds || { T_high: 0.6, T_low: 0.3, M: 0.2 };
   const top = Number(topScore) || 0;
@@ -3465,6 +3565,21 @@ export function inspectDecision(prompt, options = {}) {
       && state.margin < (state.thresholds.M || 0)
     );
     state.decision_trace.push(`score:tier:${tier}`);
+
+    // Phase 39 AUTH-04/05: evaluate the authority policy on the hot path.
+    // Computed eagerly (before route resolution) so the hint is available
+    // for BOTH the fresh-route path and the cache-hit path. Fail-open:
+    // any throw inside evaluateAuthorityHint returns null (never blocks).
+    const authorityHint = evaluateAuthorityHint({ prompt, tier, route: null });
+    if (authorityHint) {
+      state.authority_class = authorityHint.authority.authority_class;
+      state.authority_reason_code = authorityHint.authority.reason_code;
+      state.policy_decision = authorityHint.policy.decision;
+      state.policy_reason_code = authorityHint.policy.reason_code;
+      state.policy_version = authorityHint.policy_version;
+      state.decision_trace.push(`authority:${state.authority_class}`);
+      state.decision_trace.push(`policy:${state.policy_decision}`);
+    }
     if (tier === 'low') {
       state.passThroughReason = state.margin < (state.thresholds.M || 0) ? 'margin_tie' : 'low_threshold';
     }
@@ -3552,7 +3667,20 @@ export function inspectDecision(prompt, options = {}) {
       if (capped.invoke_kind === 'warn') state.passThroughReason = null;
       const routeBlock = formatInjection(capped, prompt, sig.slice(0, 8));
       const graphBlock = state.graphify.symbols.length ? formatGraphBlock(state.graphify.symbols) : '';
+      // Phase 39 AUTH-04/05: re-evaluate the policy with the finalRoute so
+      // the pause/ask hint reflects the actual guarded surface. The hint
+      // is sentinel-wrapped and appended to the injection (never
+      // decision:'block' — block policies produce no hint). Fail-open:
+      // any throw returns '' (no hint).
+      const finalAuthorityHint = evaluateAuthorityHint({ prompt, tier: state.tier, route: capped });
+      const authorityBlock = finalAuthorityHint ? formatAuthorityHint(finalAuthorityHint, sig.slice(0, 8)) : '';
       state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
+      if (authorityBlock) {
+        state.finalInjectedContext = state.finalInjectedContext
+          ? `${state.finalInjectedContext}\n${authorityBlock}`
+          : authorityBlock;
+        state.decision_trace.push(`authority:hint:${finalAuthorityHint.policy.decision}`);
+      }
       if (!state.finalInjectedContext && state.tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
     } else {
       state.route = null;

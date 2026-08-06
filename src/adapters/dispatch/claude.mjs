@@ -35,8 +35,59 @@ import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION } from './contract.mjs';
 import {
   ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
 } from './receipt.mjs';
+// Phase 39 AUTH-04/05: authority taxonomy + policy evaluator used to
+// populate the receipt's intent/authority/risk string fields from the
+// policy output rather than fixture defaults. Pure functions; no I/O.
+import {
+  classifyAuthority,
+  evaluateAuthorityPolicy,
+} from '../../intent/authority.mjs';
 
 export const CLAUDE_DISPATCH_VERSION = 'claude-dispatch/1';
+
+/**
+ * Derive the receipt's intent/authority/risk string fields from the
+ * authority-policy output when the lease carries a prompt. Falls back to
+ * the lease's explicit fields, then to the fixture defaults. buildReceipt
+ * shape is unchanged (contract.mjs untouched) — only the source of the
+ * three string values changes. AUTH-02: classifyAuthority's framing guard
+ * demotes autonomous wording inside example/retrospective/policy framing
+ * to non_authorizing_discussion even when the lease's prompt carries it.
+ */
+function deriveReceiptStrings(lease) {
+  const prompt = lease && typeof lease.prompt === 'string' ? lease.prompt : '';
+  const fallback = {
+    intent: String(lease?.intent || 'host-01-feasibility'),
+    authority: String(lease?.authority || 'operator-authorized'),
+    risk: String(lease?.risk || 'harmless-fixture'),
+  };
+  if (!prompt) return fallback;
+  try {
+    const authority = classifyAuthority(prompt, { intent: { disposition: 'execute' } });
+    const policy = evaluateAuthorityPolicy({
+      confidence: lease?.confidence || 'medium',
+      authority: {
+        authGranted: lease?.authGranted !== false,
+        protected_: Boolean(lease?.protected_),
+      },
+      risk: {
+        reversible: lease?.reversible !== false,
+        local: lease?.local !== false,
+      },
+      compatibility: {
+        eligible: lease?.eligible !== false,
+        disposition: lease?.dispatch_candidate !== false ? 'dispatch-candidate' : 'non-dispatch',
+      },
+    });
+    return {
+      intent: String(lease?.intent || authority.authority_class || fallback.intent),
+      authority: String(authority.authority_class || fallback.authority),
+      risk: String(policy.decision === 'pause' ? 'protected-effect' : policy.decision || fallback.risk),
+    };
+  } catch {
+    return fallback; // fail-open: never block the worker on a policy throw
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
@@ -338,12 +389,13 @@ async function runAsWorker() {
     }
   } catch { lease = null; }
   if (!lease) return; // no lease → no dispatch (fail-open)
+  const receiptStrings = deriveReceiptStrings(lease);
   const action = {
     lease_id: String(lease.lease_id || 'phase-38-fixture-lease'),
     idempotency_key: String(lease.idempotency_key || lease.lease_id || ''),
-    intent: String(lease.intent || 'host-01-feasibility'),
-    authority: String(lease.authority || 'operator-authorized'),
-    risk: String(lease.risk || 'harmless-fixture'),
+    intent: receiptStrings.intent,
+    authority: receiptStrings.authority,
+    risk: receiptStrings.risk,
   };
   const workerAdapter = createClaudeDispatchAdapter({
     fixture: lease.fixture || DEFAULT_FIXTURE,
