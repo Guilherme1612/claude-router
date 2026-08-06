@@ -151,9 +151,10 @@ test('one command installs router, binding, Codex marker, and complete ownership
     //   verify gates regression_suite/privacy/latency/token_budget/calibration_quality + HOST-01..04 dispatch evidence)
     // + 6 = 3 shared gate helpers (tests/helpers/*.mjs) × 2 roots
     // + 2 = fresh-install mode-map seed, one per runtime
-    // + 2 = 1 new module (src/intent/authority.mjs) × 2 roots (Phase 39 AUTH-01..05)
-    // = 261
-    assert.equal(manifest.files.length, 261);
+    // + 4 = 1 new module (src/intent/authority.mjs) × 2 roots × 2 deploy paths
+    //   (modules/ flatMap + src/ mirror at router-lifecycle.mjs:424,480 — Phase 39 AUTH-01..05)
+    // = 263
+    assert.equal(manifest.files.length, 263);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

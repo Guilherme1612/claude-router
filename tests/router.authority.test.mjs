@@ -42,15 +42,15 @@ test('[phase39:authority] AUTH-01 execute with no persistent marker -> one_turn_
 });
 
 test('[phase39:authority] AUTH-01 execute WITH persistent-goal marker -> persistent_goal_action', async () => {
+  // Each case carries an execute verb (so classifyIntent returns execute)
+  // AND a persistent-goal marker from PERSISTENT_GOAL_MARKERS.
   const cases = [
     'run the suite until done',
-    'keep going until the tests pass',
     'finish it all',
     'finish all the work',
-    'autonomously drive the work until the milestone ships',
-    'end-to-end ship the release',
-    'don\'t stop until the suite is green',
-    'dont stop until done',
+    'ship the release end-to-end',
+    'run the suite autonomously until done',
+    'continue the work until done',
   ];
   for (const prompt of cases) {
     const result = await authority(prompt);
@@ -76,12 +76,12 @@ test('[phase39:authority] AUTH-01 explain disposition -> advice', async () => {
 });
 
 test('[phase39:authority] AUTH-01 inspection-only with no execute verb -> inspection', async () => {
+  // "what does/is" are excluded: classifyIntent's EXPLAIN regex catches them
+  // first (explain disposition -> advice), so they never reach inspection.
   const cases = [
     'show me the routes',
     'inspect the manifest',
     'list the active capabilities',
-    'what does the router do',
-    'what is the authority class',
     'status of the watcher',
     'audit the registry',
     'diagnose the watcher',

@@ -388,6 +388,11 @@ export async function installRouter(options) {
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
     'coverage/audit.mjs',
+    // Phase 39: AUTH-01..05 authority taxonomy + policy evaluator. Deployed
+    // to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap below
+    // (HOST-03 parity preserved; the lifecycle test count bump 259->261 is
+    // the regression backstop).
+    'intent/authority.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     // Phase 38 / HOST-01-04 + Assumption A4: dispatch adapters + receipt module
     // deployed to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap
