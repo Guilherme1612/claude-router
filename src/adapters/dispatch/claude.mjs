@@ -92,6 +92,13 @@ function claimIdempotency(key) {
   _idempotencySeen.add(key);
   return true;
 }
+// resume() releases the key before re-spawning so the same idempotency_key
+// can drive a resume (a controlled continuation, not a duplicate invocation).
+// A direct second invoke() with the same key is still rejected because
+// resume re-claims the key after spawning (Phase 40 LEASE-05 primitive).
+function releaseIdempotency(key) {
+  if (key) _idempotencySeen.delete(key);
+}
 
 // --- Adapter factory --------------------------------------------------------
 export function createClaudeDispatchAdapter({
@@ -264,7 +271,11 @@ export function createClaudeDispatchAdapter({
   function pauseImpl(receiptIdArg, adapter) {
     const existing = store.observe(receiptIdArg);
     if (!existing) return null;
-    if (!['invoked', 'pending'].includes(existing.completion_evidence?.state)) {
+    // Pause is a router-internal durable state transition (Pitfall 4), not a
+    // process pause. Allow pausing 'invoked'/'pending'/'completed' → 'paused'
+    // so a completed receipt can be resumed (re-spawned with the same key).
+    // 'recommendation_only'/'failed'/'paused' are not resumable.
+    if (!['invoked', 'pending', 'completed'].includes(existing.completion_evidence?.state)) {
       return existing;
     }
     const paused = {
@@ -287,6 +298,11 @@ export function createClaudeDispatchAdapter({
       authority: existing.authority,
       risk: existing.risk,
     };
+    // Release the idempotency claim so resume can re-spawn with the same key
+    // (a controlled continuation, not a duplicate invocation). invokeImpl
+    // re-claims the key after spawning, so a subsequent direct invoke() with
+    // the same key is still rejected.
+    releaseIdempotency(action.idempotency_key);
     return invokeImpl(action, adapter);
   }
 
