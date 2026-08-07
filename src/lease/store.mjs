@@ -24,6 +24,35 @@ import { stableStringify } from '../registry/schema.mjs';
 
 const waitArray = new Int32Array(new SharedArrayBuffer(4));
 
+// LEASE-03 durable status enum. setStatus validates against this set; an
+// unknown status returns {status:'blocked', reason_code:'invalid_status'}
+// rather than writing a garbage value (T-40-03 tampering mitigation).
+const LEASE_STATUS_SET = new Set([
+  'active', 'paused', 'completed', 'blocked', 'expired', 'revoked',
+]);
+
+/**
+ * LEASE-03 expiry predicate. True when the deterministic wall-clock deadline
+ * has passed OR the per-lease invocation budget is exhausted. v1 enforces:
+ *   - expiry.deterministic_at_ms <= now
+ *   - claimed_actions.length >= resource_bounds.max_invocations (when max_invocations > 0)
+ * max_wall_ms and max_tokens enforcement is deferred to Phase 41+ (see PLAN
+ * deferred note): the fields are inspectable per LEASE-03 but the runtime
+ * guard is partial on purpose.
+ */
+export function isExpired(lease, now = Date.now()) {
+  if (!lease || !lease.expiry) return true;
+  if (Number.isSafeInteger(lease.expiry.deterministic_at_ms)
+      && lease.expiry.deterministic_at_ms <= now) return true;
+  const bounds = lease.resource_bounds;
+  const maxInvocations = bounds && bounds.max_invocations;
+  if (Number.isSafeInteger(maxInvocations) && maxInvocations > 0) {
+    const claimed = Array.isArray(lease.claimed_actions) ? lease.claimed_actions.length : 0;
+    if (claimed >= maxInvocations) return true;
+  }
+  return false;
+}
+
 // Resolve the per-runtime lease root. claude → ~/.claude/router/leases,
 // codex → ~/.codex/router/leases (T-40-07 cross-runtime partition).
 export function defaultLeaseRoot(runtime) {
@@ -128,11 +157,60 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
     } finally { lock.release(); }
   }
 
+  function setStatus(leaseId, status, { now = Date.now() } = {}) {
+    if (!LEASE_STATUS_SET.has(status)) {
+      return { status: 'blocked', reason_code: 'invalid_status' };
+    }
+    return mutate(leaseId, (lease) => {
+      if (lease.status === status) return { changed: false };
+      lease.status = status;
+      // Refresh freshness evidence on durable status transitions so callers
+      // can observe that the record was touched (LEASE-03 inspectability).
+      if (lease.freshness_evidence && typeof lease.freshness_evidence === 'object') {
+        lease.freshness_evidence.lease_mtime_ms = now;
+      }
+      // NOTE: do not put `status` in `data` — the mutate wrapper spreads data
+      // over its own `status` field and would overwrite the outer 'stored'.
+      return { changed: true, data: { new_status: status } };
+    });
+  }
+
+  // LEASE-03 inspect: rebuild the record in schema declaration order. The
+  // on-disk file is alphabetized by stableStringify, but the inspection
+  // contract (PLAN must_haves: LEASE-03 ordering edge) requires the 9-field
+  // declaration order.
+  function inspect(leaseId, { now = Date.now() } = {}) {
+    const lease = readLease(leaseId);
+    if (!lease) return null;
+    return {
+      schema_version: lease.schema_version,
+      policy_version: lease.policy_version,
+      lease_id: lease.lease_id,
+      project_fingerprint: lease.project_fingerprint,
+      goal: lease.goal,
+      scope: lease.scope,
+      allowed_effects: lease.allowed_effects,
+      confirmation_effects: lease.confirmation_effects,
+      resource_bounds: lease.resource_bounds,
+      status: lease.status,
+      expiry: lease.expiry,
+      authority_source: lease.authority_source,
+      last_safe_checkpoint: lease.last_safe_checkpoint,
+      freshness_evidence: lease.freshness_evidence,
+      claimed_actions: lease.claimed_actions,
+      is_expired: isExpired(lease, now),
+      is_revoked: lease.status === 'revoked',
+    };
+  }
+
   return Object.freeze({
     leaseRoot,
     readLease,
     createLease,
     findByFingerprint,
     mutate,
+    setStatus,
+    isExpired,
+    inspect,
   });
 }
