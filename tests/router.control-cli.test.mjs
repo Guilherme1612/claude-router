@@ -12,6 +12,9 @@ import * as routerControl from '../src/cli/router-control.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { saveCapsule } from '../src/context/capsule.mjs';
 import { publishCompiledIndex } from '../src/prompt/publish-index.mjs';
+import { computeLeaseFingerprint } from '../src/lease/identity.mjs';
+import { createLeaseStore } from '../src/lease/store.mjs';
+import { buildLeaseRecord } from '../src/lease/policy.mjs';
 
 const CLI = new URL('../src/cli/router-control.mjs', import.meta.url);
 const { runRouterControl } = routerControl;
@@ -483,4 +486,140 @@ test('[phase22-red:inspection] contract parser dispatches list detail and relati
       assert.deepEqual(snapshot(f.root), before);
     }
   } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+// Phase 40 — Plan 03, Task 3 (LEASE-03/04 operator surface): router-control leases CLI.
+// RED phase: failing tests for inspect / show / revoke over the lease store.
+
+function leaseFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'router-leases-cli-'));
+  return { root, leaseRoot: join(root, 'leases') };
+}
+
+function makeActiveLease(leaseRoot, { expiryMs = Date.now() + 60_000, goal = 'ship-router-v1' } = {}) {
+  const store = createLeaseStore({ root: leaseRoot });
+  const fp = computeLeaseFingerprint({
+    repo: 'repo-A', worktree: 'worktree-W', runtime: 'claude',
+    goal, schemaGeneration: 1, projectFingerprint: 'pf-cli-1',
+  });
+  const record = buildLeaseRecord({
+    fingerprint: fp,
+    goal,
+    scope: { repo: 'repo-A', worktree: 'worktree-W', runtime: 'claude', schema_generation: 1 },
+    allowedEffects: ['read', 'write'],
+    confirmationEffects: ['deploy'],
+    resourceBounds: { max_wall_ms: 60_000, max_invocations: 10, max_tokens: 8192 },
+    expiryMs,
+    authoritySource: { kind: 'operator', instruction: 'persist', class: 'persistent_goal_action' },
+    checkpoint: { receipt_id: 'rcpt-1', action_id: 'act-1', state: 'paused', at_ms: Date.now() - 1000 },
+  });
+  assert.equal(store.createLease(record).status, 'stored');
+  return { store, fp };
+}
+
+test('router-control leases inspect on empty store → ok true, leases []', () => {
+  const f = leaseFixture();
+  try {
+    const result = runRouterControl({ argv: ['leases', 'inspect', '--owned-root', f.root] });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.result.ok, true);
+    assert.equal(result.result.reason_code, 'ok');
+    assert.deepEqual(result.result.data.leases, []);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases inspect with one active lease → 5 summary fields', () => {
+  const f = leaseFixture();
+  try {
+    const { fp } = makeActiveLease(f.leaseRoot);
+    const result = runRouterControl({ argv: ['leases', 'inspect', '--owned-root', f.root] });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.result.ok, true);
+    assert.equal(result.result.data.leases.length, 1);
+    const summary = result.result.data.leases[0];
+    assert.deepEqual(Object.keys(summary).sort(), ['authority_source', 'expiry', 'goal', 'lease_id', 'status']);
+    assert.equal(summary.lease_id, fp);
+    assert.equal(summary.goal, 'ship-router-v1');
+    assert.equal(summary.status, 'active');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases show <id> → all 9 inspection fields + is_expired + is_revoked', () => {
+  const f = leaseFixture();
+  try {
+    const { fp } = makeActiveLease(f.leaseRoot);
+    const result = runRouterControl({ argv: ['leases', 'show', fp, '--owned-root', f.root] });
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.result.ok, true);
+    const data = result.result.data;
+    assert.equal(data.lease_id, fp);
+    assert.equal(data.goal, 'ship-router-v1');
+    assert.equal(data.status, 'active');
+    assert.equal(data.is_expired, false);
+    assert.equal(data.is_revoked, false);
+    // 9 declaration-order inspection fields + is_expired + is_revoked.
+    for (const field of ['schema_version', 'policy_version', 'lease_id', 'project_fingerprint', 'goal',
+      'scope', 'allowed_effects', 'confirmation_effects', 'resource_bounds', 'expiry',
+      'authority_source', 'last_safe_checkpoint', 'freshness_evidence', 'claimed_actions']) {
+      assert.ok(Object.hasOwn(data, field), `field ${field} present`);
+    }
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases show <missing> → ok false, lease_absent', () => {
+  const f = leaseFixture();
+  try {
+    const result = runRouterControl({ argv: ['leases', 'show', 'missing-id', '--owned-root', f.root] });
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.result.ok, false);
+    assert.equal(result.result.reason_code, 'lease_absent');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases revoke <id> → ok true, status revoked; follow-up show confirms', () => {
+  const f = leaseFixture();
+  try {
+    const { fp } = makeActiveLease(f.leaseRoot);
+    const revoke = runRouterControl({ argv: ['leases', 'revoke', fp, '--owned-root', f.root] });
+    assert.equal(revoke.exitCode, 0);
+    assert.equal(revoke.result.ok, true);
+    assert.equal(revoke.result.data.status, 'revoked');
+    assert.equal(revoke.result.data.lease_id, fp);
+    const show = runRouterControl({ argv: ['leases', 'show', fp, '--owned-root', f.root] });
+    assert.equal(show.result.ok, true);
+    assert.equal(show.result.data.status, 'revoked');
+    assert.equal(show.result.data.is_revoked, true);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases revoke <missing> → ok false, lease_absent', () => {
+  const f = leaseFixture();
+  try {
+    const result = runRouterControl({ argv: ['leases', 'revoke', 'missing-id', '--owned-root', f.root] });
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.result.ok, false);
+    assert.equal(result.result.reason_code, 'lease_absent');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases with no subcommand → ok false, invalid_arguments', () => {
+  const f = leaseFixture();
+  try {
+    const result = runRouterControl({ argv: ['leases', '--owned-root', f.root] });
+    assert.notEqual(result.exitCode, 0);
+    assert.equal(result.result.ok, false);
+    assert.equal(result.result.reason_code, 'invalid_arguments');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
+test('router-control leases inspect does not inline raw prompt text', () => {
+  const f = leaseFixture();
+  try {
+    const { fp } = makeActiveLease(f.leaseRoot, { goal: 'ship-router-v1' });
+    const result = runRouterControl({ argv: ['leases', 'inspect', '--owned-root', f.root] });
+    const serialized = JSON.stringify(result.result);
+    assert.doesNotMatch(serialized, /prompt/i);
+    assert.match(serialized, /ship-router-v1/);
+    // ensure fp is referenced (lease_id) but no raw prompt content
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
