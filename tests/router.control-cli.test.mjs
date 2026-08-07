@@ -602,6 +602,26 @@ test('router-control leases revoke <missing> → ok false, lease_absent', () => 
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('router-control leases show|revoke reject path-traversal ids (CR-02)', () => {
+  const f = leaseFixture();
+  try {
+    // Sentinel outside leaseRoot that `a/../../etc/x` would resolve to if safeToken
+    // were still used: path.join(root/leases, 'a/../../etc/x.json') -> root/etc/x.json.
+    mkdirSync(join(f.root, 'etc'), { recursive: true });
+    writeFileSync(join(f.root, 'etc', 'x.json'), '{"poison":true}');
+    const show = runRouterControl({ argv: ['leases', 'show', 'a/../../etc/x', '--owned-root', f.root] });
+    assert.equal(show.result.ok, false);
+    assert.equal(show.result.reason_code, 'invalid_arguments');
+    assert.notEqual(show.exitCode, 0);
+    const revoke = runRouterControl({ argv: ['leases', 'revoke', 'a/../../etc/x', '--owned-root', f.root] });
+    assert.equal(revoke.result.ok, false);
+    assert.equal(revoke.result.reason_code, 'invalid_arguments');
+    assert.notEqual(revoke.exitCode, 0);
+    // Sentinel untouched — the id was rejected before reaching readLease/setStatus.
+    assert.equal(readFileSync(join(f.root, 'etc', 'x.json'), 'utf8'), '{"poison":true}');
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('router-control leases with no subcommand → ok false, invalid_arguments', () => {
   const f = leaseFixture();
   try {

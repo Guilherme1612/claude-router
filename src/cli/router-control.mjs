@@ -759,7 +759,9 @@ function leasesCommand({ root, positional }) {
   if (positional.length !== 3) {
     return { result: canonical(`leases ${subcommand}`, false, 'invalid_arguments'), exitCode: EXIT.usage };
   }
-  const leaseId = safeToken(positional[2], '');
+  // CR-02: safeIdentifier rejects '..' segments — prevents path traversal via
+  // `leases show|revoke <id>` (safeToken permits '.'/'/' and would escape leaseRoot).
+  const leaseId = safeIdentifier(positional[2], '');
   if (!leaseId) {
     return { result: canonical(`leases ${subcommand}`, false, 'invalid_arguments'), exitCode: EXIT.usage };
   }
