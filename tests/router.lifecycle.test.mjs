@@ -153,8 +153,10 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 2 = fresh-install mode-map seed, one per runtime
     // + 4 = 1 new module (src/intent/authority.mjs) × 2 roots × 2 deploy paths
     //   (modules/ flatMap + src/ mirror at router-lifecycle.mjs:424,480 — Phase 39 AUTH-01..05)
-    // = 263
-    assert.equal(manifest.files.length, 263);
+    // + 16 = 4 Phase 40 lease modules (identity, store, policy, briefing) × 2 roots × 2 deploy paths
+    //   (modules/ flatMap + src/ mirror — Phase 40 LEASE-01..06, T-39-03 regression backstop)
+    // = 279
+    assert.equal(manifest.files.length, 279);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -182,6 +184,21 @@ test('one command installs router, binding, Codex marker, and complete ownership
     }
     for (const module of ['registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs', 'registry/reconcile.mjs', 'registry/hook-reconcile.mjs']) {
       assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', module)), true);
+    }
+    // Phase 40 LEASE-01..06 / T-39-03 regression backstop: all 4 lease modules
+    // deploy to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap
+    // (single-runtime deploy would ENOENT in Codex). Existence asserted under
+    // both runtime roots after install.
+    for (const module of ['identity.mjs', 'store.mjs', 'policy.mjs', 'briefing.mjs']) {
+      assert.equal(existsSync(join(f.options.claudeRoot, 'router', 'modules', 'lease', module)), true, `claude lease/${module}`);
+      assert.equal(existsSync(join(f.options.codexRoot, 'router', 'modules', 'lease', module)), true, `codex lease/${module}`);
+    }
+    // Lease modules are stdlib-only: no node:http, node:net, or npm imports.
+    for (const module of ['identity.mjs', 'store.mjs', 'policy.mjs', 'briefing.mjs']) {
+      const src = readFileSync(join(f.options.claudeRoot, 'router', 'modules', 'lease', module), 'utf8');
+      assert.doesNotMatch(src, /from\s+['"]node:http['"]/, `lease/${module} no node:http`);
+      assert.doesNotMatch(src, /from\s+['"]node:net['"]/, `lease/${module} no node:net`);
+      assert.doesNotMatch(src, /from\s+['"](?!\.)(?!\.\.)(?!node:)[^'"]+['"]/, `lease/${module} no npm packages`);
     }
     const status = JSON.parse(readFileSync(result.controllerStatusPath, 'utf8'));
     assert.equal(status.state, 'ready');
