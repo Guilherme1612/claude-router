@@ -393,6 +393,12 @@ export async function installRouter(options) {
     // (HOST-03 parity preserved; the lifecycle test count bump 259->261 is
     // the regression backstop).
     'intent/authority.mjs',
+    // Phase 40 LEASE-01..06: lease lifecycle deployed to BOTH ownedRoot and
+    // codexOwnedRoot via the moduleValues flatMap below (T-39-03 regression
+    // backstop; the lifecycle test count bump 263->279 is the regression gate).
+    // No custom deploy path — the flatMap over [p.ownedRoot, p.codexOwnedRoot]
+    // handles both runtimes. A single-runtime deploy would ENOENT in Codex.
+    'lease/identity.mjs', 'lease/store.mjs', 'lease/policy.mjs', 'lease/briefing.mjs',
     'adapters/claude.mjs', 'adapters/codex.mjs',
     // Phase 38 / HOST-01-04 + Assumption A4: dispatch adapters + receipt module
     // deployed to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap
