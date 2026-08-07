@@ -104,3 +104,57 @@ export function buildLeaseRecord({
     claimed_actions: [],
   };
 }
+
+/**
+ * LEASE-04 lease authority resolution. Reads the lease store (a file scan
+ * under try/catch — fail-open) and returns the authority verdict for the
+ * hot path. Precedence on the router hot path:
+ *
+ *   active   → { authGranted:true,  source:'lease:<id>', reason_code:'lease_active', lease }
+ *   revoked  → { authGranted:false, source:'lease:revoked',  reason_code:'revoked' }
+ *   expired  → { authGranted:false, source:'lease:expired',  reason_code:'expired' }
+ *   foreign  → { authGranted:false, source:'lease:foreign',  reason_code:'fingerprint_mismatch' }
+ *   absent   → { authGranted:false, source:'none',           reason_code:'lease_absent' }
+ *   throw    → { authGranted:false, source:'none',           reason_code:'lease_read_failed' }
+ *
+ * A revoked/expired/foreign lease overrides authGranted=false regardless of
+ * cached state, confidence, recommendations, or learned mappings (LEASE-04
+ * precedence). An absent lease returns 'lease_absent' and the caller keeps
+ * the existing authGranted derivation (no override). A throw from the store
+ * returns 'lease_read_failed' (fail-open — no throw escapes).
+ *
+ * Pure w.r.t. its inputs but reads the lease store (a file read under the
+ * outer try/catch). Does NOT import evaluateAuthorityPolicy or
+ * classifyAuthority — policy.mjs stays self-contained for the deploy bundle
+ * and the sealed evaluator is consumed unchanged downstream.
+ */
+export function resolveLeaseAuthority({ projectFingerprint, leaseStore, now = Date.now() } = {}) {
+  try {
+    if (!leaseStore || !projectFingerprint) {
+      return { authGranted: false, source: 'none', reason_code: 'lease_absent' };
+    }
+    const lease = leaseStore.findByFingerprint(projectFingerprint);
+    if (!lease) {
+      return { authGranted: false, source: 'none', reason_code: 'lease_absent' };
+    }
+    if (lease.status === 'revoked') {
+      return { authGranted: false, source: 'lease:revoked', reason_code: 'revoked' };
+    }
+    if (leaseStore.isExpired(lease, now)) {
+      return { authGranted: false, source: 'lease:expired', reason_code: 'expired' };
+    }
+    if (lease.freshness_evidence && lease.freshness_evidence.fingerprint_match === false) {
+      return { authGranted: false, source: 'lease:foreign', reason_code: 'fingerprint_mismatch' };
+    }
+    return {
+      authGranted: true,
+      source: `lease:${lease.lease_id}`,
+      reason_code: 'lease_active',
+      lease,
+    };
+  } catch {
+    // T-40-08 fail-open: any throw from the store returns lease_read_failed
+    // (authGranted false). Never throws.
+    return { authGranted: false, source: 'none', reason_code: 'lease_read_failed' };
+  }
+}

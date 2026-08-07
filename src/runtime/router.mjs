@@ -170,6 +170,43 @@ try {
 } catch (_) { _authorityMod = null; }
 function getAuthorityMod() { return _authorityMod; }
 
+// Phase 40 LEASE-04: lease module family (identity.mjs, store.mjs, policy.mjs)
+// deployed via the lifecycle bundle to <ROUTER_DIR>/modules/lease/ (production)
+// or src/lease/ (dev). Loaded once at module init via top-level await and
+// cached. Fail-open: a missing/stale module sets _leaseMod = null and the
+// lease consultation becomes a no-op (the existing authority derivation is
+// preserved). Mirrors the resolveAuthorityModulePath search pattern.
+function resolveLeaseModulePath(name) {
+  const deployed = join(ROUTER_DIR, 'modules', 'lease', name);
+  if (existsSync(deployed)) return deployed;
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const dev = join(here, '..', 'lease', name);
+    if (existsSync(dev)) return dev;
+  } catch { /* fall through */ }
+  return deployed;
+}
+let _leaseMod = null;
+try {
+  _leaseMod = {
+    identity: await import(pathToFileURL(resolveLeaseModulePath('identity.mjs')).href),
+    store: await import(pathToFileURL(resolveLeaseModulePath('store.mjs')).href),
+    policy: await import(pathToFileURL(resolveLeaseModulePath('policy.mjs')).href),
+  };
+} catch (_) { _leaseMod = null; }
+let _leaseStore = null;
+function getLeaseStore() {
+  if (_leaseStore === null) {
+    if (!_leaseMod || !_leaseMod.store || typeof _leaseMod.store.createLeaseStore !== 'function') {
+      _leaseStore = false;
+      return null;
+    }
+    try { _leaseStore = _leaseMod.store.createLeaseStore({ runtime: RUNTIME }); }
+    catch { _leaseStore = false; return null; }
+  }
+  return _leaseStore || null;
+}
+
 // Phase 4 / ANC-01: surface filter plumbing. RUNTIME_CONFIG_DIR is the home of
 // the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
 // SURFACE_FILE is the cache-key path (mtime only — never read directly; the
@@ -1863,7 +1900,7 @@ export function normalize(scored) {
 // existing guarded surface); an executing route with no warning is
 // treated as protected=false (the policy's protected_ flag is the
 // backstop, not the only signal).
-function evaluateAuthorityHint({ prompt, tier, route }) {
+function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd } = {}) {
   try {
     const mod = getAuthorityMod();
     if (!mod) return null; // module missing → fail-open no-op
@@ -1888,14 +1925,58 @@ function evaluateAuthorityHint({ prompt, tier, route }) {
     // authority.granted: the route is operator-authorized when it is a
     // dispatchable (non-warn) route. protected_ follows the warn/guarded
     // surface; the policy's protected leg is the backstop.
-    const authGranted = eligible;
+    let authGranted = eligible;
     const protected_ = invokeKind === 'warn' || tier === 'deny_filtered';
+
+    // LEASE-04: lease authority consultation. A revoked/expired/foreign lease
+    // overrides authGranted=false regardless of eligible (precedence over
+    // confidence/recommendations/cached state). An active lease sets
+    // authGranted=true and source=lease:<id> (the lease is the authority
+    // SOURCE). Absent/read-failure → no change (fail-open). The protected_
+    // flag is NEVER touched by the lease (Pitfall 1 — the protected-effect
+    // pause still fires for a leased protected effect). The whole block is
+    // guarded by try/catch (fail-open returns null sentinel, preserving
+    // existing behavior).
+    let leaseSource = null;
+    let leaseReasonCode = null;
+    try {
+      const leaseStore = getLeaseStore();
+      if (leaseStore && _leaseMod && _leaseMod.identity && _leaseMod.policy && manifestFingerprint) {
+        const projectFp = String(manifestFingerprint);
+        const leaseFp = _leaseMod.identity.computeLeaseFingerprint({
+          repo: cwd || process.cwd(),
+          worktree: cwd || process.cwd(),
+          runtime: RUNTIME,
+          goal: authorityOut.authority_class || 'unknown',
+          schemaGeneration: 1,
+          projectFingerprint: projectFp,
+        });
+        const leaseAuth = _leaseMod.policy.resolveLeaseAuthority({
+          projectFingerprint: leaseFp,
+          leaseStore,
+        });
+        if (leaseAuth.authGranted === true) {
+          authGranted = true;
+          leaseSource = leaseAuth.source;
+        } else if (leaseAuth.reason_code !== 'lease_absent') {
+          // revoked/expired/foreign → override authGranted=false (LEASE-04 precedence)
+          authGranted = false;
+          leaseSource = leaseAuth.source;
+        }
+        leaseReasonCode = leaseAuth.reason_code;
+      }
+    } catch { /* fail-open: lease consultation never blocks the prompt */ }
+
     // risk: reversible+local default for the suggestion path (the hot path
     // does not read the contract's risk envelope — that is the action-mapper
     // path's job). The policy's protected_ leg is what gates pause here.
     const policy = mod.evaluateAuthorityPolicy({
       confidence: tier,
-      authority: { authGranted, protected_ },
+      authority: {
+        authGranted,
+        protected_,
+        ...(leaseSource ? { source: leaseSource, lease_reason_code: leaseReasonCode } : {}),
+      },
       risk: { reversible: true, local: true },
       compatibility: { eligible, disposition: compatDisposition },
     });
@@ -3570,7 +3651,7 @@ export function inspectDecision(prompt, options = {}) {
     // Computed eagerly (before route resolution) so the hint is available
     // for BOTH the fresh-route path and the cache-hit path. Fail-open:
     // any throw inside evaluateAuthorityHint returns null (never blocks).
-    const authorityHint = evaluateAuthorityHint({ prompt, tier, route: null });
+    const authorityHint = evaluateAuthorityHint({ prompt, tier, route: null, manifestFingerprint, cwd: opts.cwd });
     if (authorityHint) {
       state.authority_class = authorityHint.authority.authority_class;
       state.authority_reason_code = authorityHint.authority.reason_code;
@@ -3672,7 +3753,7 @@ export function inspectDecision(prompt, options = {}) {
       // is sentinel-wrapped and appended to the injection (never
       // decision:'block' — block policies produce no hint). Fail-open:
       // any throw returns '' (no hint).
-      const finalAuthorityHint = evaluateAuthorityHint({ prompt, tier: state.tier, route: capped });
+      const finalAuthorityHint = evaluateAuthorityHint({ prompt, tier: state.tier, route: capped, manifestFingerprint, cwd: opts.cwd });
       const authorityBlock = finalAuthorityHint ? formatAuthorityHint(finalAuthorityHint, sig.slice(0, 8)) : '';
       state.finalInjectedContext = composeWithCap(routeBlock, graphBlock);
       if (authorityBlock) {
