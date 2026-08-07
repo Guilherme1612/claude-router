@@ -136,6 +136,12 @@ function defaultAllowedRoots() {
 }
 
 // --- Idempotent checkpoint (minimal Phase 40 LEASE-05 primitive) ----------
+// The in-memory _idempotencySeen Set is the HOT-PATH FAST-PATH only. The
+// AUTHORITATIVE at-most-once gate is the durable claimCheckpoint on the
+// lease record (src/lease/store.mjs) — it survives compaction/restart;
+// this Set does not. resumeImpl consults the durable claim first; this
+// Set remains only so invokeImpl's direct-second-invoke guard stays O(1)
+// on the hot path (Pitfall 2 — Phase 38 in-memory Set is lost on re-spawn).
 const _idempotencySeen = new Set();
 function claimIdempotency(key) {
   if (!key) return true;
@@ -150,6 +156,55 @@ function claimIdempotency(key) {
 function releaseIdempotency(key) {
   if (key) _idempotencySeen.delete(key);
 }
+
+// --- LEASE-05 durable lease store (memoized, fail-open null sentinel) ----
+// Mirrors the getAuthorityMod/getReceiptStore pattern: module-level cached,
+// deployed modules/lease/ path searched first, dev src/lease/ second, fail-open
+// null sentinel. If the lease module is unavailable (null), resumeImpl falls
+// back to the existing in-memory path so Phase 38 behavior is preserved.
+function resolveLeaseModulePath(name) {
+  const deployed = join(homedir(), '.claude', 'router', 'modules', 'lease', name);
+  if (existsSync(deployed)) return deployed;
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const dev = join(here, '..', '..', 'lease', name);
+    if (existsSync(dev)) return dev;
+  } catch { /* fall through */ }
+  return deployed;
+}
+let _leaseMod = null;
+let _leaseStore = null;
+async function _loadLeaseMod() {
+  if (_leaseMod !== null) return _leaseMod || null;
+  try {
+    _leaseMod = {
+      store: await import(pathToFileURL(resolveLeaseModulePath('store.mjs')).href),
+    };
+  } catch (_) { _leaseMod = false; }
+  return _leaseMod || null;
+}
+function getLeaseStore() {
+  if (_leaseStore === null) {
+    const mod = _leaseMod && _leaseMod.store ? _leaseMod : null;
+    if (!mod || typeof mod.store.createLeaseStore !== 'function') {
+      _leaseStore = false;
+      return null;
+    }
+    try { _leaseStore = mod.store.createLeaseStore({ runtime: 'claude' }); }
+    catch { _leaseStore = false; return null; }
+  }
+  return _leaseStore || null;
+}
+// Eager-load the lease module at import time (top-level await, ESM-safe) so
+// getLeaseStore() is synchronous on the hot path. Mirrors router.mjs's
+// authority-module load pattern.
+await _loadLeaseMod();
+
+// Test-only helpers: reset the in-memory idempotency Set and the cached
+// lease store so tests can simulate a restart (the durable lease record on
+// disk is the authoritative gate; these reset only the in-process caches).
+export function _resetIdempotencyForTest() { _idempotencySeen.clear(); }
+export function _resetLeaseStoreForTest() { _leaseStore = null; }
 
 // --- Adapter factory --------------------------------------------------------
 export function createClaudeDispatchAdapter({
@@ -349,10 +404,27 @@ export function createClaudeDispatchAdapter({
       authority: existing.authority,
       risk: existing.risk,
     };
-    // Release the idempotency claim so resume can re-spawn with the same key
-    // (a controlled continuation, not a duplicate invocation). invokeImpl
-    // re-claims the key after spawning, so a subsequent direct invoke() with
-    // the same key is still rejected.
+    // LEASE-05: durable checkpoint claim. The on-lease claimCheckpoint is the
+    // AUTHORITATIVE at-most-once gate — it survives compaction/restart (the
+    // in-memory _idempotencySeen Set does not). If the lease store is
+    // available and the action carries a lease_id, claim durably first. A
+    // claimed:false (already_claimed) result returns the existing paused
+    // receipt WITHOUT re-spawning (at-most-once). If the lease store is
+    // unavailable (null), fall back to the existing in-memory path so
+    // Phase 38 behavior is preserved when the lease module is absent.
+    const leaseStore = getLeaseStore();
+    if (leaseStore && action.lease_id) {
+      const claim = leaseStore.claimCheckpoint(action.lease_id, action.idempotency_key);
+      if (claim.claimed === false) {
+        // already_claimed — at-most-once: return the existing paused receipt, no re-spawn.
+        return existing;
+      }
+    }
+    // Release the in-memory idempotency claim so resume can re-spawn with
+    // the same key (a controlled continuation, not a duplicate invocation).
+    // invokeImpl re-claims the key after spawning. The durable claim stays
+    // on the lease record — it is NOT released by resume (it is the
+    // authoritative gate; a second resume with the same key is rejected).
     releaseIdempotency(action.idempotency_key);
     return invokeImpl(action, adapter);
   }

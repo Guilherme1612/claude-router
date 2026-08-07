@@ -175,6 +175,48 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
     });
   }
 
+  // LEASE-05 durable checkpoint claim. At-most-once resume gate: the
+  // claimed_actions array on the lease record is the authoritative
+  // at-most-once primitive — it survives compaction/restart (the in-memory
+  // _idempotencySeen Set in claude.mjs does NOT). claimCheckpoint is durable:
+  // it mutates the on-disk lease record under the mutation lock.
+  //
+  //   !actionId → { claimed:true, changed:false, reason:'no_op' }
+  //     (mirrors claimIdempotency's `if (!key) return true` — empty key is a
+  //     no-op, never blocks)
+  //   !leaseId  → { claimed:true, changed:false, reason:'no_lease' }
+  //     (fail-open: no lease to claim against, never blocks)
+  //   already claimed → { claimed:false, changed:false, reason:'already_claimed' }
+  //   new claim       → { claimed:true,  changed:true }
+  function claimCheckpoint(leaseId, actionId) {
+    if (!actionId) return { claimed: true, changed: false, reason: 'no_op' };
+    if (!leaseId) return { claimed: true, changed: false, reason: 'no_lease' };
+    return mutate(leaseId, (lease) => {
+      if (!Array.isArray(lease.claimed_actions)) lease.claimed_actions = [];
+      if (lease.claimed_actions.includes(actionId)) {
+        return { changed: false, data: { claimed: false, changed: false, reason: 'already_claimed' } };
+      }
+      lease.claimed_actions.push(actionId);
+      return { changed: true, data: { claimed: true, changed: true } };
+    });
+  }
+
+  // LEASE-05 release checkpoint. Removes actionId from the durable
+  // claimed_actions array (the inverse of claimCheckpoint). Used when a
+  // claim needs to be relinquished (e.g. a lease revocation or manual
+  // reset) — NOT called by resumeImpl (the durable claim is the
+  // authoritative gate and stays across re-spawns).
+  function releaseCheckpoint(leaseId, actionId) {
+    if (!actionId || !leaseId) return { released: true, changed: false };
+    return mutate(leaseId, (lease) => {
+      if (!Array.isArray(lease.claimed_actions)) lease.claimed_actions = [];
+      const idx = lease.claimed_actions.indexOf(actionId);
+      if (idx < 0) return { changed: false, data: { released: true } };
+      lease.claimed_actions.splice(idx, 1);
+      return { changed: true, data: { released: true } };
+    });
+  }
+
   // LEASE-03 inspect: rebuild the record in schema declaration order. The
   // on-disk file is alphabetized by stableStringify, but the inspection
   // contract (PLAN must_haves: LEASE-03 ordering edge) requires the 9-field
@@ -210,6 +252,8 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
     findByFingerprint,
     mutate,
     setStatus,
+    claimCheckpoint,
+    releaseCheckpoint,
     isExpired,
     inspect,
   });
