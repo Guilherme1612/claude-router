@@ -17,7 +17,7 @@ v1.6 extends the verified deterministic Router into a guarded control plane. Wor
 ## Phases
 
 - [x] **Phase 38: Cross-Runtime Native Feasibility** - Prove truthful native dispatch, observation, protected-effect pause, startup delivery, and performance in Claude and Codex. (completed 2026-08-06)
-- [ ] **Phase 39: Intent, Authority, Risk, and Invocation Policy** - Separate what the operator means, permits, and must confirm before any general execution.
+- [x] **Phase 39: Intent, Authority, Risk, and Invocation Policy** - Separate what the operator means, permits, and must confirm before any general execution. (completed 2026-08-07)
 - [ ] **Phase 40: Project Identity, Leases, Continuity, and Safe Resume** - Persist narrowly scoped authority and resume valid unfinished work exactly once.
 - [ ] **Phase 41: Manifest vNext and Trust Hardening** - Make untrusted capability metadata and typed invocation contracts safe to inspect and ineligible by default.
 - [ ] **Phase 42: Semantic Graph and Safe Composition** - Resolve unfamiliar installed capabilities and substitutions through validated semantic relationships.
@@ -67,15 +67,15 @@ Plans:
   4. An explicitly authorized reversible local action proceeds after fit validation without a repeated command, while conflicting or low-fit evidence blocks or asks.
   5. Protected, external, privileged, destructive, credentialed, costly, published, deployed, or materially scope-expanding effects pause for host-mediated confirmation.
 
-**Plans**: 2 plans
+**Plans**: 1/2 plans executed
 
 **Wave 1**
 
-- [ ] 39-01-PLAN.md — authority taxonomy module (AUTH-01/02) + independent-input authority-policy evaluator (AUTH-03) + deploy bundle
+- [x] 39-01-PLAN.md — authority taxonomy module (AUTH-01/02) + independent-input authority-policy evaluator (AUTH-03) + deploy bundle
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 39-02-PLAN.md — proceed/pause/ask gate (AUTH-04) + expanded protected-effect vocabulary (AUTH-05) + router.mjs hot-path wiring + dispatch receipt threading
+- [x] 39-02-PLAN.md — proceed/pause/ask gate (AUTH-04) + expanded protected-effect vocabulary (AUTH-05) + router.mjs hot-path wiring + dispatch receipt threading
 
 ### Phase 40: Project Identity, Leases, Continuity, and Safe Resume
 
@@ -185,7 +185,7 @@ Plans:
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
 | 38. Cross-Runtime Native Feasibility | v1.6 | 3/3 | Complete    | 2026-08-06 |
-| 39. Intent, Authority, Risk, and Invocation Policy | v1.6 | 0/TBD | Not started | - |
+| 39. Intent, Authority, Risk, and Invocation Policy | v1.6 | 2/2 | Complete    | 2026-08-07 |
 | 40. Project Identity, Leases, Continuity, and Safe Resume | v1.6 | 0/TBD | Not started | - |
 | 41. Manifest vNext and Trust Hardening | v1.6 | 0/TBD | Not started | - |
 | 42. Semantic Graph and Safe Composition | v1.6 | 0/TBD | Not started | - |

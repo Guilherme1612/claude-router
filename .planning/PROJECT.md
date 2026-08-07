@@ -8,16 +8,17 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.5 Framework-Neutral Adaptive Routing (SHIPPED)
+## Current Milestone: v1.6 Autonomous Control Plane
 
-**Goal:** Make the router choose the right locally-available capability by intent, not hardcoded framework names; calibrate per install instead of globally; stay consistent across Claude and Codex; react correctly when the inventory changes.
+**Goal:** Extend the deterministic framework-neutral Router into a guarded control plane with native dispatch, persistent scoped authority, proportional execution, truthful continuity, attributable outcomes, and reversible local learning across Claude and Codex.
 
 **Target features:**
-- Intent-first routing — mode-map entries carry intent + ranked resolve lists; route resolves to first locally-present capability; close the schema_version guard hole; manifest-driven suppression + next-best fallback; generic fallback tier to native capabilities
-- Inventory-change correctness — calibration AND cache epoch-versioned against the manifest fingerprint; verify watcher covers plugin-cache dirs; document add/update/remove capability lifecycle
-- Per-install auto-calibration — minimal shadow-log outcome capture (suggested vs actually-invoked); per-install threshold derivation from real accepted routes; framework-neutral defaults
-- Per-runtime parity — consistent routing + shared telemetry across Claude and Codex; only active runtime's suggestion injected (no token increase, no LLM calls)
-- Release-gate cleanup — live-install release verification (BLOCKER 2, REL-05/06/07) so v1.5 ships on trusted ground
+- Cross-runtime feasibility and safety foundation — prove native dispatch, outcome observation, startup delivery, and lifecycle hooks in Claude and Codex before downstream autonomy depends on them
+- Intent, authority, and autonomy leases — separate confidence from permission; understand advice, inspection, action, persistent goals, quotations, examples, negation, and policy discussion
+- Framework-neutral semantic execution — resolve installed public, private, proprietary, plugin, service, and native capabilities through canonical contracts without named-framework branches
+- Adaptive execution and continuity — select proportionate skills, commands, agents, and tools; resume only safe unfinished work with truthful startup briefings and idempotent checkpoints
+- Outcome observability and reversible learning — attribute recommendation, invocation, substitution, rejection, completion, cost, and correction; promote only deterministic shadow/canary-proven local changes
+- Migration and trust hardening — safely migrate v1.5 state, fail closed on untrusted capability metadata and invocation arguments, preserve last-known-good rollback, and verify uninstall cleanup
 
 ## Current State
 
@@ -26,6 +27,8 @@ The user can write the minimum useful prompt and still get the best available wo
 **All 3 phases (27–29) verified passed — 16/16 requirements satisfied, 101/101 milestone-focused tests pass, integration checker PASS, Nyquist fully compliant.** Milestone audit verdict `passed`. Remaining items are bounded maintenance risks (reverse-gap baseline maintenance, T_high sensitivity re-run on corpus change) plus pre-existing Phase 26 environment issues (lifecycle readiness timeout on real-home checkout, reinstall-verb teardown race, flaky perf suites under load, manifest hook-count drift). Evolution weight tuning (FUT-05..07) remains deferred — `signal_patterns` expansion was the safer primary lever and shipped.
 
 **v1.5 completed and release-verified on 2026-08-02.** Phases 30–36, 32.1, and 37.1 passed their review, security, Nyquist, verification, integration, and release gates. The installed controller is ready with one owned watcher, the active and known-good release tuple is healthy, and recommendation-only candidates are never promoted without safe dispatch targets.
+
+**v1.6 "Autonomous Control Plane" in progress.** Phase 38 (Cross-Runtime Native Feasibility) complete and verified 2026-08-06: a router-owned `NativeDispatchAdapter` spawns an authorized harmless fixture off the prompt hot path on both Claude and Codex, producing adapter-issued `invocation_identity` + verifiable `completion_evidence` receipts (byte-identical `stdout_sha256` across runtimes), with cross-runtime partition, truthful recommendation-only fallback, and prompt-path budget/read-only/fail-open invariants preserved (HOST-01..04). Dispatch adapters + fixture shipped in the deploy bundle. Phase 39 (Intent, Authority, Risk, and Invocation Policy) complete and verified 2026-08-07: a self-contained `authority.mjs` taxonomy + sealed-input `evaluateAuthorityPolicy` (independent of confidence/weights — AUTH-03) + `gateAction` thin post-processor composing over `resolveAction` + shared frozen `PROTECTED_EFFECT_TOKENS` + router.mjs hot-path wiring via top-level-await fail-open load + dispatch receipt intent/authority/risk threading (AUTH-01..05); 150 relevant tests green, fail-open preserved (router never emits `decision:'block'`). Phases 40–46 remain.
 
 ## Last Milestone: v1.4 Coverage Completeness & Auto-Skill Routing Improvement (SHIPPED 2026-07-31)
 
@@ -95,10 +98,16 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Claude/Codex runtime parity and runtime-local resolution — v1.5 (PARITY-01..04)
 - ✓ Cwd-scoped project routing and fingerprint participation — v1.5 (PROJ-01..03)
 - ✓ Live install, cold-start, lifecycle, and release-gate hardening — v1.5 (REL-08..10)
+- ✓ Cross-runtime native dispatch feasibility — real native invocation + attributable completion receipt on Claude and Codex via a router-owned adapter off the prompt hot path (fire-and-forget unref), cross-runtime equivalence with byte-identical stdout_sha256, truthful recommendation-only fallback (no silent downgrade), warm p95 <25ms / max <100ms prompt budget, read-only/fail-open invariants, dispatch layer shipped in the deploy bundle — v1.6 (Phase 38, HOST-01..04)
+- ✓ Intent/authority/risk invocation policy — advice, inspection, one-turn action, persistent-goal action, and non-authorizing discussion distinguished before capability execution; quotations/examples/negations/hypotheticals/audits/policy discussion never widen authority (incl. autonomous wording); confidence/authority/risk/compatibility shown independent (confidence/history never grant permission); explicitly-authorized reversible local action proceeds after fit validation without a repeated command while conflicting/low-fit evidence blocks or asks; protected/external/privileged/destructive/credentialed/costly/published/deployed/scope-expanding effects pause for host-mediated confirmation — v1.6 (Phase 39, AUTH-01..05)
 
 ### Active
 
-(None — next milestone requirements to be defined via the new-milestone workflow.)
+- Native host dispatch with independent intent, authority, confidence, and risk policy
+- Scoped project-goal leases with deterministic expiry, revocation, binding, and restart idempotency
+- Semantic capability resolution and proportionate execution across Claude and Codex
+- Truthful continuity, complete outcome receipts, and deterministic shadow/canary learning
+- Atomic v1.5 migration, metadata/argument trust boundaries, rollback, and lifecycle cleanup
 
 ### Out of Scope
 
@@ -114,6 +123,7 @@ The user often provides intentionally short instructions. Prompt text alone is t
 
 The approved design and implementation plan are:
 
+- `docs/superpowers/specs/2026-08-02-router-v1.6-autonomous-control-plane-design.md`
 - `docs/superpowers/specs/2026-07-14-dual-runtime-auto-updating-router-design.md`
 - `docs/superpowers/plans/2026-07-14-dual-runtime-auto-updating-router-implementation.md`
 
@@ -149,6 +159,8 @@ The approved design and implementation plan are:
 | Measure the live resolve-first hook path separately from the resolver helper | Ensure the latency gate certifies rendered production behavior, not only helper speed | ✓ Good |
 | Preserve a verified release tuple when a recommendation-only candidate has no safe dispatch target | Safety beats forced activation; the last-known-good compiled route remains authoritative | ✓ Good |
 | Treat deployed gate fixtures and helper-directory cleanup as installer-owned lifecycle state | Installed release evidence must be executable and uninstall must remove all owned artifacts | ✓ Good |
+| gateAction composes OVER resolveAction (thin post-processor); blocked/clarify pass through unchanged with policy attached for telemetry | Preserve the 22 existing actions tests; keep the authority gate additive rather than re-implementing the dispatch gate | ✓ Good |
+| authority.mjs loaded via top-level await with fail-open null sentinel; router never emits decision:'block' (block policies produce no hint) | Hot path stays <100ms, read-only, fail-open; a missing/stale policy module never blocks a prompt | ✓ Good |
 
 ## Evolution
 
@@ -168,4 +180,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-02 after v1.5 milestone*
+*Last updated: 2026-08-07 after Phase 39*
