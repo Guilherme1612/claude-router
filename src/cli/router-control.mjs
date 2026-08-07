@@ -17,6 +17,7 @@ import { selectSuggestion } from '../steward/suggestion.mjs';
 import { createStewardStore } from '../steward/state.mjs';
 import { approveDraftCreation, deriveStewardDraft, previewDraft } from '../steward/draft.mjs';
 import { loadStewardObservations, refreshSuggestionPointer } from '../steward/refresh.mjs';
+import { createLeaseStore } from '../lease/store.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -645,7 +646,7 @@ export function renderSuggestionText(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover|leases inspect|show <id>|revoke <id>> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -705,6 +706,83 @@ function runContextCommand({ subcommand, root, options }) {
   if (save?.status === 'blocked') return { result: canonical(`context ${subcommand}`, false, save.reason_code, { resolution }), exitCode: EXIT.mutation };
   const ok = resolution.dispatch_eligible || resolution.outcome === 'none';
   return { result: canonical(`context ${subcommand}`, ok, resolution.reason_code, { resolution, ...(save ? { save: { status: save.status, reason_code: save.reason_code } } : {}) }), exitCode: ok ? 0 : EXIT.invalid };
+}
+
+// Phase 40 LEASE-03/04 operator surface: `router-control leases { inspect, show
+// <id>, revoke <id> }`. Operator-only (not hot-path); reads/mutates the lease
+// store rooted at <ownedRoot>/leases (mirrors defaultLeaseRoot's
+// <homedir>/.{claude,codex}/router/leases layout, so a --owned-root of
+// ~/.claude/router resolves the same store the hot path reads). Fail-open if
+// the lease module is unavailable (mirrors the existing module-absent
+// pattern). Never inlines raw prompt text — only the structured goal label
+// and the 9 inspection fields (T-40-10 information disclosure mitigation).
+function leasesCommand({ root, positional }) {
+  let store;
+  try {
+    // Lazy require guard: if the deployed lease module is unavailable (older
+    // install, partial deploy), fail-open with lease_module_unavailable
+    // rather than crashing the CLI. createLeaseStore is imported at module
+    // top; the try/catch covers a thrown factory (e.g. ENOENT on root mkdir).
+    store = createLeaseStore({ root: join(root, 'leases') });
+  } catch {
+    return { result: canonical('leases', false, 'lease_module_unavailable'), exitCode: EXIT.invalid };
+  }
+  const subcommand = positional[1] || '';
+  if (!['inspect', 'show', 'revoke', ''].includes(subcommand)) {
+    return { result: canonical('leases', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  if (subcommand === '') {
+    return { result: canonical('leases', false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  if (subcommand === 'inspect') {
+    if (positional.length !== 2) {
+      return { result: canonical('leases inspect', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    }
+    const leases = [];
+    let names;
+    try { names = readdirSync(store.leaseRoot); } catch { names = []; }
+    for (const name of names) {
+      if (!name.endsWith('.json')) continue;
+      const lease = store.readLease(name.slice(0, -5));
+      if (!lease) continue;
+      leases.push({
+        lease_id: safeToken(lease.lease_id, ''),
+        goal: safeToken(lease.goal, ''),
+        status: safeToken(lease.status, ''),
+        expiry: lease.expiry,
+        authority_source: lease.authority_source,
+      });
+    }
+    return { result: canonical('leases inspect', true, 'ok', { leases }), exitCode: EXIT.success };
+  }
+  // show / revoke require a lease_id positional.
+  if (positional.length !== 3) {
+    return { result: canonical(`leases ${subcommand}`, false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  const leaseId = safeToken(positional[2], '');
+  if (!leaseId) {
+    return { result: canonical(`leases ${subcommand}`, false, 'invalid_arguments'), exitCode: EXIT.usage };
+  }
+  if (subcommand === 'show') {
+    const inspected = store.inspect(leaseId);
+    if (!inspected) {
+      return { result: canonical('leases show', false, 'lease_absent'), exitCode: EXIT.invalid };
+    }
+    return { result: canonical('leases show', true, 'ok', inspected), exitCode: EXIT.success };
+  }
+  // revoke
+  const existing = store.readLease(leaseId);
+  if (!existing) {
+    return { result: canonical('leases revoke', false, 'lease_absent'), exitCode: EXIT.invalid };
+  }
+  const result = store.setStatus(leaseId, 'revoked');
+  if (result.status === 'blocked') {
+    return { result: canonical('leases revoke', false, result.reason_code), exitCode: EXIT.invalid };
+  }
+  return {
+    result: canonical('leases revoke', true, 'ok', { lease_id: leaseId, status: 'revoked' }),
+    exitCode: EXIT.success,
+  };
 }
 
 function integerOption(value, fallback, { minimum = 0, maximum = MAX_VALUE } = {}) {
@@ -1077,6 +1155,9 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   if (command === 'context') {
     if (positional.length !== 2) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
     return runContextCommand({ subcommand: positional[1], root, options });
+  }
+  if (command === 'leases') {
+    return leasesCommand({ root, positional });
   }
   if (command === 'registry' && positional[1] === 'recover') {
     if (positional.length !== 2) return { result: canonical('registry recover', false, 'invalid_arguments'), exitCode: EXIT.usage };
