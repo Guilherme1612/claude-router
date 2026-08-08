@@ -138,9 +138,14 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
     const leaseId = record && record.lease_id;
     if (!leaseId) return { status: 'blocked', reason_code: 'invalid_lease_id' };
     const existing = readLease(leaseId);
-    if (existing && existing.project_fingerprint === record.project_fingerprint) {
-      // LEASE-03 adjacency: identical six-axis fingerprint ⇒ same lease.
-      return { status: 'unchanged', lease_id: leaseId };
+    if (existing) {
+      if (existing.project_fingerprint === record.project_fingerprint) {
+        // LEASE-03 adjacency: identical six-axis fingerprint ⇒ same lease.
+        return { status: 'unchanged', lease_id: leaseId };
+      }
+      // WR-02: a lease_id collision with a differing project_fingerprint is
+      // a silent data-loss path — reject instead of overwriting the record.
+      return { status: 'blocked', reason_code: 'lease_id_collision' };
     }
     durableWrite(join(leaseRoot, `${leaseId}.json`), record);
     return { status: 'stored', lease_id: leaseId };
