@@ -415,8 +415,14 @@ export function createClaudeDispatchAdapter({
     const leaseStore = getLeaseStore();
     if (leaseStore && action.lease_id) {
       const claim = leaseStore.claimCheckpoint(action.lease_id, action.idempotency_key);
-      if (claim.claimed === false) {
-        // already_claimed — at-most-once: return the existing paused receipt, no re-spawn.
+      if (claim.claimed !== true) {
+        // already_claimed, mutation_lock_failed, or lease_not_found — do NOT
+        // re-spawn. Only an explicit claimed:true permits the resume to proceed
+        // (at-most-once). A blocked mutate returns no `claimed` field at all
+        // (undefined !== true → fail-closed), which preserves the durable gate
+        // under lock contention or when the lease was deleted between pause and
+        // resume. The no_op/no_lease paths still return claimed:true and proceed
+        // (intended fail-open for empty actionId/leaseId).
         return existing;
       }
     }
