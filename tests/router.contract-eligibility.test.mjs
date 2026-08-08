@@ -56,6 +56,12 @@ test('[phase22-red:eligibility] all passed gates are eligible through one evalua
   assert.deepEqual(result.reason_codes, ['eligibility_all_gates_passed']);
 });
 
+test('[41-03:quarantine] a safe record is not quarantined', async () => {
+  const result = await evaluate(safeRecord());
+  assert.equal(result.quarantined, false);
+  assert.deepEqual(result.quarantine_reasons, []);
+});
+
 test('missing contract safety evidence is recommendation-only [phase22-red:eligibility-gap]', async () => {
   const complete = safeRecord();
   const cases = [
