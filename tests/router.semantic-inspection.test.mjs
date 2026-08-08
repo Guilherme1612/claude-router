@@ -9,8 +9,11 @@ import { buildClaudeHeavyProfile, contractEvidence } from './helpers/inventory-f
 const controlModule = import('../src/cli/router-control.mjs');
 
 function safeRecord(overrides = {}) {
+  const name = overrides.name || 'atlas';
   const record = {
     ...buildClaudeHeavyProfile()[0],
+    name,
+    canonical_identity: `router/${name}`,
     dependencies: { state: 'declared', items: [] },
     ...overrides,
   };
@@ -19,7 +22,10 @@ function safeRecord(overrides = {}) {
   evidence.risk[0].value = 'low';
   evidence.permissions[0].value = ['read'];
   evidence.scope[0].value = record.scope;
-  return { ...record, contract: buildCapabilityContract(record, evidence) };
+  const built = { ...record, contract: buildCapabilityContract(record, evidence) };
+  // Set stable_id to stableCapabilityId so edge matching works (mirrors real registry)
+  built.stable_id = stableCapabilityId(built);
+  return built;
 }
 
 function withEligibility(record, eligible = true, gates = {}) {

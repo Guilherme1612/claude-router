@@ -508,6 +508,63 @@ export function relationshipProjection({ relationships = {}, limit = MAX_DIFF, o
   };
 }
 
+export function semanticProjection({ record, relationships = {}, limit = MAX_DIFF, offset = 0 } = {}) {
+  if (!record?.contract || typeof record.contract !== 'object') throw new TypeError('invalid_contract_record');
+  // Use the raw stable_id for edge matching (edge endpoints are stableCapabilityId values).
+  // safeIdentifier is applied for display via relationshipItemProjection.
+  const rawSubjectId = record?.stable_id || record?.id || record?.name;
+
+  // requires: map over contract fields that declare inputs/dependencies
+  const requiresFields = ['inputs', 'dependencies'];
+  const requires = requiresFields.map(f => {
+    const projected = fieldProjection(record.contract.fields?.[f]);
+    return { ...projected, kind: 'requires', field: safeToken(f) };
+  });
+
+  // produces: map over contract fields that declare outputs
+  const produces = ['outputs'].map(f => {
+    const projected = fieldProjection(record.contract.fields?.[f]);
+    return { ...projected, kind: 'produces', field: safeToken(f) };
+  });
+
+  // edges: filter relationship edges where source_id or target_id matches the record
+  const allEdges = [
+    ...(Array.isArray(relationships?.edges) ? relationships.edges : []),
+    ...(Array.isArray(relationships?.candidates) ? relationships.candidates : []),
+  ];
+  const edges = allEdges
+    .filter(edge => edge?.source_id === rawSubjectId || edge?.target_id === rawSubjectId)
+    .map(edge => ({ ...relationshipItemProjection(edge), kind: 'relationship' }));
+
+  // Combine and sort by stableStringify for deterministic output
+  const values = [...requires, ...produces, ...edges]
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  const bounded = boundedResult(values, { limit, offset });
+
+  // lifecycle section
+  const lifecycle = {
+    enabled: record?.enabled !== false,
+    lifecycle: safeToken(record?.lifecycle),
+    eligible: record?.eligibility?.eligible === true,
+    eligibility_gates: Object.fromEntries(
+      Object.entries(record.eligibility?.gates || {})
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([gate, state]) => [safeToken(gate), safeToken(state)]),
+    ),
+  };
+
+  return {
+    total: bounded.meta.total,
+    returned: bounded.meta.returned,
+    truncated: bounded.meta.truncated,
+    limit: bounded.meta.limit,
+    offset: bounded.meta.offset,
+    next_offset: bounded.meta.next_offset,
+    semantic: bounded.values,
+    lifecycle,
+  };
+}
+
 function diffVersions(root, sourceId, destinationId) {
   const source = readVersion(root, sourceId), destination = readVersion(root, destinationId);
   if (!source.verdict.valid || !destination.verdict.valid) return { ok: false, reason_code: !source.verdict.valid ? source.verdict.reason_code : destination.verdict.reason_code };
@@ -952,8 +1009,10 @@ function inventoryCommand({ root, active, options, dependencies, authorityVersio
 
 function contractCommand({ root, active, positional, options, dependencies }) {
   const relationshipView = positional[1] === 'relationships';
-  if (positional.length > (relationshipView ? 2 : 1)
+  const semanticView = positional[1] === 'semantic';
+  if (positional.length > (relationshipView || semanticView ? 2 : 1)
     || (relationshipView && options.id)
+    || (relationshipView && semanticView)
     || options.availability
     || options.execute
     || options.semantic_type
@@ -977,6 +1036,25 @@ function contractCommand({ root, active, positional, options, dependencies }) {
     if (relationshipView) {
       return {
         result: canonical('contract relationships', true, 'contract_relationships_ready', relationshipProjection({
+          relationships: source.relationships,
+          limit,
+          offset,
+        })),
+        exitCode: 0,
+      };
+    }
+    if (semanticView) {
+      if (!options.id) {
+        return { result: canonical('contract', false, 'invalid_arguments'), exitCode: EXIT.usage };
+      }
+      if (safeIdentifier(options.id, '') !== options.id) {
+        return { result: canonical('contract', false, 'invalid_contract_id'), exitCode: EXIT.usage };
+      }
+      const record = source.records.find(item => safeIdentifier(item?.stable_id || item?.id || item?.name) === options.id);
+      if (!record?.contract) return { result: canonical('contract', false, 'contract_not_found'), exitCode: EXIT.invalid };
+      return {
+        result: canonical('contract semantic', true, 'semantic_detail_ready', semanticProjection({
+          record,
           relationships: source.relationships,
           limit,
           offset,
