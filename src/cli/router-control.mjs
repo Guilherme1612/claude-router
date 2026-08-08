@@ -755,6 +755,14 @@ function leasesCommand({ root, positional, options = {} }) {
     return { result: canonical('leases inspect', true, 'ok', { leases }), exitCode: EXIT.success };
   }
   if (subcommand === 'create') {
+    // WR-04: create reads its inputs from --goal/--project-fingerprint options,
+    // but it must still reject extra positionals — consistent with inspect
+    // (positional.length === 2) and show/revoke (=== 3) — so operator typos
+    // like `leases create accidental-positional` surface as invalid_arguments
+    // instead of silently creating a lease.
+    if (positional.length !== 2) {
+      return { result: canonical('leases create', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    }
     // WR-02: production lease-creation path. The operator supplies the
     // operator-declared goal label and the manifest project-fingerprint; the
     // CLI computes the lease fingerprint (matching the hot-path axes) and
