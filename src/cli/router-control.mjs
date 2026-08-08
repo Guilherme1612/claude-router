@@ -733,9 +733,6 @@ function leasesCommand({ root, positional, options = {} }) {
   if (!['inspect', 'show', 'revoke', 'create'].includes(subcommand)) {
     return { result: canonical('leases', false, 'invalid_arguments'), exitCode: EXIT.usage };
   }
-  if (subcommand === '') {
-    return { result: canonical('leases', false, 'invalid_arguments'), exitCode: EXIT.usage };
-  }
   if (subcommand === 'inspect') {
     if (positional.length !== 2) {
       return { result: canonical('leases inspect', false, 'invalid_arguments'), exitCode: EXIT.usage };
