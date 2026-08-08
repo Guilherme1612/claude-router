@@ -192,6 +192,7 @@ try {
     identity: await import(pathToFileURL(resolveLeaseModulePath('identity.mjs')).href),
     store: await import(pathToFileURL(resolveLeaseModulePath('store.mjs')).href),
     policy: await import(pathToFileURL(resolveLeaseModulePath('policy.mjs')).href),
+    briefing: await import(pathToFileURL(resolveLeaseModulePath('briefing.mjs')).href),
   };
 } catch (_) { _leaseMod = null; }
 let _leaseStore = null;
@@ -1950,6 +1951,7 @@ function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd }
     // existing behavior).
     let leaseSource = null;
     let leaseReasonCode = null;
+    let leaseBriefing = null;
     try {
       const leaseStore = getLeaseStore();
       if (leaseStore && _leaseMod && _leaseMod.identity && _leaseMod.policy && manifestFingerprint) {
@@ -1983,6 +1985,20 @@ function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd }
           leaseSource = leaseAuth.source;
         }
         leaseReasonCode = leaseAuth.reason_code;
+        // WR-01: LEASE-06 continuity briefing. composeBriefing is fail-open-to-
+        // null (never blocks). Only consult it when an active lease was found
+        // (lease_active) — every other state returns null anyway, so the gate
+        // avoids a redundant findByFingerprint scan on the no-lease path (the
+        // production case until a creation path ships, see WR-02).
+        if (_leaseMod.briefing && leaseAuth.reason_code === 'lease_active') {
+          try {
+            leaseBriefing = _leaseMod.briefing.composeBriefing({
+              projectFingerprint: leaseFp,
+              leaseStore,
+              now: Date.now(),
+            });
+          } catch { /* fail-open: briefing never blocks the prompt */ }
+        }
       }
     } catch { /* fail-open: lease consultation never blocks the prompt */ }
 
@@ -1999,7 +2015,12 @@ function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd }
       risk: { reversible: true, local: true },
       compatibility: { eligible, disposition: compatDisposition },
     });
-    return { authority: authorityOut, policy, policy_version: mod.AUTHORITY_POLICY_VERSION };
+    return {
+      authority: authorityOut,
+      policy,
+      policy_version: mod.AUTHORITY_POLICY_VERSION,
+      ...(leaseBriefing ? { briefing: leaseBriefing } : {}),
+    };
   } catch {
     return null; // fail-open: never block the prompt on a policy throw
   }
@@ -2018,6 +2039,23 @@ function formatAuthorityHint(authorityHint, sigHash = '') {
   const body = decision === 'pause'
     ? `paused: confirm before proceeding (${reason}).`
     : `ask: clarify intent (${reason}).`;
+  const close = `<!-- /router-inject -->`;
+  return `${open}\n${body}\n${close}`;
+}
+
+// WR-01 / LEASE-06: render the continuity briefing for a returning project with
+// an active lease. The briefing references receipt IDs (never raw prompt text
+// — per the LEASE-06 <=120 token injection constraint); the operator inspects
+// via `router-control leases show <id>`. Sentinel-wrapped so it is
+// attributable and removable. Returns '' when there is no briefing (first
+// visit, invalid states) so the caller's truthy check is the gate.
+function formatBriefingBlock(briefing, sigHash = '') {
+  if (!briefing || !briefing.briefing) return '';
+  const leaseId = briefing.lease_id || '';
+  const evidence = briefing.evidence || {};
+  const receiptId = evidence.receipt_id || '';
+  const open = `<!-- router-inject mode= tier= sig=${sigHash} -->`;
+  const body = `continuity: resuming lease ${leaseId}${receiptId ? `; last checkpoint ${receiptId}` : ''} (inspect: router-control leases show ${leaseId}).`;
   const close = `<!-- /router-inject -->`;
   return `${open}\n${body}\n${close}`;
 }
@@ -3780,6 +3818,17 @@ export function inspectDecision(prompt, options = {}) {
           ? `${state.finalInjectedContext}\n${authorityBlock}`
           : authorityBlock;
         state.decision_trace.push(`authority:hint:${finalAuthorityHint.policy.decision}`);
+      }
+      // WR-01 / LEASE-06: append the continuity briefing for a returning project
+      // with an active lease (fail-open: '' when none — first visit, invalid).
+      const briefingBlock = finalAuthorityHint && finalAuthorityHint.briefing
+        ? formatBriefingBlock(finalAuthorityHint.briefing, sig.slice(0, 8))
+        : '';
+      if (briefingBlock) {
+        state.finalInjectedContext = state.finalInjectedContext
+          ? `${state.finalInjectedContext}\n${briefingBlock}`
+          : briefingBlock;
+        state.decision_trace.push('briefing:active');
       }
       if (!state.finalInjectedContext && state.tier === 'low' && !state.passThroughReason) state.passThroughReason = 'low_tier';
     } else {
