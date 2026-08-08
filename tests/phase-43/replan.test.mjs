@@ -49,15 +49,32 @@ const current = {
   status: 'planned', dispatch_eligible: true, strategy_id: 'strategy-43-fixture',
   workflow_id: 'workflow-43', transition_id: 'transition-43', replan_count: 0,
   strategy: {
+    contract_version: 'strategy-contract-v1',
     resource_limits: { max_time_ms: 100, max_tokens: 100, max_calls: 4, max_retries: 2, max_failures: 2, max_coordination_cost: 20 },
+    cost: { expected_time_ms: 10, expected_tokens: 10, calls: 1, retries: 0, failures: 0, coordination_cost: 1 },
+    hard_constraints: { safe: true, correct: true, quality: true, fit: true, available: true, in_scope: true, resources: true, passed: true },
     work: [{ id: 'task-a', safe: true }, { id: 'task-b', safe: true }],
   },
 };
 
+function replacement(work, overrides = {}) {
+  return {
+    status: 'planned', dispatch_eligible: true, strategy_id: current.strategy_id,
+    strategy: {
+      contract_version: 'strategy-contract-v1',
+      resource_limits: { ...current.strategy.resource_limits },
+      cost: { ...current.strategy.cost },
+      hard_constraints: { ...current.strategy.hard_constraints },
+      work,
+      ...overrides,
+    },
+  };
+}
+
 test('STRAT-04: accepts one evidence-backed replan and preserves completed independent work', () => {
   const result = replanStrategy({
     current, failure: FAILURE_EVIDENCE,
-    replacement: { strategy_id: current.strategy_id, work: [{ id: 'task-a', safe: true }, { id: 'task-c', safe: true }] },
+    replacement: replacement([{ id: 'task-a', safe: true }, { id: 'task-c', safe: true }]),
     checkpoints: { completed_work: COMPLETED_WORK },
   });
   assert.equal(result.status, 'planned');
@@ -72,13 +89,13 @@ test('STRAT-04: blocks missing, unrelated, unsafe, over-bound, and second replan
     [{ ...FAILURE_EVIDENCE, reason_code: undefined }, 'replan_evidence_missing'],
   ];
   for (const [failure, reason_code] of cases) {
-    const result = replanStrategy({ current, failure, replacement: { work: [{ id: 'task-c', safe: true }] }, checkpoints: { completed_work: COMPLETED_WORK } });
+    const result = replanStrategy({ current, failure, replacement: replacement([{ id: 'task-c', safe: true }]), checkpoints: { completed_work: COMPLETED_WORK } });
     assert.equal(result.reason_code, reason_code);
     assert.deepEqual(result.completed_work, COMPLETED_WORK);
   }
-  const unsafe = replanStrategy({ current, failure: FAILURE_EVIDENCE, replacement: { work: [{ id: 'task-c', safe: false }] }, checkpoints: { completed_work: COMPLETED_WORK } });
+  const unsafe = replanStrategy({ current, failure: FAILURE_EVIDENCE, replacement: replacement([{ id: 'task-c', safe: false }], { hard_constraints: { ...current.strategy.hard_constraints, safe: false, passed: false } }), checkpoints: { completed_work: COMPLETED_WORK } });
   assert.equal(unsafe.reason_code, 'replacement_not_safe');
-  const second = replanStrategy({ current: { ...current, replan_count: 1 }, failure: FAILURE_EVIDENCE, replacement: { work: [{ id: 'task-c', safe: true }] }, checkpoints: { completed_work: COMPLETED_WORK } });
+  const second = replanStrategy({ current: { ...current, replan_count: 1 }, failure: FAILURE_EVIDENCE, replacement: replacement([{ id: 'task-c', safe: true }]), checkpoints: { completed_work: COMPLETED_WORK } });
   assert.equal(second.reason_code, 'one_replan_exhausted');
   assert.deepEqual(second.resume_work, []);
 });
@@ -97,16 +114,18 @@ test('STRAT-04: durable checkpoint re-read preserves completed claims and return
     first.createLease(record);
     first.claimCheckpoint(record.lease_id, 'task-a');
     const reread = createLeaseStore({ root: owned }).inspect(record.lease_id);
-    const result = replanStrategy({ current, failure: FAILURE_EVIDENCE, replacement: { work: [{ id: 'task-a', safe: true }, { id: 'task-c', safe: true }] }, checkpoints: reread });
+    const result = replanStrategy({ current, failure: FAILURE_EVIDENCE, replacement: replacement([{ id: 'task-a', safe: true }, { id: 'task-c', safe: true }]), checkpoints: reread });
     assert.deepEqual(reread.claimed_actions, ['task-a']);
     assert.deepEqual(result.resume_work, [{ id: 'task-c', safe: true }]);
   } finally { rmSync(owned, { recursive: true, force: true }); }
 });
 
 test('dispatch strategy bounds reject blocked, unsafe, identity-mismatched, unfinished, and over-bound plans', () => {
-  const valid = { status: 'planned', dispatch_eligible: true, strategy_id: 's', workflow_id: 'w', transition_id: 't', work_id: 'task-c', strategy: { resource_limits: { max_tokens: 10 }, cost: { expected_tokens: 5 }, work: [{ id: 'task-c', safe: true }] } };
+  const valid = { ...replacement([{ id: 'task-c', safe: true }]), strategy_id: 's', workflow_id: 'w', transition_id: 't', work_id: 'task-c' };
+  valid.strategy_id = 's';
+  valid.strategy = { ...valid.strategy, resource_limits: { ...valid.strategy.resource_limits, max_tokens: 10 }, cost: { ...valid.strategy.cost, expected_tokens: 5 } };
   assert.equal(validateStrategyBounds(valid).ok, true);
-  assert.equal(validateStrategyBounds({ ...valid, strategy: { ...valid.strategy, cost: { expected_tokens: 11 } } }).reason, 'strategy_resource_bound_exceeded');
+  assert.equal(validateStrategyBounds({ ...valid, strategy: { ...valid.strategy, cost: { ...valid.strategy.cost, expected_tokens: 11 } } }).reason, 'strategy_resource_bound_exceeded');
   assert.equal(validateStrategyBounds({ ...valid, status: 'blocked' }).reason, 'strategy_blocked');
   assert.equal(validateStrategyBounds({ ...valid, work_id: 'task-a' }).reason, 'strategy_work_unplanned');
 });
@@ -114,7 +133,7 @@ test('dispatch strategy bounds reject blocked, unsafe, identity-mismatched, unfi
 test('Claude and Codex reject over-bound strategy plans before native spawn', () => {
   const action = { runtime: 'claude', strategy_plan: {
     status: 'planned', dispatch_eligible: true, strategy_id: 's',
-    strategy: { work: [{ id: 'task-c', safe: true }], resource_limits: { max_tokens: 10 }, cost: { expected_tokens: 11 } },
+    strategy: { contract_version: 'strategy-contract-v1', hard_constraints: { safe: true, correct: true, quality: true, fit: true, available: true, in_scope: true, resources: true, passed: true }, work: [{ id: 'task-c', safe: true }], resource_limits: { max_time_ms: 100, max_tokens: 10, max_calls: 4, max_retries: 2, max_failures: 2, max_coordination_cost: 20 }, cost: { expected_time_ms: 10, expected_tokens: 11, calls: 1, retries: 0, failures: 0, coordination_cost: 1 } },
   } };
   const claude = createClaudeDispatchAdapter({ receiptRoot: mkdtempSync(join(tmpdir(), 'router-43-claude-')) });
   const codex = createCodexDispatchAdapter({ receiptRoot: mkdtempSync(join(tmpdir(), 'router-43-codex-')) });

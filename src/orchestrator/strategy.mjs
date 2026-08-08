@@ -143,18 +143,38 @@ function strategyParts(action) {
   return { plan, strategy };
 }
 
+function validHardContract(strategy) {
+  const hard = strategy?.hard_constraints;
+  return object(hard) && HARD_FIELDS.every(field => hard[field] === true)
+    && hard.resources === true && hard.passed === true;
+}
+
+function validResourceContract(strategy) {
+  const limits = strategy?.resource_limits;
+  const cost = strategy?.cost;
+  return object(limits) && object(cost) && STRATEGY_COST_LIMITS.every(([costField, limitField]) =>
+    finiteBounded(cost[costField], 10 ** 12) && finiteBounded(limits[limitField], 10 ** 12));
+}
+
+function withinResourceBounds(strategy) {
+  return STRATEGY_COST_LIMITS.every(([costField, limitField]) => strategy.cost[costField] <= strategy.resource_limits[limitField]);
+}
+
 /** Validate the optional strategy contract at the dispatch boundary. */
 export function validateStrategyBounds(action = {}) {
   const hasPlan = action?.strategy !== undefined || action?.strategy_plan !== undefined || action?.plan !== undefined;
   if (!hasPlan) return { ok: true };
   const { plan, strategy } = strategyParts(action);
   if (plan?.status === 'blocked' || strategy?.status === 'blocked') return { ok: false, reason: 'strategy_blocked' };
-  if (plan?.dispatch_eligible === false || strategy?.dispatch_eligible === false) return { ok: false, reason: 'strategy_not_dispatch_eligible' };
+  if (plan?.status !== 'planned' || plan?.dispatch_eligible !== true) return { ok: false, reason: 'strategy_not_dispatch_eligible' };
+  if (strategy?.contract_version !== STRATEGY_CONTRACT_VERSION) return { ok: false, reason: 'strategy_contract_invalid' };
   if (action.strategy_id && plan?.strategy_id && action.strategy_id !== plan.strategy_id) return { ok: false, reason: 'strategy_identity_mismatch' };
   if (action.workflow_id && plan?.workflow_id && action.workflow_id !== plan.workflow_id) return { ok: false, reason: 'strategy_identity_mismatch' };
   if (action.transition_id && plan?.transition_id && action.transition_id !== plan.transition_id) return { ok: false, reason: 'strategy_identity_mismatch' };
   if (!strategy || typeof strategy !== 'object' || !Array.isArray(strategy.work)) return { ok: false, reason: 'strategy_work_invalid' };
-  if (strategy.hard_constraints?.passed === false) return { ok: false, reason: 'strategy_constraints_failed' };
+  if (!validHardContract(strategy)) return { ok: false, reason: 'strategy_constraints_failed' };
+  if (!validResourceContract(strategy)) return { ok: false, reason: 'strategy_resource_contract_invalid' };
+  if (!withinResourceBounds(strategy)) return { ok: false, reason: 'strategy_resource_bound_exceeded' };
   const workIds = new Set();
   for (const work of strategy.work) {
     if (!work || !validId(work.id) || workIds.has(work.id)) return { ok: false, reason: 'strategy_work_invalid' };
@@ -165,13 +185,7 @@ export function validateStrategyBounds(action = {}) {
   if (action.work_id && !workIds.has(action.work_id)) return { ok: false, reason: 'strategy_work_unplanned' };
   const limits = strategy.resource_limits;
   const cost = strategy.cost;
-  if (cost && limits) {
-    for (const [costField, limitField] of STRATEGY_COST_LIMITS) {
-      if (!(costField in cost) && !(limitField in limits)) continue;
-      if (!finiteBounded(cost[costField], 10 ** 12) || !finiteBounded(limits[limitField], 10 ** 12)
-        || cost[costField] > limits[limitField]) return { ok: false, reason: 'strategy_resource_bound_exceeded' };
-    }
-  }
+  if (!validResourceContract(strategy)) return { ok: false, reason: 'strategy_resource_contract_invalid' };
   return { ok: true };
 }
 
@@ -196,15 +210,20 @@ export function replanStrategy({ current, failure, replacement, checkpoints, bou
   if (!['resource_exhausted', 'repeated_failure', 'failure'].includes(failure.reason_code)) return finish('replan_evidence_missing');
   if (!Number.isInteger(current.replan_count)) return finish('replan_count_invalid');
   if (current.replan_count !== 0) return finish('one_replan_exhausted');
+  const currentWork = current.strategy?.work;
+  if (!Array.isArray(currentWork) || !currentWork.some(work => work?.id === failure.work_id) || completed.includes(failure.work_id)) return finish('replan_evidence_mismatch');
   const { plan, strategy } = replacementParts(replacement);
   if (!strategy || !Array.isArray(strategy.work)) return finish('replacement_invalid');
+  if (plan?.status !== 'planned' || plan?.dispatch_eligible !== true || plan?.strategy_id !== strategyId) return finish('replan_evidence_mismatch');
+  if (strategy.contract_version !== STRATEGY_CONTRACT_VERSION || !validHardContract(strategy)) return finish('replacement_not_safe');
+  if (!validResourceContract(strategy)) return finish('replacement_invalid');
+  if (!withinResourceBounds(strategy)) return finish('replacement_over_bound');
   const replacementIds = new Set();
   for (const work of strategy.work) {
     if (!work || !validId(work.id) || replacementIds.has(work.id)) return finish('replacement_invalid');
     replacementIds.add(work.id);
     if (STRATEGY_HARD_FIELDS.some(field => work[field] === false)) return finish('replacement_not_safe');
   }
-  if (plan?.strategy_id && plan.strategy_id !== strategyId) return finish('replan_evidence_mismatch');
   const limits = bounds ?? current.strategy?.resource_limits;
   const cost = strategy.cost;
   if (cost && limits && STRATEGY_COST_LIMITS.some(([costField, limitField]) => !finiteBounded(cost[costField], 10 ** 12) || !finiteBounded(limits[limitField], 10 ** 12) || cost[costField] > limits[limitField])) return finish('replacement_over_bound');
