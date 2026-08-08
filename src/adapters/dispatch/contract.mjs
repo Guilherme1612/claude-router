@@ -18,6 +18,7 @@
 
 import { realpathSync, statSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import { validateStrategyBounds as validateStrategyBoundsFromStrategy } from '../../orchestrator/strategy.mjs';
 
 export const DISPATCH_CONTRACT_VERSION = 1;
 
@@ -243,6 +244,13 @@ export function validateInvocation(action, adapter) {
   }
 
   return { ok: true };
+}
+
+// Strategy bounds are additive to, and never a replacement for, invocation
+// and pre-dispatch validation. Keeping this seam here makes the ordering
+// inspectable by every runtime adapter.
+export function validateStrategyBounds(action) {
+  return validateStrategyBoundsFromStrategy(action);
 }
 
 // --- TRUST-04: preDispatchGate ----------------------------------------------

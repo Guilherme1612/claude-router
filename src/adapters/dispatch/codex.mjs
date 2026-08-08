@@ -33,10 +33,12 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, preDispatchGate } from './contract.mjs';
+import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, validateStrategyBounds, preDispatchGate } from './contract.mjs';
 import {
   ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
 } from './receipt.mjs';
+import { replanStrategy } from '../../orchestrator/strategy.mjs';
+import { createLeaseStore } from '../../lease/store.mjs';
 
 export const CODEX_DISPATCH_VERSION = 'codex-dispatch/1';
 
@@ -187,6 +189,8 @@ export function createCodexDispatchAdapter({
     if (!action || typeof action !== 'object' || Object.keys(action).length === 0) {
       return recommendationOnly(action, 'empty_action');
     }
+    const strategyGate = validateStrategyBounds(action);
+    if (!strategyGate.ok) return recommendationOnly(action, strategyGate.reason, 'blocked');
     const can = canDispatchImpl(action);
     if (!can.ok) return recommendationOnly(action, can.reason);
 
@@ -271,6 +275,7 @@ export function createCodexDispatchAdapter({
       authority: String(action.authority || ''),
       risk: String(action.risk || ''),
       provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+      ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
     };
     store.publish(invokedReceipt);
 
@@ -294,8 +299,24 @@ export function createCodexDispatchAdapter({
         authority: String(action.authority || ''),
         risk: String(action.risk || ''),
         provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+        ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
       };
       store.publish(completedReceipt);
+      if (state !== 'completed' && action.replan_context) {
+        const lease = action.lease_id ? createLeaseStore({ runtime: 'codex' }).inspect(action.lease_id) : null;
+        const current = action.replan_context.current || action.strategy_plan;
+        const failure = {
+          ...action.replan_context.failure,
+          strategy_id: action.replan_context.failure?.strategy_id || current?.strategy_id,
+          work_id: action.replan_context.failure?.work_id || action.work_id,
+          reason_code: action.replan_context.failure?.reason_code || 'failure',
+        };
+        const replanned = replanStrategy({ current, failure, replacement: action.replan_context.replacement, checkpoints: lease || action.replan_context.checkpoints });
+        const resume = replanned.resume_work?.[0];
+        const followup = { ...completedReceipt, completion_evidence: resume ? { state: 'paused' } : { state: 'blocked', reason_codes: [replanned.reason_code] }, ...(resume ? { strategy_plan: replanned, work_id: resume.id } : {}) };
+        store.publish(followup);
+        if (resume) resumeImpl(followup.receipt_id, adapter);
+      }
     });
 
     return invokedReceipt;
@@ -330,11 +351,26 @@ export function createCodexDispatchAdapter({
       intent: existing.intent,
       authority: existing.authority,
       risk: existing.risk,
+      runtime: existing.invocation_identity?.runtime,
+      args: existing.invocation_identity?.args,
+      strategy_plan: existing.strategy_plan,
+      work_id: existing.work_id,
+      timeout: existing.timeout,
+      retry: existing.retry,
+      output_bounds: existing.output_bounds,
+      completion_contract: existing.completion_contract,
     };
     // Release the idempotency claim so resume can re-spawn with the same key
     // (a controlled continuation, not a duplicate invocation). invokeImpl
     // re-claims the key after spawning, so a subsequent direct invoke() with
     // the same key is still rejected.
+    if (existing.strategy_plan?.replan_count !== undefined && action.lease_id) {
+      const leaseStore = createLeaseStore({ runtime: 'codex' });
+      const durable = leaseStore.inspect(action.lease_id);
+      if (!durable) return existing;
+      const claim = leaseStore.claimCheckpoint(action.lease_id, action.idempotency_key);
+      if (claim.claimed !== true) return existing;
+    }
     releaseIdempotency(action.idempotency_key);
     return invokeImpl(action, adapter);
   }

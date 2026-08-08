@@ -131,6 +131,92 @@ function candidateList(tasks, candidates, bounds, evidence) {
   return { evaluated };
 }
 
+const STRATEGY_HARD_FIELDS = ['safe', 'correct', 'quality', 'fit', 'available', 'in_scope'];
+const STRATEGY_COST_LIMITS = [
+  ['expected_time_ms', 'max_time_ms'], ['expected_tokens', 'max_tokens'], ['calls', 'max_calls'],
+  ['retries', 'max_retries'], ['failures', 'max_failures'], ['coordination_cost', 'max_coordination_cost'],
+];
+
+function strategyParts(action) {
+  const plan = action?.strategy_plan ?? action?.plan ?? action;
+  const strategy = plan?.strategy ?? plan;
+  return { plan, strategy };
+}
+
+/** Validate the optional strategy contract at the dispatch boundary. */
+export function validateStrategyBounds(action = {}) {
+  const hasPlan = action?.strategy !== undefined || action?.strategy_plan !== undefined || action?.plan !== undefined;
+  if (!hasPlan) return { ok: true };
+  const { plan, strategy } = strategyParts(action);
+  if (plan?.status === 'blocked' || strategy?.status === 'blocked') return { ok: false, reason: 'strategy_blocked' };
+  if (plan?.dispatch_eligible === false || strategy?.dispatch_eligible === false) return { ok: false, reason: 'strategy_not_dispatch_eligible' };
+  if (action.strategy_id && plan?.strategy_id && action.strategy_id !== plan.strategy_id) return { ok: false, reason: 'strategy_identity_mismatch' };
+  if (action.workflow_id && plan?.workflow_id && action.workflow_id !== plan.workflow_id) return { ok: false, reason: 'strategy_identity_mismatch' };
+  if (action.transition_id && plan?.transition_id && action.transition_id !== plan.transition_id) return { ok: false, reason: 'strategy_identity_mismatch' };
+  if (!strategy || typeof strategy !== 'object' || !Array.isArray(strategy.work)) return { ok: false, reason: 'strategy_work_invalid' };
+  if (strategy.hard_constraints?.passed === false) return { ok: false, reason: 'strategy_constraints_failed' };
+  const workIds = new Set();
+  for (const work of strategy.work) {
+    if (!work || !validId(work.id) || workIds.has(work.id)) return { ok: false, reason: 'strategy_work_invalid' };
+    workIds.add(work.id);
+    if (work.status === 'completed' || work.completed === true) return { ok: false, reason: 'strategy_work_unfinished_required' };
+    if (STRATEGY_HARD_FIELDS.some(field => work[field] === false)) return { ok: false, reason: 'strategy_constraints_failed' };
+  }
+  if (action.work_id && !workIds.has(action.work_id)) return { ok: false, reason: 'strategy_work_unplanned' };
+  const limits = strategy.resource_limits;
+  const cost = strategy.cost;
+  if (cost && limits) {
+    for (const [costField, limitField] of STRATEGY_COST_LIMITS) {
+      if (!(costField in cost) && !(limitField in limits)) continue;
+      if (!finiteBounded(cost[costField], 10 ** 12) || !finiteBounded(limits[limitField], 10 ** 12)
+        || cost[costField] > limits[limitField]) return { ok: false, reason: 'strategy_resource_bound_exceeded' };
+    }
+  }
+  return { ok: true };
+}
+
+function completedIds(checkpoints) {
+  const values = [checkpoints?.completed_work, checkpoints?.completed_actions, checkpoints?.claimed_actions]
+    .find(value => Array.isArray(value)) || [];
+  return new Set(values.filter(validId));
+}
+
+function replacementParts(replacement) {
+  const plan = replacement?.strategy ?? replacement;
+  return { plan: replacement, strategy: plan?.strategy ?? plan };
+}
+
+/** Allow one evidence-bound, hard-gated transition and return safe unfinished work only. */
+export function replanStrategy({ current, failure, replacement, checkpoints, bounds } = {}) {
+  const completed = [...completedIds(checkpoints)];
+  const finish = (reason_code, facts = {}) => blocked(reason_code, { replan_count: Number.isInteger(current?.replan_count) ? current.replan_count : 0, completed_work: completed, resume_work: [], ...facts });
+  if (!current || current.status !== 'planned' || current.dispatch_eligible !== true) return finish('current_strategy_invalid');
+  const strategyId = current.strategy_id ?? current.strategy?.strategy_id;
+  if (!failure || !validId(strategyId) || failure.strategy_id !== strategyId || !validId(failure.work_id)) return finish(failure?.strategy_id && failure.strategy_id !== strategyId ? 'replan_evidence_mismatch' : 'replan_evidence_missing');
+  if (!['resource_exhausted', 'repeated_failure', 'failure'].includes(failure.reason_code)) return finish('replan_evidence_missing');
+  if (!Number.isInteger(current.replan_count)) return finish('replan_count_invalid');
+  if (current.replan_count !== 0) return finish('one_replan_exhausted');
+  const { plan, strategy } = replacementParts(replacement);
+  if (!strategy || !Array.isArray(strategy.work)) return finish('replacement_invalid');
+  const replacementIds = new Set();
+  for (const work of strategy.work) {
+    if (!work || !validId(work.id) || replacementIds.has(work.id)) return finish('replacement_invalid');
+    replacementIds.add(work.id);
+    if (STRATEGY_HARD_FIELDS.some(field => work[field] === false)) return finish('replacement_not_safe');
+  }
+  if (plan?.strategy_id && plan.strategy_id !== strategyId) return finish('replan_evidence_mismatch');
+  const limits = bounds ?? current.strategy?.resource_limits;
+  const cost = strategy.cost;
+  if (cost && limits && STRATEGY_COST_LIMITS.some(([costField, limitField]) => !finiteBounded(cost[costField], 10 ** 12) || !finiteBounded(limits[limitField], 10 ** 12) || cost[costField] > limits[limitField])) return finish('replacement_over_bound');
+  const resume = strategy.work.filter(work => !completed.includes(work.id));
+  return {
+    status: 'planned', dispatch_eligible: true, reason_code: 'evidence_backed_replan',
+    strategy_id: strategyId, workflow_id: current.workflow_id, transition_id: current.transition_id,
+    replan_count: 1, completed_work: completed, resume_work: resume,
+    strategy: { ...current.strategy, ...strategy, work: resume },
+  };
+}
+
 export function planStrategy({ workflow, closure, tasks, candidates, bounds: rawBounds, evidence } = {}) {
   const selected = token(workflow);
   if (!selected) return blocked('workflow_not_dispatch_eligible');
@@ -148,7 +234,8 @@ export function planStrategy({ workflow, closure, tasks, candidates, bounds: raw
   const work = facts.tasks.map(task => ({ id: task.id, depends_on: [...task.depends_on] }));
   return {
     status: 'planned', dispatch_eligible: true, reason_code: chosen.kind === 'direct' ? 'direct_proportional_baseline' : 'eligible_strategy_minimum_cost',
-    workflow_id: selected.workflow_id, transition_id: selected.transition_id,
+    workflow_id: selected.workflow_id, transition_id: selected.transition_id, replan_count: 0,
+    strategy_id: `${selected.workflow_id}:${selected.transition_id}:${chosen.id}`,
     strategy: { contract_version: STRATEGY_CONTRACT_VERSION, kind: chosen.kind, child_agents: chosen.child_agents, work, dependencies: work.flatMap(task => task.depends_on.map(depends_on => ({ task_id: task.id, depends_on }))), hard_constraints: chosen.hard_constraints, resource_limits: bounds, measured_facts: facts.tasks.map(({ id, size, verification_need, specialist_value, quality_required, risk }) => ({ id, size, verification_need, specialist_value, quality_required, risk })), cost: chosen.cost, reason_code: chosen.kind === 'direct' ? 'direct_proportional_baseline' : 'eligible_strategy_minimum_cost', candidates: options.evaluated.map(({ id, kind, hard_constraints, cost }) => ({ id, kind, hard_constraints, cost })) },
   };
 }

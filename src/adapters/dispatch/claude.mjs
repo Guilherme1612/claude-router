@@ -31,7 +31,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, preDispatchGate } from './contract.mjs';
+import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, validateStrategyBounds, preDispatchGate } from './contract.mjs';
 import {
   ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
 } from './receipt.mjs';
@@ -42,6 +42,7 @@ import {
   classifyAuthority,
   evaluateAuthorityPolicy,
 } from '../../intent/authority.mjs';
+import { replanStrategy } from '../../orchestrator/strategy.mjs';
 
 export const CLAUDE_DISPATCH_VERSION = 'claude-dispatch/1';
 
@@ -277,6 +278,8 @@ export function createClaudeDispatchAdapter({
     if (!action || typeof action !== 'object' || Object.keys(action).length === 0) {
       return recommendationOnly(action, 'empty_action');
     }
+    const strategyGate = validateStrategyBounds(action);
+    if (!strategyGate.ok) return recommendationOnly(action, strategyGate.reason, 'blocked');
     const can = canDispatchImpl(action);
     if (!can.ok) return recommendationOnly(action, can.reason);
 
@@ -362,6 +365,7 @@ export function createClaudeDispatchAdapter({
       authority: String(action.authority || ''),
       risk: String(action.risk || ''),
       provenance: { adapter: CLAUDE_DISPATCH_VERSION, source_fingerprint: null },
+      ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
     };
     store.publish(invokedReceipt);
 
@@ -385,8 +389,27 @@ export function createClaudeDispatchAdapter({
         authority: String(action.authority || ''),
         risk: String(action.risk || ''),
         provenance: { adapter: CLAUDE_DISPATCH_VERSION, source_fingerprint: null },
+        ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
       };
       store.publish(completedReceipt);
+      if (state !== 'completed' && action.replan_context) {
+        const leaseStore = getLeaseStore();
+        const checkpoints = leaseStore && action.lease_id
+          ? leaseStore.inspect(action.lease_id)
+          : action.replan_context.checkpoints;
+        const current = action.replan_context.current || action.strategy_plan;
+        const failure = {
+          ...action.replan_context.failure,
+          strategy_id: action.replan_context.failure?.strategy_id || current?.strategy_id,
+          work_id: action.replan_context.failure?.work_id || action.work_id,
+          reason_code: action.replan_context.failure?.reason_code || 'failure',
+        };
+        const replanned = replanStrategy({ current, failure, replacement: action.replan_context.replacement, checkpoints });
+        const resume = replanned.resume_work?.[0];
+        const followup = { ...completedReceipt, completion_evidence: resume ? { state: 'paused' } : { state: 'blocked', reason_codes: [replanned.reason_code] }, ...(resume ? { strategy_plan: replanned, work_id: resume.id } : {}) };
+        store.publish(followup);
+        if (resume) resumeImpl(followup.receipt_id, adapter);
+      }
     });
 
     return invokedReceipt;
@@ -421,6 +444,14 @@ export function createClaudeDispatchAdapter({
       intent: existing.intent,
       authority: existing.authority,
       risk: existing.risk,
+      runtime: existing.invocation_identity?.runtime,
+      args: existing.invocation_identity?.args,
+      strategy_plan: existing.strategy_plan,
+      work_id: existing.work_id,
+      timeout: existing.timeout,
+      retry: existing.retry,
+      output_bounds: existing.output_bounds,
+      completion_contract: existing.completion_contract,
     };
     // LEASE-05: durable checkpoint claim. The on-lease claimCheckpoint is the
     // AUTHORITATIVE at-most-once gate — it survives compaction/restart (the
