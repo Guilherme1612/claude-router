@@ -19,9 +19,16 @@ export const SUBSTITUTION_REASONS = Object.freeze([
   'ambiguous_substitute',
   'no_compatible_substitute',
   'substitution_permissions_expanded',
+  'substitution_permissions_unknown',
   'substitution_risk_escalation',
+  'substitution_risk_unknown',
   'substitution_reversibility_escalation',
+  'substitution_reversibility_unknown',
   'substitution_scope_expansion',
+  'substitution_side_effects_expanded',
+  'substitution_side_effects_unknown',
+  'substitution_invocation_kind_changed',
+  'substitution_invocation_kind_unknown',
   'substitution_within_bounds',
 ]);
 
