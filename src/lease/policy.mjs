@@ -143,7 +143,7 @@ export function resolveLeaseAuthority({ projectFingerprint, leaseStore, now = Da
     if (leaseStore.isExpired(lease, now)) {
       return { authGranted: false, source: 'lease:expired', reason_code: 'expired' };
     }
-    if (lease.freshness_evidence && lease.freshness_evidence.fingerprint_match === false) {
+    if (!lease.freshness_evidence || lease.freshness_evidence.fingerprint_match !== true) {
       return { authGranted: false, source: 'lease:foreign', reason_code: 'fingerprint_mismatch' };
     }
     return {
