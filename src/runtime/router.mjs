@@ -2054,8 +2054,15 @@ function formatBriefingBlock(briefing, sigHash = '') {
   const leaseId = briefing.lease_id || '';
   const evidence = briefing.evidence || {};
   const receiptId = evidence.receipt_id || '';
+  // WR-03: sanitize receipt_id before interpolating into the sentinel-wrapped
+  // additionalContext block. Reject control chars, the router sentinel, and
+  // anything outside a short safe charset (length <= 128).
+  const safeReceiptId = typeof receiptId === 'string'
+    && /^[A-Za-z0-9._:@/+ -]{0,128}$/.test(receiptId)
+    && !receiptId.includes('router-inject')
+    ? receiptId : '';
   const open = `<!-- router-inject mode= tier= sig=${sigHash} -->`;
-  const body = `continuity: resuming lease ${leaseId}${receiptId ? `; last checkpoint ${receiptId}` : ''} (inspect: router-control leases show ${leaseId}).`;
+  const body = `continuity: resuming lease ${leaseId}${safeReceiptId ? `; last checkpoint ${safeReceiptId}` : ''} (inspect: router-control leases show ${leaseId}).`;
   const close = `<!-- /router-inject -->`;
   return `${open}\n${body}\n${close}`;
 }
