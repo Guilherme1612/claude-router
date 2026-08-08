@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import * as control from '../src/cli/router-control.mjs';
 import { assembleRegistry } from '../src/registry/build.mjs';
-import { buildCapabilityContract } from '../src/registry/contract.mjs';
+import { buildCapabilityContract, CONTRACT_FIELDS } from '../src/registry/contract.mjs';
 import { stableStringify } from '../src/registry/schema.mjs';
 import { buildClaudeHeavyProfile, contractEvidence } from './helpers/inventory-fixture.mjs';
 
@@ -169,6 +169,39 @@ test('[phase22-red:inspection] assembly preserves safe inspection state in the c
   assert.deepEqual(built.registry.relationships, built.relationships);
   assert.deepEqual(built.registry.rejected_overlays, built.overlays.rejected);
   assert.equal(built.registry.rejected_overlays[0].reason_code, 'overlay_id_unsafe');
+});
+
+test('[phase41:trust] contract detail projects evidence_class and new fields for every CONTRACT_FIELDS entry', () => {
+  const source = buildClaudeHeavyProfile()[0];
+  const contract = buildCapabilityContract(source, contractEvidence(source));
+  const rec = {
+    stable_id: 'router/atlas',
+    contract,
+    eligibility: {
+      schema_version: 1,
+      policy_version: 'eligibility-policy-v1',
+      eligible: true,
+      recommendation_only: false,
+      gates: {},
+      reason_codes: ['eligibility_all_gates_passed'],
+    },
+  };
+  const detail = control.contractDetailProjection(rec);
+  assert.deepEqual(Object.keys(detail.fields).sort(), [...CONTRACT_FIELDS].sort());
+  for (const [field, value] of Object.entries(detail.fields)) {
+    assert.ok(
+      ['explicit', 'inferred', 'conflicting', 'unknown'].includes(value.evidence_class),
+      `${field} has valid evidence_class`,
+    );
+  }
+  for (const field of ['action', 'cost', 'completion', 'native_invocation']) {
+    assert.ok(field in detail.fields, `${field} projected`);
+  }
+  for (const value of Object.values(detail.fields)) {
+    for (const item of [...value.evidence, ...value.rejected_evidence]) {
+      assert.equal('value' in item, false, 'evidence item must not expose raw value');
+    }
+  }
 });
 
 function escapeRegExp(value) {
