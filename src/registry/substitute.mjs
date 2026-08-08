@@ -26,7 +26,7 @@ export const SUBSTITUTION_REASONS = Object.freeze([
 ]);
 
 const RISK_ORDER = ['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable'];
-const REVERSIBILITY_ORDER = ['unknown', 'reversible', 'irreversible'];
+const REVERSIBILITY_ORDER = ['reversible', 'unknown', 'irreversible'];
 const SUBSTITUTE_EDGE_TYPES = new Set(['substitute', 'fallback']);
 
 function field(record, name) {

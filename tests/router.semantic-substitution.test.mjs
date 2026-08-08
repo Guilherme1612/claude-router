@@ -179,6 +179,24 @@ test('[42-red:semantic-substitution] substitute with less-safe reversibility tha
   assert.equal(result.reason_code, 'no_compatible_substitute');
 });
 
+test('[42-red:semantic-substitution] unknown-reversibility substitute for reversible original is not selected (bound violation)', async () => {
+  const { resolveSubstitution } = await substituteModule;
+  const original = safeRecord();
+  // original reversibility is 'reversible' (set in safeRecord). Substitute with
+  // 'unknown' reversibility must NOT pass bounds: 'reversible' is safest, and an
+  // unverified-unknown substitute cannot stand in for a known-reversible original.
+  const sub = withField(substituteRecord(original), 'reversibility', { state: 'known', value: 'unknown' });
+  const originalId = stableCapabilityId(original);
+  const subId = stableCapabilityId(sub);
+  const result = resolveSubstitution({
+    failedRecord: original,
+    records: [original, sub],
+    relationships: graph([edge('substitute', originalId, subId)]),
+  });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason_code, 'no_compatible_substitute');
+});
+
 test('[42-red:semantic-substitution] both routes retained as stableCapabilityId strings', async () => {
   const { resolveSubstitution } = await substituteModule;
   const original = safeRecord();
