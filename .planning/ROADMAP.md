@@ -19,7 +19,7 @@ v1.6 extends the verified deterministic Router into a guarded control plane. Wor
 - [x] **Phase 38: Cross-Runtime Native Feasibility** - Prove truthful native dispatch, observation, protected-effect pause, startup delivery, and performance in Claude and Codex. (completed 2026-08-06)
 - [x] **Phase 39: Intent, Authority, Risk, and Invocation Policy** - Separate what the operator means, permits, and must confirm before any general execution. (completed 2026-08-07)
 - [x] **Phase 40: Project Identity, Leases, Continuity, and Safe Resume** - Persist narrowly scoped authority and resume valid unfinished work exactly once. (completed 2026-08-08)
-- [ ] **Phase 41: Manifest vNext and Trust Hardening** - Make untrusted capability metadata and typed invocation contracts safe to inspect and ineligible by default.
+- [x] **Phase 41: Manifest vNext and Trust Hardening** - Make untrusted capability metadata and typed invocation contracts safe to inspect and ineligible by default. (completed 2026-08-08)
 - [ ] **Phase 42: Semantic Graph and Safe Composition** - Resolve unfamiliar installed capabilities and substitutions through validated semantic relationships.
 - [ ] **Phase 43: Proportional Planning and Production Dispatch** - Choose the least costly reliable strategy and dispatch it within exact safety, scope, and resource bounds.
 - [ ] **Phase 44: Receipts and Causal Attribution** - Preserve every route and actual invocation through a causally justified terminal outcome.
@@ -117,24 +117,25 @@ Plans:
   4. Dependency, permission/effect, timeout, retry, output, and completion contracts are validated before dispatch.
   5. Invalid, ambiguous, stale, unavailable, injection-bearing, or scope-escaping capabilities are blocked or quarantined with reasons while independent valid fallbacks stay eligible.
 
-**Plans**: 3 plans
+**Plans**: 3/3 plans executed
 
 Plans:
-- [ ] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
-- [ ] 41-02-PLAN.md — TRUST-03 validateInvocation typed-args + entrypoint/containment/cwd/wrapper/quoting/target/runtime-scope + TRUST-04 preDispatchGate dependency/permission/timeout/retry/output/completion
-- [ ] 41-03-PLAN.md — TRUST-05 per-capability quarantine disposition + fallback eligibility + RECEIPT_STATES extension
+
+- [x] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
+- [x] 41-02-PLAN.md — TRUST-03 validateInvocation typed-args + entrypoint/containment/cwd/wrapper/quoting/target/runtime-scope + TRUST-04 preDispatchGate dependency/permission/timeout/retry/output/completion
+- [x] 41-03-PLAN.md — TRUST-05 per-capability quarantine disposition + fallback eligibility + RECEIPT_STATES extension
 
 **Wave 1**
 
-- [ ] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
+- [x] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 41-02-PLAN.md — TRUST-03 validateInvocation + TRUST-04 preDispatchGate (dispatch trust gates)
+- [x] 41-02-PLAN.md — TRUST-03 validateInvocation + TRUST-04 preDispatchGate (dispatch trust gates)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 41-03-PLAN.md — TRUST-05 quarantine disposition + fallback eligibility + RECEIPT_STATES
+- [x] 41-03-PLAN.md — TRUST-05 quarantine disposition + fallback eligibility + RECEIPT_STATES
 
 ### Phase 42: Semantic Graph and Safe Composition
 
@@ -148,7 +149,15 @@ Plans:
   3. Ambiguous ties, native-identity collisions, stale targets, missing dependencies, incompatible outputs, unsafe compositions, and unresolvable contracts fail strict compilation before activation.
   4. A failed route substitutes only to a contract-compatible candidate inside unchanged authority, risk, scope, and resource bounds, with both routes retained for attribution.
 
-**Plans**: TBD
+**Plans**: 2 plans
+
+**Wave 1**
+
+- [ ] 42-01-PLAN.md — SEM-01 semantic outcome resolver + SEM-03 strict compilation gate (build-time path)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 42-02-PLAN.md — SEM-04 contract-compatible substitution resolver + SEM-02 semantic inspection projection
 
 ### Phase 43: Proportional Planning and Production Dispatch
 
@@ -216,7 +225,7 @@ Plans:
 | 38. Cross-Runtime Native Feasibility | v1.6 | 3/3 | Complete    | 2026-08-06 |
 | 39. Intent, Authority, Risk, and Invocation Policy | v1.6 | 2/2 | Complete    | 2026-08-07 |
 | 40. Project Identity, Leases, Continuity, and Safe Resume | v1.6 | 3/3 | Complete    | 2026-08-08 |
-| 41. Manifest vNext and Trust Hardening | v1.6 | 0/3 | Not started | - |
+| 41. Manifest vNext and Trust Hardening | v1.6 | 3/3 | Complete    | 2026-08-08 |
 | 42. Semantic Graph and Safe Composition | v1.6 | 0/TBD | Not started | - |
 | 43. Proportional Planning and Production Dispatch | v1.6 | 0/TBD | Not started | - |
 | 44. Receipts and Causal Attribution | v1.6 | 0/TBD | Not started | - |
