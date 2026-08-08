@@ -154,3 +154,65 @@ test('[42-red:semantic-compilation] rejects unresolvable contract — dispatch-c
   assert.equal(result.compiled, false);
   assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_unresolvable_contract')));
 });
+
+test('[42:semantic-compilation] rejects ambiguous ties — identical outputs/inputs, no variant/conflict edge', async () => {
+  const { compileRelationshipGraph } = await relationshipsModule;
+  const alpha = contractRecord('alpha',
+    { canonical_identity: 'router/alpha', native_type: 'claude:skill' },
+    { outputs: ['text'], inputs: ['prompt'] },
+  );
+  const beta = contractRecord('beta',
+    { canonical_identity: 'router/beta', native_type: 'claude:tool', semantic_type: 'tool' },
+    { outputs: ['text'], inputs: ['prompt'] },
+  );
+  const result = compileRelationshipGraph({
+    records: [alpha, beta],
+    relationships: graph(),
+  });
+  assert.equal(result.compiled, false);
+  assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_ambiguous_tie')));
+});
+
+test('[42:semantic-compilation] rejects unsafe compositions — target risk exceeds source risk', async () => {
+  const { compileRelationshipGraph } = await relationshipsModule;
+  const alpha = contractRecord('alpha',
+    { canonical_identity: 'router/alpha', native_type: 'claude:skill' },
+    { outputs: ['text'], risk: 'low' },
+  );
+  const beta = contractRecord('beta',
+    { canonical_identity: 'router/beta', native_type: 'claude:tool', semantic_type: 'tool' },
+    { inputs: ['text'], risk: 'high' },
+  );
+  const compEdge = activeEdge('composition', stableCapabilityId(alpha), stableCapabilityId(beta));
+  const result = compileRelationshipGraph({
+    records: [alpha, beta],
+    relationships: graph([compEdge]),
+  });
+  assert.equal(result.compiled, false);
+  assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_unsafe_composition')));
+});
+
+test('[42:semantic-compilation] rejects stale targets — edge with freshness stale', async () => {
+  const { compileRelationshipGraph } = await relationshipsModule;
+  const alpha = simpleRecord('alpha', { native_type: 'claude:skill' });
+  const beta = simpleRecord('beta', { native_type: 'claude:tool', semantic_type: 'tool' });
+  const staleEdge = activeEdge('alias', stableCapabilityId(alpha), stableCapabilityId(beta), { freshness: 'stale' });
+  const result = compileRelationshipGraph({
+    records: [alpha, beta],
+    relationships: graph([staleEdge]),
+  });
+  assert.equal(result.compiled, false);
+  assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_stale_target')));
+});
+
+test('[42:semantic-compilation] rejects missing dependencies — prerequisite edge target not in records', async () => {
+  const { compileRelationshipGraph } = await relationshipsModule;
+  const alpha = simpleRecord('alpha', { native_type: 'claude:skill' });
+  const missingEdge = activeEdge('prerequisite', stableCapabilityId(alpha), 'router/missing', { freshness: 'fresh' });
+  const result = compileRelationshipGraph({
+    records: [alpha],
+    relationships: graph([missingEdge]),
+  });
+  assert.equal(result.compiled, false);
+  assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_missing_dependency')));
+});

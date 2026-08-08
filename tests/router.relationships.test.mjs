@@ -149,3 +149,15 @@ test('[phase22-red:relationships] endpoint lifecycle invalidates direct and depe
   assert.equal(observed.length, 1);
   assert.equal(observed[0].references.edges.length, 0);
 });
+
+test('[42:compilation] compileRelationshipGraph via deriveRelationships output produces consistent diagnostics', async () => {
+  const { deriveRelationships, compileRelationshipGraph } = await relationshipsModule;
+  const collisionRecords = [
+    record('alpha', { native_type: 'claude:skill' }),
+    record('beta', { native_type: 'claude:skill' }),
+  ];
+  const relationships = deriveRelationships({ records: collisionRecords, candidates: [] });
+  const result = compileRelationshipGraph({ records: collisionRecords, relationships });
+  assert.equal(result.compiled, false);
+  assert.ok(result.diagnostics.some(d => d.reason_codes.includes('compilation_native_collision')));
+});
