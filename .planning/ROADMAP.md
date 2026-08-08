@@ -18,7 +18,7 @@ v1.6 extends the verified deterministic Router into a guarded control plane. Wor
 
 - [x] **Phase 38: Cross-Runtime Native Feasibility** - Prove truthful native dispatch, observation, protected-effect pause, startup delivery, and performance in Claude and Codex. (completed 2026-08-06)
 - [x] **Phase 39: Intent, Authority, Risk, and Invocation Policy** - Separate what the operator means, permits, and must confirm before any general execution. (completed 2026-08-07)
-- [ ] **Phase 40: Project Identity, Leases, Continuity, and Safe Resume** - Persist narrowly scoped authority and resume valid unfinished work exactly once.
+- [x] **Phase 40: Project Identity, Leases, Continuity, and Safe Resume** - Persist narrowly scoped authority and resume valid unfinished work exactly once. (completed 2026-08-08)
 - [ ] **Phase 41: Manifest vNext and Trust Hardening** - Make untrusted capability metadata and typed invocation contracts safe to inspect and ineligible by default.
 - [ ] **Phase 42: Semantic Graph and Safe Composition** - Resolve unfamiliar installed capabilities and substitutions through validated semantic relationships.
 - [ ] **Phase 43: Proportional Planning and Production Dispatch** - Choose the least costly reliable strategy and dispatch it within exact safety, scope, and resource bounds.
@@ -90,7 +90,19 @@ Plans:
   4. Across supported compaction and restart paths, each incomplete action under a valid lease resumes at most once from its durable checkpoint.
   5. First visits remain silent; returning projects receive at most one evidence-backed briefing, and invalid or non-active continuity never auto-runs.
 
-**Plans**: TBD
+**Plans**: 3/3 plans executed
+
+**Wave 1**
+
+- [x] 40-01-PLAN.md — lease identity + durable store + creation gate + 9-field inspection (LEASE-01, LEASE-02, LEASE-03)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 40-02-PLAN.md — lease authority resolution + hot-path revocation precedence (LEASE-04) + durable checkpoint claim + at-most-once resume (LEASE-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 40-03-PLAN.md — continuity briefing (LEASE-06) + dual-runtime lifecycle deploy + router-control leases CLI
 
 ### Phase 41: Manifest vNext and Trust Hardening
 
@@ -105,7 +117,24 @@ Plans:
   4. Dependency, permission/effect, timeout, retry, output, and completion contracts are validated before dispatch.
   5. Invalid, ambiguous, stale, unavailable, injection-bearing, or scope-escaping capabilities are blocked or quarantined with reasons while independent valid fallbacks stay eligible.
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
+- [ ] 41-02-PLAN.md — TRUST-03 validateInvocation typed-args + entrypoint/containment/cwd/wrapper/quoting/target/runtime-scope + TRUST-04 preDispatchGate dependency/permission/timeout/retry/output/completion
+- [ ] 41-03-PLAN.md — TRUST-05 per-capability quarantine disposition + fallback eligibility + RECEIPT_STATES extension
+
+**Wave 1**
+
+- [ ] 41-01-PLAN.md — TRUST-01 contract envelope evidence_class + new fields (tracer) + TRUST-02 untrusted-evidence policy (trust.mjs)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 41-02-PLAN.md — TRUST-03 validateInvocation + TRUST-04 preDispatchGate (dispatch trust gates)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 41-03-PLAN.md — TRUST-05 quarantine disposition + fallback eligibility + RECEIPT_STATES
 
 ### Phase 42: Semantic Graph and Safe Composition
 
@@ -186,8 +215,8 @@ Plans:
 |-------|-----------|----------------|--------|-----------|
 | 38. Cross-Runtime Native Feasibility | v1.6 | 3/3 | Complete    | 2026-08-06 |
 | 39. Intent, Authority, Risk, and Invocation Policy | v1.6 | 2/2 | Complete    | 2026-08-07 |
-| 40. Project Identity, Leases, Continuity, and Safe Resume | v1.6 | 0/TBD | Not started | - |
-| 41. Manifest vNext and Trust Hardening | v1.6 | 0/TBD | Not started | - |
+| 40. Project Identity, Leases, Continuity, and Safe Resume | v1.6 | 3/3 | Complete    | 2026-08-08 |
+| 41. Manifest vNext and Trust Hardening | v1.6 | 0/3 | Not started | - |
 | 42. Semantic Graph and Safe Composition | v1.6 | 0/TBD | Not started | - |
 | 43. Proportional Planning and Production Dispatch | v1.6 | 0/TBD | Not started | - |
 | 44. Receipts and Causal Attribution | v1.6 | 0/TBD | Not started | - |

@@ -3,17 +3,17 @@ gsd_state_version: 1.0
 milestone: v1.6
 milestone_name: Autonomous Control Plane
 current_phase: 40
-current_phase_name: Project Identity, Leases, Continuity, and Safe Resume
-status: planning
-stopped_at: context exhaustion at 77% (2026-08-06)
-last_updated: "2026-08-07T17:09:37.225Z"
+current_phase_name: project-identity-leases-continuity-and-safe-resume
+status: verifying
+stopped_at: context exhaustion at 75% (2026-08-07)
+last_updated: "2026-08-07T19:30:17.705Z"
 last_activity: 2026-08-07
-last_activity_desc: Phase 39 complete, transitioned to Phase 40
+last_activity_desc: Phase 40 execution started
 progress:
   total_phases: 9
-  completed_phases: 2
-  total_plans: 5
-  completed_plans: 5
+  completed_phases: 3
+  total_plans: 8
+  completed_plans: 8
 ---
 
 # Project State
@@ -27,12 +27,12 @@ See: .planning/PROJECT.md (updated 2026-08-07)
 
 ## Current Position
 
-Phase: 40 — Project Identity, Leases, Continuity, and Safe Resume
-Plan: Not started
-Status: Ready to plan
-Last activity: 2026-08-07 — Phase 39 complete, transitioned to Phase 40
+Phase: 40 (project-identity-leases-continuity-and-safe-resume) — EXECUTING
+Plan: 3 of 3
+Status: Phase complete — ready for verification
+Last activity: 2026-08-07 — Phase 40 execution started
 
-Progress: [████████████████████] 5/5 plans (100%)
+Progress: [████████████████████] 5/5 plans ([██████████] 100%)
 
 ## Performance Metrics
 
@@ -64,6 +64,9 @@ Progress: [████████████████████] 5/5 pla
 | Phase 38 P03 | 6min | 2 tasks | 3 files |
 | Phase 39 P01 | 25min | 2 tasks | 5 files |
 | Phase 39 P02 | 30min | 2 tasks | 6 files |
+| Phase 40 P01 | 12min | 3 tasks | 6 files |
+| Phase 40 P02 | 11min | 2 tasks | 6 files |
+| Phase 40 P03 | 21min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -87,6 +90,14 @@ Decisions are logged in PROJECT.md Key Decisions table.
 - [Phase ?]: PROTECTED_EFFECT_TOKENS centralized in authority.mjs as the single source of truth; approval.mjs imports it (AUTH-05)
 - [Phase ?]: authority.mjs loaded via top-level await in router.mjs with fail-open null sentinel; deployed modules/intent/ path searched first, dev src/intent/ second (mirrors resolveDispatchWorkerPath)
 - [Phase ?]: Router never emits decision:'block' on the hot path; block policies produce no hint (fail-open preserved)
+- [Phase ?]: Phase 40 P01: lease store copies durableWrite+mutationLock verbatim from steward/state.mjs (self-contained for deploy, mirrors authority.mjs)
+- [Phase ?]: Phase 40 P01: inspect rebuilds record in 9-field declaration order (stableStringify alphabetizes keys on disk)
+- [Phase ?]: LEASE-04: resolveLeaseAuthority consulted BEFORE authGranted derivation on hot path; revoked lease overrides eligible regardless of confidence (revocation precedence)
+- [Phase ?]: LEASE-05: durable claimCheckpoint on lease record is authoritative at-most-once gate; in-memory _idempotencySeen Set demoted to hot-path fast-path (survives restart)
+- [Phase ?]: evaluateAuthorityPolicy signature unchanged — lease feeds authority.authGranted + authority.source as INPUT, not part of the sealed evaluator (AUTH-03 invariant preserved)
+- [Phase ?]: LEASE-06 briefing: INVALID set (8 frozen statuses) maps each invalid state to a distinct internal briefing_status but all return null; first-visit silent via findByFingerprint null
+- [Phase ?]: Lease modules deploy via existing moduleValues flatMap over [ownedRoot, codexOwnedRoot] — no custom deploy path (T-39-03 regression backstop)
+- [Phase ?]: router-control leases CLI roots store at join(ownedRoot,'leases') matching defaultLeaseRoot layout; operator-only, not hot-path
 
 ### Pending Todos
 
@@ -107,8 +118,8 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-08-07
-Stopped at: Phase 39 complete, transitioned to Phase 40 (recovered from 2026-08-06 context exhaustion at 77% — phase 39 verification had passed but transition close-out was uncommitted)
+Last session: 2026-08-07T19:30:17.687Z
+Stopped at: context exhaustion at 75% (2026-08-07)
 Resume file: None
 
 ## Operator Next Steps
