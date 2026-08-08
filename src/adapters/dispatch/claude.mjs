@@ -31,7 +31,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation } from './contract.mjs';
+import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, preDispatchGate } from './contract.mjs';
 import {
   ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
 } from './receipt.mjs';
@@ -284,6 +284,11 @@ export function createClaudeDispatchAdapter({
     // quoting, destructive targets, runtime scope before spawn.
     const inv = validateInvocation(action, adapter);
     if (!inv.ok) return recommendationOnly(action, inv.reason, 'blocked');
+
+    // TRUST-04: preDispatchGate — timeout, retry, output bounds, completion
+    // contract, dependency availability, permission/effect before spawn.
+    const gate = preDispatchGate(action, adapter);
+    if (!gate.ok) return recommendationOnly(action, gate.reason, 'blocked');
 
     const idempotencyKey = String(action.idempotency_key || '');
     if (idempotencyKey && !claimIdempotency(idempotencyKey)) {

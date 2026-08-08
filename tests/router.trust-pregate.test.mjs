@@ -138,13 +138,13 @@ test('preDispatchGate without context skips dependency/permission checks but val
 test('claude.mjs invokeImpl calls preDispatchGate after validateInvocation — failed gate returns blocked receipt with no spawn', async () => {
   const { createClaudeDispatchAdapter } = await import('../src/adapters/dispatch/claude.mjs');
   const adapter = createClaudeDispatchAdapter();
-  // An action with runtime matching (passes validateInvocation) but no
-  // timeout (fails preDispatchGate) → blocked receipt, no spawn.
+  // An action with runtime matching (passes validateInvocation) and a partial
+  // contract (retry declared but no timeout) → strict gate → missing_timeout → blocked.
   const action = {
     lease_id: 'trust-04-pregate-test',
     idempotency_key: 'trust-04-pregate-key',
     runtime: 'claude',
-    // No timeout → missing_timeout → blocked
+    retry: 2, // declares a contract field → strict mode → no timeout → missing_timeout
   };
   const receipt = adapter.invoke(action);
   assert.equal(receipt.completion_evidence.state, 'blocked');

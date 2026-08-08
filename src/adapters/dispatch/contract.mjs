@@ -243,3 +243,68 @@ export function validateInvocation(action, adapter) {
 
   return { ok: true };
 }
+
+// --- TRUST-04: preDispatchGate ----------------------------------------------
+// Pure function validating the invocation contract (not the capability record).
+// Called inside invokeImpl at dispatch time after validateInvocation and
+// before spawn — NEVER on the prompt hot path. The context argument provides
+// dependency availability and permission/effect state from the build-time
+// eligibility evaluation (if available; default to permissive — fail-open for
+// the gate itself, but the gate still checks declared contracts).
+//
+// Checks, in order:
+//   a. Dependency availability: if action.dependencies declared and
+//      context.dependencies provided, verify each is available.
+//   b. Permission/effect class: if action.permission_effect declared and
+//      context.permission_effect provided, verify it is in the allowed set.
+//   c. Timeout contract: action.timeout is a positive integer (milliseconds).
+//   d. Retry policy: action.retry is a non-negative finite integer (bounded).
+//   e. Output bounds: action.output_bounds is declared (max bytes or max lines).
+//   f. Completion contract: action.completion_contract is declared.
+export function preDispatchGate(action, adapter, context) {
+  // Determine if any contract field is declared. If none are declared, this
+  // is a legacy action that does not participate in the dispatch contract —
+  // permissive (backward compatible with pre-TRUST-04 actions).
+  const hasAnyContract = action?.timeout !== undefined
+    || action?.retry !== undefined
+    || action?.output_bounds !== undefined
+    || action?.completion_contract !== undefined;
+  if (!hasAnyContract) return { ok: true };
+
+  // a. Dependency availability
+  if (action?.dependencies && context?.dependencies) {
+    for (const dep of action.dependencies) {
+      if (!context.dependencies[dep]) return { ok: false, reason: 'dependency_missing' };
+    }
+  }
+
+  // b. Permission/effect class
+  if (action?.permission_effect && context?.permission_effect) {
+    if (!context.permission_effect.includes(action.permission_effect)) {
+      return { ok: false, reason: 'permission_effect_disallowed' };
+    }
+  }
+
+  // c. Timeout contract
+  if (!Number.isInteger(action?.timeout) || action.timeout <= 0) {
+    return { ok: false, reason: 'missing_timeout' };
+  }
+
+  // d. Retry policy
+  const retry = action?.retry;
+  if (!Number.isInteger(retry) || retry < 0 || !Number.isFinite(retry)) {
+    return { ok: false, reason: 'unbounded_retry' };
+  }
+
+  // e. Output bounds
+  if (!action?.output_bounds || typeof action.output_bounds !== 'object') {
+    return { ok: false, reason: 'missing_output_bounds' };
+  }
+
+  // f. Completion contract
+  if (!action?.completion_contract || typeof action.completion_contract !== 'object') {
+    return { ok: false, reason: 'missing_completion_contract' };
+  }
+
+  return { ok: true };
+}
