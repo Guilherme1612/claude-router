@@ -214,11 +214,15 @@ export function compileRelationshipGraph({ records = [], relationships = {} } = 
   const edges = Array.isArray(relationships?.edges) ? relationships.edges : [];
   const diagnostics = [];
 
-  // Build variant edge pair set for collision exemption.
+  // Build variant/conflict edge pair set for collision and ambiguous-tie exemption.
   const variantPairs = new Set();
+  const conflictPairs = new Set();
   for (const edge of edges) {
     if (edge?.type === 'variant' && edge.source_id && edge.target_id) {
       variantPairs.add(variantPairKey(edge.source_id, edge.target_id));
+    }
+    if (edge?.type === 'conflict' && edge.source_id && edge.target_id) {
+      conflictPairs.add(variantPairKey(edge.source_id, edge.target_id));
     }
   }
 
@@ -238,6 +242,32 @@ export function compileRelationshipGraph({ records = [], relationships = {} } = 
         diagnostics.push({
           subject_ids: [ids[i], ids[j]].sort(),
           reason_codes: ['compilation_native_collision'],
+        });
+      }
+    }
+  }
+
+  // Ambiguous ties: identical outputs/inputs contract values, no variant/conflict edge.
+  const RISK_ORDER = ['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable'];
+  const fitGroups = new Map();
+  for (const [id, record] of recordsById) {
+    if (record?.contract?.disposition !== 'dispatch-candidate') continue;
+    const outputs = compilationField(record, 'outputs');
+    const inputs = compilationField(record, 'inputs');
+    if (!outputs || outputs.state !== 'known' || !inputs || inputs.state !== 'known') continue;
+    const fitKey = stableStringify([outputs.value, inputs.value]);
+    if (!fitGroups.has(fitKey)) fitGroups.set(fitKey, []);
+    fitGroups.get(fitKey).push(id);
+  }
+  for (const ids of fitGroups.values()) {
+    if (ids.length < 2) continue;
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        const pairKey = variantPairKey(ids[i], ids[j]);
+        if (variantPairs.has(pairKey) || conflictPairs.has(pairKey)) continue;
+        diagnostics.push({
+          subject_ids: [ids[i], ids[j]].sort(),
+          reason_codes: ['compilation_ambiguous_tie'],
         });
       }
     }
@@ -284,6 +314,29 @@ export function compileRelationshipGraph({ records = [], relationships = {} } = 
         reason_codes: ['compilation_incompatible_output'],
       });
     }
+    // Unsafe composition: target risk exceeds source risk, or target permissions not subset of source.
+    const sourceRisk = compilationField(source, 'risk');
+    const targetRisk = compilationField(target, 'risk');
+    const sourceRiskLevel = sourceRisk?.state === 'known' ? RISK_ORDER.indexOf(sourceRisk.value) : 0;
+    const targetRiskLevel = targetRisk?.state === 'known' ? RISK_ORDER.indexOf(targetRisk.value) : 0;
+    if (targetRiskLevel > sourceRiskLevel) {
+      diagnostics.push({
+        subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+        reason_codes: ['compilation_unsafe_composition'],
+      });
+    }
+    const sourcePerms = compilationField(source, 'permissions');
+    const targetPerms = compilationField(target, 'permissions');
+    if (sourcePerms?.state === 'known' && targetPerms?.state === 'known') {
+      const sourcePermSet = new Set(Array.isArray(sourcePerms.value) ? sourcePerms.value : []);
+      const targetPermArr = Array.isArray(targetPerms.value) ? targetPerms.value : [];
+      if (targetPermArr.some(perm => !sourcePermSet.has(perm))) {
+        diagnostics.push({
+          subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+          reason_codes: ['compilation_unsafe_composition'],
+        });
+      }
+    }
   }
 
   // Unresolvable contracts: dispatch-candidate with unknown DISPATCH_FIELDS field.
@@ -303,12 +356,13 @@ export function compileRelationshipGraph({ records = [], relationships = {} } = 
     }
   }
 
-  const reasonCodes = [...new Set(diagnostics.flatMap(d => d.reason_codes))].sort();
+  const sortedDiagnostics = sorted(diagnostics);
+  const reasonCodes = [...new Set(sortedDiagnostics.flatMap(d => d.reason_codes))].sort();
   return {
     schema_version: 1,
     policy_version: 'compilation-rules-v1',
-    diagnostics,
-    compiled: diagnostics.length === 0,
+    diagnostics: sortedDiagnostics,
+    compiled: sortedDiagnostics.length === 0,
     reason_codes: reasonCodes,
   };
 }
