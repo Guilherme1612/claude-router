@@ -11,7 +11,7 @@ import {
   validateCapabilityContract,
 } from './contract.mjs';
 import { evaluateEligibility } from './eligibility.mjs';
-import { deriveRelationships } from './relationships.mjs';
+import { compileRelationshipGraph, deriveRelationships } from './relationships.mjs';
 
 function key(value) {
   return stableStringify(value);
@@ -343,6 +343,7 @@ export function assembleRegistry(acquisition, options = {}) {
     records: overlaidRecords,
     candidates: options.relationshipCandidates,
   });
+  const compilation = compileRelationshipGraph({ records: overlaidRecords, relationships });
   const enrichedRecords = overlaidRecords.map(record => {
     const {
       eligibility: _authoredEligibility,
@@ -364,6 +365,7 @@ export function assembleRegistry(acquisition, options = {}) {
     records: enrichedRecords,
     ...((relationships.edges.length || relationships.candidates.length) ? { relationships } : {}),
     ...(overlayResolution?.rejected.length ? { rejected_overlays: overlayResolution.rejected } : {}),
+    ...(compilation.diagnostics.length ? { compilation } : {}),
   };
   const summary = {
     schema_version: 1, activated: false, record_count: enrichedRecords.length, diagnostic_count: diagnostics.length,

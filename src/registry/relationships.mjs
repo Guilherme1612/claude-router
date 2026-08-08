@@ -3,6 +3,23 @@ import { stableStringify } from './schema.mjs';
 
 const MAX_EDGES = 128;
 const MAX_EVIDENCE = 32;
+
+const COMPILATION_DISPATCH_FIELDS = new Set([
+  'inputs', 'preconditions', 'dependencies', 'permissions',
+  'side_effects', 'reversibility', 'risk', 'invocation_kind',
+  'scope', 'workflow_transitions', 'action', 'cost', 'completion',
+  'native_invocation',
+]);
+
+export const COMPILATION_REASONS = Object.freeze([
+  'compilation_ambiguous_tie',
+  'compilation_incompatible_output',
+  'compilation_missing_dependency',
+  'compilation_native_collision',
+  'compilation_stale_target',
+  'compilation_unsafe_composition',
+  'compilation_unresolvable_contract',
+]);
 const MIN_CONFIDENCE = 8500;
 const RULES = Object.freeze({
   substitute: 'explicit-substitution',
@@ -175,4 +192,123 @@ export function relationshipReferences(graph, knownEndpointIds = []) {
     }
   }
   return sorted(edges);
+}
+
+function compilationField(record, name) {
+  return record?.contract?.fields?.[name];
+}
+
+function variantPairKey(left, right) {
+  return [left, right].sort().join('\0');
+}
+
+export function compileRelationshipGraph({ records = [], relationships = {} } = {}) {
+  const recordsById = new Map();
+  for (const record of Array.isArray(records) ? records : []) {
+    try {
+      recordsById.set(stableCapabilityId(record), record);
+    } catch {
+      // Invalid records cannot participate in compilation.
+    }
+  }
+  const edges = Array.isArray(relationships?.edges) ? relationships.edges : [];
+  const diagnostics = [];
+
+  // Build variant edge pair set for collision exemption.
+  const variantPairs = new Set();
+  for (const edge of edges) {
+    if (edge?.type === 'variant' && edge.source_id && edge.target_id) {
+      variantPairs.add(variantPairKey(edge.source_id, edge.target_id));
+    }
+  }
+
+  // Native-identity collision: same native_type, different stable id, no variant edge.
+  const nativeGroups = new Map();
+  for (const [id, record] of recordsById) {
+    const nativeType = record?.native_type;
+    if (typeof nativeType !== 'string' || !nativeType) continue;
+    if (!nativeGroups.has(nativeType)) nativeGroups.set(nativeType, []);
+    nativeGroups.get(nativeType).push(id);
+  }
+  for (const ids of nativeGroups.values()) {
+    if (ids.length < 2) continue;
+    for (let i = 0; i < ids.length; i += 1) {
+      for (let j = i + 1; j < ids.length; j += 1) {
+        if (variantPairs.has(variantPairKey(ids[i], ids[j]))) continue;
+        diagnostics.push({
+          subject_ids: [ids[i], ids[j]].sort(),
+          reason_codes: ['compilation_native_collision'],
+        });
+      }
+    }
+  }
+
+  // Stale targets and missing dependencies.
+  for (const edge of edges) {
+    if (!edge || typeof edge !== 'object') continue;
+    if (edge.freshness === 'stale') {
+      diagnostics.push({
+        subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+        reason_codes: ['compilation_stale_target'],
+      });
+    }
+    if (edge.type === 'prerequisite' && edge.target_id && !recordsById.has(edge.target_id)) {
+      diagnostics.push({
+        subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+        reason_codes: ['compilation_missing_dependency'],
+      });
+    }
+  }
+
+  // Composition I/O compatibility.
+  for (const edge of edges) {
+    if (!edge || edge.type !== 'composition') continue;
+    const source = recordsById.get(edge.source_id);
+    const target = recordsById.get(edge.target_id);
+    if (!source || !target) continue;
+    const sourceOutputs = compilationField(source, 'outputs');
+    const targetInputs = compilationField(target, 'inputs');
+    if (!sourceOutputs || sourceOutputs.state !== 'known' || !targetInputs || targetInputs.state !== 'known') {
+      diagnostics.push({
+        subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+        reason_codes: ['compilation_unresolvable_contract'],
+      });
+      continue;
+    }
+    const outputs = Array.isArray(sourceOutputs.value) ? sourceOutputs.value : [];
+    const inputs = Array.isArray(targetInputs.value) ? targetInputs.value : [];
+    const intersection = outputs.filter(value => inputs.includes(value));
+    if (intersection.length === 0) {
+      diagnostics.push({
+        subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
+        reason_codes: ['compilation_incompatible_output'],
+      });
+    }
+  }
+
+  // Unresolvable contracts: dispatch-candidate with unknown DISPATCH_FIELDS field.
+  for (const [id, record] of recordsById) {
+    if (record?.contract?.disposition !== 'dispatch-candidate') continue;
+    const fields = record?.contract?.fields;
+    if (!fields) continue;
+    for (const fieldName of COMPILATION_DISPATCH_FIELDS) {
+      const envelope = fields[fieldName];
+      if (!envelope || envelope.state !== 'known') {
+        diagnostics.push({
+          subject_ids: [id],
+          reason_codes: ['compilation_unresolvable_contract'],
+        });
+        break;
+      }
+    }
+  }
+
+  const reasonCodes = [...new Set(diagnostics.flatMap(d => d.reason_codes))].sort();
+  return {
+    schema_version: 1,
+    policy_version: 'compilation-rules-v1',
+    diagnostics,
+    compiled: diagnostics.length === 0,
+    reason_codes: reasonCodes,
+  };
 }

@@ -47,22 +47,17 @@ test('[42-red:semantic-resolution] resolves a record whose outputs match outcome
 
 test('[42-red:semantic-resolution] filters out records with disposition recommendation-only', async () => {
   const { resolveSemanticOutcome } = await semanticModule;
-  const evidence = contractEvidence({
-    ...buildClaudeHeavyProfile()[0],
-    name: 'alpha',
-    canonical_identity: 'router/alpha',
-    dependencies: { state: 'declared', items: [] },
-  });
-  evidence.reversibility[0].value = 'reversible';
-  evidence.risk[0].value = 'low';
-  evidence.outputs[0].value = ['text'];
-  delete evidence.permissions;
   const base = {
     ...buildClaudeHeavyProfile()[0],
     name: 'alpha',
     canonical_identity: 'router/alpha',
     dependencies: { state: 'declared', items: [] },
   };
+  const evidence = contractEvidence(base);
+  evidence.reversibility[0].value = 'reversible';
+  evidence.risk[0].value = 'low';
+  evidence.outputs[0].value = ['text'];
+  evidence.permissions[0].freshness = 'stale';
   const record = { ...base, contract: buildCapabilityContract(base, evidence) };
   assert.equal(record.contract.disposition, 'recommendation-only');
   const result = resolveSemanticOutcome({
@@ -77,7 +72,7 @@ test('[42-red:semantic-resolution] filters out records with disposition recommen
 test('[42-red:semantic-resolution] filters out matches where evaluateEligibility returns eligible false (Pitfall 2 backstop)', async () => {
   const { resolveSemanticOutcome } = await semanticModule;
   const record = contractRecord(
-    { name: 'alpha', canonical_identity: 'router/alpha', enabled: false },
+    { name: 'alpha', canonical_identity: 'router/alpha', enabled: false, dispatchable: false },
     { outputs: ['text'], inputs: ['prompt'] },
   );
   assert.equal(record.contract.disposition, 'dispatch-candidate');
