@@ -36,6 +36,7 @@ export const RECEIPT_SCHEMA_VERSION = 1;
 export const RECEIPT_STATES = Object.freeze([
   'pending', 'invoked', 'paused', 'completed', 'failed', 'recommendation_only',
   'blocked',
+  'quarantined',
 ]);
 
 // Build a Receipt object following the schema documented in the plan:

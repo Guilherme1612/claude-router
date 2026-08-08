@@ -259,7 +259,7 @@ function rejection(overlay, reasonCode) {
   };
 }
 
-function hasUnsafeAuthoredContent(value, key = '') {
+export function hasUnsafeAuthoredContent(value, key = '') {
   if (/secret|token|password|raw|body|path/i.test(key)) return true;
   if (typeof value === 'string') {
     return /[\u0000-\u001f\u007f]/.test(value)

@@ -1,6 +1,6 @@
 import { stableCapabilityId } from './identity.mjs';
 import { stableStringify } from './schema.mjs';
-import { validateContractFieldValue } from './contract.mjs';
+import { validateContractFieldValue, hasUnsafeAuthoredContent, CONTRACT_FIELDS } from './contract.mjs';
 
 export const ELIGIBILITY_GATES = Object.freeze([
   'target_existence',
@@ -142,6 +142,59 @@ function unsafeValue(value, tokens) {
   return tokens.some(token => text.includes(token));
 }
 
+// --- TRUST-05: quarantine disposition -----------------------------------------
+// Per RESEARCH Pattern 5 + Pitfall 5: quarantine is per-capability (per-record),
+// NOT per-route. evaluateEligibility already operates per-record; the quarantine
+// flag is computed from the record's contract only and does not read siblings.
+//
+// Quarantine reasons:
+//   injection_bearing — unsafe content (secrets, paths, control chars) in a
+//                        contract field value, detected via hasUnsafeAuthoredContent.
+//   scope_escaping    — invocation_kind.value does not match record.semantic_type
+//                        and is not 'none' (declares an invocation outside scope).
+//   stale_unavailable  — a dispatch field's freshness is 'stale' beyond threshold.
+const QUARANTINE_REASON_TOKEN = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
+
+function computeQuarantineReasons(record) {
+  const reasons = [];
+  if (!record?.contract?.fields) return reasons;
+
+  // injection_bearing: scan contract field values for unsafe content
+  for (const fieldName of CONTRACT_FIELDS) {
+    const envelope = field(record, fieldName);
+    if (envelope?.state === 'known' && envelope.value !== undefined) {
+      if (hasUnsafeAuthoredContent(envelope.value, fieldName)) {
+        reasons.push('injection_bearing');
+        break;
+      }
+    }
+  }
+
+  // scope_escaping: invocation_kind.value mismatches semantic_type (and is not 'none')
+  const invocationKind = field(record, 'invocation_kind');
+  if (invocationKind?.state === 'known'
+    && typeof invocationKind.value === 'string'
+    && invocationKind.value !== 'none'
+    && invocationKind.value !== record?.semantic_type) {
+    reasons.push('scope_escaping');
+  }
+
+  // stale_unavailable: a dispatch field with freshness 'stale'
+  for (const fieldName of DISPATCH_FIELDS) {
+    const envelope = field(record, fieldName);
+    if (envelope?.freshness === 'stale') {
+      reasons.push('stale_unavailable');
+      break;
+    }
+  }
+
+  return reasons;
+}
+
+export function isQuarantined(record) {
+  return computeQuarantineReasons(record).length > 0;
+}
+
 export function evaluateEligibility({ record, records = [], relationships = {} } = {}) {
   const recordsById = new Map();
   for (const candidate of Array.isArray(records) ? records : []) {
@@ -178,13 +231,18 @@ export function evaluateEligibility({ record, records = [], relationships = {} }
   const reasonCodes = ELIGIBILITY_GATES
     .filter(name => gates[name] !== 'passed')
     .map(name => `${name}_${gates[name]}`);
-  const eligible = reasonCodes.length === 0;
+  const gateEligible = reasonCodes.length === 0;
+  const quarantineReasons = computeQuarantineReasons(record);
+  const quarantined = quarantineReasons.length > 0;
+  const eligible = quarantined ? false : gateEligible;
   return {
     schema_version: 1,
     policy_version: 'eligibility-policy-v1',
     eligible,
     recommendation_only: !eligible,
     gates,
-    reason_codes: eligible ? ['eligibility_all_gates_passed'] : reasonCodes,
+    reason_codes: gateEligible ? ['eligibility_all_gates_passed'] : reasonCodes,
+    quarantined,
+    quarantine_reasons: quarantineReasons,
   };
 }

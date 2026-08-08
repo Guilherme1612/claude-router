@@ -199,6 +199,25 @@ export function validateEligibility(eligibility) {
     || eligibility.eligible === eligibility.recommendation_only) {
     fail('capability.eligibility disposition is invalid');
   }
+  // TRUST-05: quarantine disposition (validate-if-present for backward compat)
+  if (eligibility.quarantined !== undefined) {
+    if (typeof eligibility.quarantined !== 'boolean') {
+      fail('capability.eligibility.quarantined must be a boolean');
+    }
+    if (eligibility.quarantined === true && eligibility.eligible !== false) {
+      fail('capability.eligibility.quarantined requires eligible === false');
+    }
+    if (!Array.isArray(eligibility.quarantine_reasons)
+      || eligibility.quarantine_reasons.length < 1
+      || eligibility.quarantine_reasons.length > 64) {
+      fail('capability.eligibility.quarantine_reasons must be a non-empty bounded array');
+    }
+    for (const reason of eligibility.quarantine_reasons) {
+      if (typeof reason !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(reason)) {
+        fail('capability.eligibility.quarantine_reasons must match the reason-token pattern');
+      }
+    }
+  }
   object(eligibility.gates, 'capability.eligibility.gates');
   if (stableStringify(Object.keys(eligibility.gates).sort()) !== stableStringify([...ELIGIBILITY_GATES].sort())) {
     fail('capability.eligibility.gates must contain the canonical gate set');
@@ -218,7 +237,7 @@ export function validateEligibility(eligibility) {
   if (stableStringify(eligibility.reason_codes) !== stableStringify(reasons)) {
     fail('capability.eligibility.reason_codes must match canonical gate results');
   }
-  if (eligibility.eligible !== (expected.length === 0)) {
+  if (eligibility.quarantined !== true && eligibility.eligible !== (expected.length === 0)) {
     fail('capability.eligibility.eligible requires every gate to pass');
   }
   return true;
