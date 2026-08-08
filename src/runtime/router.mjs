@@ -207,6 +207,17 @@ function getLeaseStore() {
   return _leaseStore || null;
 }
 
+// WR-03: per-process memo of the lease authority verdict keyed by leaseFp.
+// The hook is one process per prompt; evaluateAuthorityHint is called twice
+// per prompt (eager at scoring + final after route resolution). With CR-01
+// (goal no longer hashed) the leaseFp is identical across both calls, so the
+// memo dedupes the readdirSync scan + sha256 into one per prompt. The lease
+// set is immutable within a single prompt invocation (setStatus/createLease
+// are operator CLI actions, off the hot path), so no invalidation is needed.
+// Fail-open: a cached throw is never stored (the try/catch below still wraps
+// the whole consultation).
+const _leaseAuthCache = new Map();
+
 // Phase 4 / ANC-01: surface filter plumbing. RUNTIME_CONFIG_DIR is the home of
 // the user's `.gsd-surface.json` state file (sibling of `~/.claude/router/`).
 // SURFACE_FILE is the cache-key path (mtime only — never read directly; the
@@ -1951,10 +1962,18 @@ function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd }
           schemaGeneration: 1,
           projectFingerprint: projectFp,
         });
-        const leaseAuth = _leaseMod.policy.resolveLeaseAuthority({
-          projectFingerprint: leaseFp,
-          leaseStore,
-        });
+        // WR-03: reuse the per-process verdict for this leaseFp so the second
+        // evaluateAuthorityHint call (final, after route resolution) does not
+        // re-scan the lease directory or re-hash. goal is metadata-only now
+        // (CR-01), so leaseFp is stable across both calls in a prompt.
+        let leaseAuth = _leaseAuthCache.get(leaseFp);
+        if (!leaseAuth) {
+          leaseAuth = _leaseMod.policy.resolveLeaseAuthority({
+            projectFingerprint: leaseFp,
+            leaseStore,
+          });
+          _leaseAuthCache.set(leaseFp, leaseAuth);
+        }
         if (leaseAuth.authGranted === true) {
           authGranted = true;
           leaseSource = leaseAuth.source;
