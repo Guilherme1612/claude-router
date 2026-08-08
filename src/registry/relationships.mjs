@@ -317,8 +317,17 @@ export function compileRelationshipGraph({ records = [], relationships = {} } = 
     // Unsafe composition: target risk exceeds source risk, or target permissions not subset of source.
     const sourceRisk = compilationField(source, 'risk');
     const targetRisk = compilationField(target, 'risk');
-    const sourceRiskLevel = sourceRisk?.state === 'known' ? RISK_ORDER.indexOf(sourceRisk.value) : 0;
-    const targetRiskLevel = targetRisk?.state === 'known' ? RISK_ORDER.indexOf(targetRisk.value) : 0;
+    // Defense-in-depth: treat an unrecognized risk enum value as UNSAFE (highest
+    // level) rather than -1 (which indexOf returns for unknown strings and would
+    // silently rank as safest). A { state: 'known', value: 'garbage' } field must
+    // not slip past the strict compilation gate as lowest-risk.
+    const riskLevel = (envelope) => {
+      if (envelope?.state !== 'known') return 0;
+      const idx = RISK_ORDER.indexOf(envelope.value);
+      return idx === -1 ? RISK_ORDER.length - 1 : idx;
+    };
+    const sourceRiskLevel = riskLevel(sourceRisk);
+    const targetRiskLevel = riskLevel(targetRisk);
     if (targetRiskLevel > sourceRiskLevel) {
       diagnostics.push({
         subject_ids: [edge.source_id, edge.target_id].filter(Boolean).sort(),
