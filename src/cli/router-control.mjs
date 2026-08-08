@@ -18,6 +18,8 @@ import { createStewardStore } from '../steward/state.mjs';
 import { approveDraftCreation, deriveStewardDraft, previewDraft } from '../steward/draft.mjs';
 import { loadStewardObservations, refreshSuggestionPointer } from '../steward/refresh.mjs';
 import { createLeaseStore } from '../lease/store.mjs';
+import { buildLeaseRecord } from '../lease/policy.mjs';
+import { computeLeaseFingerprint } from '../lease/identity.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -538,7 +540,7 @@ function parse(argv) {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value.length > 4096) throw new TypeError('argument_too_long');
-    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope' || value === '--until' || value === '--proposal-json' || value === '--approval') {
+    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope' || value === '--until' || value === '--proposal-json' || value === '--approval' || value === '--goal' || value === '--project-fingerprint' || value === '--repo' || value === '--worktree' || value === '--expiry-ms') {
       const next = args[++index];
       if (!next || next.length > 4096) throw new TypeError('missing_option_value');
       options[value.slice(2).replace('-', '_')] = next;
@@ -646,7 +648,7 @@ export function renderSuggestionText(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover|leases inspect|show <id>|revoke <id>> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover|leases inspect|show <id>|revoke <id>|create --goal <label> --project-fingerprint <fp>> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -716,7 +718,7 @@ function runContextCommand({ subcommand, root, options }) {
 // the lease module is unavailable (mirrors the existing module-absent
 // pattern). Never inlines raw prompt text — only the structured goal label
 // and the 9 inspection fields (T-40-10 information disclosure mitigation).
-function leasesCommand({ root, positional }) {
+function leasesCommand({ root, positional, options = {} }) {
   let store;
   try {
     // Lazy require guard: if the deployed lease module is unavailable (older
@@ -728,7 +730,7 @@ function leasesCommand({ root, positional }) {
     return { result: canonical('leases', false, 'lease_module_unavailable'), exitCode: EXIT.invalid };
   }
   const subcommand = positional[1] || '';
-  if (!['inspect', 'show', 'revoke', ''].includes(subcommand)) {
+  if (!['inspect', 'show', 'revoke', 'create'].includes(subcommand)) {
     return { result: canonical('leases', false, 'invalid_arguments'), exitCode: EXIT.usage };
   }
   if (subcommand === '') {
@@ -754,6 +756,52 @@ function leasesCommand({ root, positional }) {
       });
     }
     return { result: canonical('leases inspect', true, 'ok', { leases }), exitCode: EXIT.success };
+  }
+  if (subcommand === 'create') {
+    // WR-02: production lease-creation path. The operator supplies the
+    // operator-declared goal label and the manifest project-fingerprint; the
+    // CLI computes the lease fingerprint (matching the hot-path axes) and
+    // stores the record via buildLeaseRecord + createLease. Defaults (repo/
+    // worktree = cwd, runtime = claude, 1h expiry) match the hot-path
+    // composition so a default --owned-root lease lands in the store the hot
+    // path reads. Never inlines raw prompt text — only the structured label.
+    const goal = typeof options.goal === 'string' && options.goal.trim() ? options.goal : '';
+    const projectFingerprint = typeof options.project_fingerprint === 'string' && options.project_fingerprint.trim() ? options.project_fingerprint : '';
+    if (!goal || !projectFingerprint) {
+      return { result: canonical('leases create', false, 'invalid_arguments'), exitCode: EXIT.usage };
+    }
+    const repo = options.repo || process.cwd();
+    const worktree = options.worktree || process.cwd();
+    const runtime = options.runtime === 'codex' ? 'codex' : 'claude';
+    const expiryMs = Number(options.expiry_ms);
+    const expiry = Number.isSafeInteger(expiryMs) && expiryMs > 0 ? expiryMs : Date.now() + 3_600_000;
+    let fingerprint;
+    try {
+      fingerprint = computeLeaseFingerprint({
+        repo, worktree, runtime, goal, schemaGeneration: 1, projectFingerprint,
+      });
+    } catch {
+      return { result: canonical('leases create', false, 'invalid_project_fingerprint'), exitCode: EXIT.invalid };
+    }
+    const record = buildLeaseRecord({
+      fingerprint,
+      goal,
+      scope: { repo, worktree, runtime, schema_generation: 1 },
+      allowedEffects: [],
+      confirmationEffects: [],
+      resourceBounds: { max_wall_ms: 0, max_invocations: 0, max_tokens: 0 },
+      expiryMs: expiry,
+      authoritySource: { kind: 'operator', instruction: 'persist', class: 'persistent_goal_action' },
+      checkpoint: null,
+    });
+    const result = store.createLease(record);
+    if (result.status === 'blocked') {
+      return { result: canonical('leases create', false, result.reason_code), exitCode: EXIT.invalid };
+    }
+    return {
+      result: canonical('leases create', true, result.status, { lease_id: result.lease_id, status: result.status }),
+      exitCode: EXIT.success,
+    };
   }
   // show / revoke require a lease_id positional.
   if (positional.length !== 3) {
@@ -1159,7 +1207,7 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
     return runContextCommand({ subcommand: positional[1], root, options });
   }
   if (command === 'leases') {
-    return leasesCommand({ root, positional });
+    return leasesCommand({ root, positional, options });
   }
   if (command === 'registry' && positional[1] === 'recover') {
     if (positional.length !== 2) return { result: canonical('registry recover', false, 'invalid_arguments'), exitCode: EXIT.usage };
