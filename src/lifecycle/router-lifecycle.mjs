@@ -394,6 +394,10 @@ export async function installRouter(options) {
     // BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap below
     // (HOST-03 parity; single-runtime deploy would ENOENT in Codex).
     'registry/semantic.mjs',
+    // Phase 42 SEM-04: substitution resolver deployed to BOTH ownedRoot
+    // and codexOwnedRoot via the moduleValues flatMap below (HOST-03
+    // parity; single-runtime deploy would ENOENT in Codex).
+    'registry/substitute.mjs',
     'coverage/audit.mjs',
     // Phase 39: AUTH-01..05 authority taxonomy + policy evaluator. Deployed
     // to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap below
