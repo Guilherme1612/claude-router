@@ -10,10 +10,20 @@
 //   - A returning project (a fingerprint with at least one prior lease record)
 //     receives AT MOST ONE evidence-backed briefing, and only when the lease
 //     is active, non-expired, non-revoked, and fingerprint-matching.
-//   - The eight invalid states — completed, blocked, expired, revoked,
-//     corrupt, stale, unauthorized, foreign — NEVER auto-run and NEVER emit a
-//     briefing; each maps to a distinct internal briefing_status but all
-//     return null.
+//   - Invalid continuity states NEVER auto-run and NEVER emit a briefing;
+//     each maps to a distinct internal briefing_status but all return null.
+//     The states fall into two layers:
+//       * Enum-backed (rejected here via INVALID_SET): completed, blocked,
+//         expired, revoked — statuses that store.readLease ACCEPTS (they are
+//         in LEASE_STATUS_SET), so the lease reaches composeBriefing and is
+//         mapped to its own briefing_status.
+//       * Derived (rejected here via the else-if branches below): expired
+//         (clock/budget exhaustion on an 'active' lease, via isExpired) and
+//         foreign (fingerprint mismatch, via freshness_evidence).
+//     Out-of-enum labels (e.g. 'corrupt', 'stale', 'unauthorized', and the
+//     derived label 'foreign') never reach INVALID_SET because store.readLease
+//     fail-closes on them — findByFingerprint returns null and composeBriefing
+//     returns null on the first-visit silent path.
 //   - The briefing references receipt IDs from last_safe_checkpoint so the
 //     operator inspects via `router-control leases show <id>`; it never
 //     inlines raw prompt text or full receipt bodies (CLAUDE.md <=120 token
@@ -25,11 +35,16 @@
 
 export const BRIEFING_POLICY_VERSION = 'briefing-policy-v1';
 
-// The eight invalid continuity states. Each maps to a distinct internal
+// Enum-backed invalid continuity states. Each maps to a distinct internal
 // briefing_status for telemetry/diagnostics, but ALL return null (no
-// injection, no auto-run). Object.freeze so the set cannot be mutated at
-// runtime (T-40-09 tampering mitigation).
-const INVALID = Object.freeze(['completed', 'blocked', 'expired', 'revoked', 'corrupt', 'stale', 'unauthorized', 'foreign']);
+// injection, no auto-run). These are the four statuses that store.readLease
+// ACCEPTS (they are in LEASE_STATUS_SET) so the lease reaches composeBriefing.
+// The two derived states — expired (clock/budget, via isExpired) and foreign
+// (fingerprint mismatch, via freshness_evidence) — are handled by the
+// else-if branches below, not by this set. Out-of-enum labels (corrupt,
+// stale, unauthorized, ...) never reach here: readLease fail-closes on them.
+// Object.freeze so the set cannot be mutated at runtime (T-40-09 tampering).
+const INVALID = Object.freeze(['completed', 'blocked', 'expired', 'revoked']);
 const INVALID_SET = new Set(INVALID);
 
 /**
@@ -55,8 +70,9 @@ export function composeBriefing({ projectFingerprint, leaseStore, now = Date.now
     // absence of any Router activity).
     if (!lease) return null;
 
-    // Derive the internal briefing_status. Each of the eight invalid states
-    // maps to a distinct status string (for telemetry) but all return null.
+    // Derive the internal briefing_status. INVALID_SET covers the enum-backed
+    // invalid statuses; the else-if branches derive expired (clock/budget)
+    // and foreign (fingerprint mismatch). All non-active statuses return null.
     let briefing_status;
     if (INVALID_SET.has(lease.status)) {
       briefing_status = lease.status;
