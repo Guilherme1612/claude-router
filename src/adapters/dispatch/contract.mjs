@@ -16,6 +16,9 @@
 // All files are ESM .mjs, stdlib-only (node:child_process, node:crypto,
 // node:fs, node:path, node:os). No npm imports, no native modules.
 
+import { realpathSync, statSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
+
 export const DISPATCH_CONTRACT_VERSION = 1;
 
 // Receipt schema_version is pinned at 1 for Phase 38. Future schema
@@ -32,6 +35,7 @@ export const RECEIPT_SCHEMA_VERSION = 1;
 //   recommendation_only — canDispatch() false / empty action: NO spawn, text only
 export const RECEIPT_STATES = Object.freeze([
   'pending', 'invoked', 'paused', 'completed', 'failed', 'recommendation_only',
+  'blocked',
 ]);
 
 // Build a Receipt object following the schema documented in the plan:
@@ -92,6 +96,7 @@ export function createDispatchAdapter({
   receiptRoot,
   fixture,
   nativeIdentity,
+  allowedRoots,
   invokeImpl,
   canDispatchImpl,
   pauseImpl,
@@ -107,6 +112,7 @@ export function createDispatchAdapter({
     receiptRoot,
     fixture,
     nativeIdentity: nativeIdentity || null,
+    allowedRoots: allowedRoots || [],
 
     canDispatch(action) {
       return canDispatchImpl ? canDispatchImpl(action) : { ok: false, reason: 'not_implemented' };
@@ -131,4 +137,109 @@ export function createDispatchAdapter({
     },
   };
   return adapter;
+}
+
+// --- TRUST-03: validateInvocation -------------------------------------------
+// Pure function (no spawn, no I/O beyond realpathSync/statSync for path
+// validation). Called inside invokeImpl at dispatch time — NEVER on the prompt
+// hot path (router.mjs). Reuses the { ok: false, reason: '<reason_code>' }
+// return shape from validateFixturePath (claude.mjs:111-132).
+//
+// Checks, in order:
+//   a. Typed argument contract: action.args is an array of strings.
+//   b. Entrypoint identity: adapter.fixture path — '..', realpath, containment,
+//      isFile (mirrors validateFixturePath).
+//   c. Working directory (cwd): if action.cwd provided, within allowed roots.
+//   d. Wrapper injection: shell:false enforced — reject shell:true or wrapper.
+//   e. Quoting: args scanned for unescaped shell metacharacters (defense-in-depth;
+//      shell:false already prevents interpretation).
+//   f. Destructive targets: args scanned for rm -rf /, mkfs, dd, shutdown, etc.
+//   g. Runtime scope: action.runtime === adapter.runtime.
+function within(root, candidate) {
+  return candidate === root || candidate.startsWith(`${root}${sep}`);
+}
+
+const SHELL_METACHARS = /[|;&$`!<>()\n]/;
+const DESTRUCTIVE_PATTERNS = [
+  /rm\s+-rf\s+\/(\s|$)/,
+  /rm\s+-rf\s+~/,
+  />\s*\/dev\/sd/,
+  /mkfs/,
+  /dd\s+if=.*of=\/dev\//,
+  /shutdown/,
+  /reboot/,
+];
+
+export function validateInvocation(action, adapter) {
+  // a. Typed argument contract
+  if (action && action.args !== undefined) {
+    if (!Array.isArray(action.args)) return { ok: false, reason: 'arg_type_invalid' };
+    for (const arg of action.args) {
+      if (typeof arg !== 'string') return { ok: false, reason: 'arg_type_invalid' };
+    }
+  }
+
+  // b. Entrypoint identity (reuse validateFixturePath logic)
+  const fixturePath = adapter?.fixture;
+  const allowedRoots = adapter?.allowedRoots || [];
+  if (typeof fixturePath === 'string' && fixturePath.trim()) {
+    if (fixturePath.includes('..')) return { ok: false, reason: 'path_escape' };
+    let resolved;
+    try { resolved = realpathSync(resolve(fixturePath)); }
+    catch { return { ok: false, reason: 'fixture_not_found' }; }
+    if (allowedRoots.length > 0) {
+      const contained = allowedRoots.some((root) => {
+        try { return within(realpathSync(root), resolved); } catch { return false; }
+      });
+      if (!contained) return { ok: false, reason: 'path_escape' };
+    }
+    try {
+      const st = statSync(resolved);
+      if (!st.isFile()) return { ok: false, reason: 'not_a_file' };
+    } catch { return { ok: false, reason: 'fixture_not_found' }; }
+  }
+
+  // c. Working directory (cwd)
+  if (action && typeof action.cwd === 'string' && action.cwd.trim()) {
+    if (action.cwd.includes('..')) return { ok: false, reason: 'cwd_escape' };
+    let cwdResolved;
+    try { cwdResolved = realpathSync(resolve(action.cwd)); }
+    catch { return { ok: false, reason: 'cwd_escape' }; }
+    if (allowedRoots.length > 0) {
+      const contained = allowedRoots.some((root) => {
+        try { return within(realpathSync(root), cwdResolved); } catch { return false; }
+      });
+      if (!contained) return { ok: false, reason: 'cwd_escape' };
+    }
+  }
+
+  // d. Wrapper injection
+  if (action?.shell === true) return { ok: false, reason: 'wrapper_injection' };
+  if (typeof action?.shellWrapper === 'string' && action.shellWrapper.trim()) {
+    return { ok: false, reason: 'wrapper_injection' };
+  }
+
+  // e. Quoting — scan args for unescaped shell metacharacters
+  if (action && Array.isArray(action.args)) {
+    for (const arg of action.args) {
+      if (SHELL_METACHARS.test(arg)) return { ok: false, reason: 'unquoted_metachar' };
+    }
+  }
+
+  // f. Destructive targets
+  if (action && Array.isArray(action.args)) {
+    for (const arg of action.args) {
+      for (const pat of DESTRUCTIVE_PATTERNS) {
+        if (pat.test(arg)) return { ok: false, reason: 'destructive_target' };
+      }
+    }
+  }
+
+  // g. Runtime scope
+  const actionRuntime = action?.runtime;
+  if (actionRuntime && adapter?.runtime && actionRuntime !== adapter.runtime) {
+    return { ok: false, reason: 'runtime_scope_mismatch' };
+  }
+
+  return { ok: true };
 }

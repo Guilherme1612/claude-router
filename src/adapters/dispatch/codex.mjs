@@ -33,7 +33,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION } from './contract.mjs';
+import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation } from './contract.mjs';
 import {
   ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
 } from './receipt.mjs';
@@ -148,7 +148,7 @@ export function createCodexDispatchAdapter({
     });
   }
 
-  function recommendationOnly(action, reason) {
+  function recommendationOnly(action, reason, state = 'recommendation_only') {
     const invocation = {
       adapter: CODEX_DISPATCH_VERSION,
       runtime,
@@ -160,11 +160,19 @@ export function createCodexDispatchAdapter({
       spawned_at: null,
       native_identity: null,
     };
+    const completion_evidence = { state };
+    if (reason) {
+      if (state === 'blocked') {
+        completion_evidence.reason_codes = [reason];
+      } else {
+        completion_evidence.reason = reason;
+      }
+    }
     const receipt = {
       schema_version: RECEIPT_SCHEMA_VERSION,
       receipt_id: buildReceiptId(invocation, action),
       invocation_identity: invocation,
-      completion_evidence: { state: 'recommendation_only', ...(reason ? { reason } : {}) },
+      completion_evidence,
       intent: String(action?.intent || ''),
       authority: String(action?.authority || ''),
       risk: String(action?.risk || ''),
@@ -181,6 +189,11 @@ export function createCodexDispatchAdapter({
     }
     const can = canDispatchImpl(action);
     if (!can.ok) return recommendationOnly(action, can.reason);
+
+    // TRUST-03: validateInvocation — typed args, entrypoint, cwd, wrapper,
+    // quoting, destructive targets, runtime scope before spawn.
+    const inv = validateInvocation(action, adapter);
+    if (!inv.ok) return recommendationOnly(action, inv.reason, 'blocked');
 
     const idempotencyKey = String(action.idempotency_key || '');
     if (idempotencyKey && !claimIdempotency(idempotencyKey)) {
@@ -327,6 +340,7 @@ export function createCodexDispatchAdapter({
     receiptRoot: resolvedReceiptRoot,
     fixture: fixturePath,
     nativeIdentity: 'codex',
+    allowedRoots: roots,
     invokeImpl,
     canDispatchImpl,
     pauseImpl,
