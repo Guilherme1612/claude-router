@@ -387,6 +387,9 @@ export async function installRouter(options) {
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
     'registry/contract.mjs', 'registry/eligibility.mjs', 'registry/relationships.mjs',
+    // Phase 41 TRUST-02: untrusted-evidence policy deployed to BOTH ownedRoot
+    // and codexOwnedRoot via the moduleValues flatMap below (Pitfall 6 backstop).
+    'registry/trust.mjs',
     'coverage/audit.mjs',
     // Phase 39: AUTH-01..05 authority taxonomy + policy evaluator. Deployed
     // to BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap below

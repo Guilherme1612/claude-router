@@ -1,5 +1,6 @@
 import { stableStringify, validateCapability } from './schema.mjs';
 import { contentFingerprint, stableCapabilityId } from './identity.mjs';
+import { classifyEvidence } from './trust.mjs';
 
 export const CONTRACT_FIELDS = Object.freeze([
   'purpose',
@@ -132,8 +133,9 @@ function envelope(field, candidates) {
       continue;
     }
     validValues.push(candidate);
-    if (candidate.provenance === 'authored') {
-      rejected.push(portableEvidence(candidate, false, 'authored_evidence_rejected'));
+    const trust = classifyEvidence(field, candidate);
+    if (!trust.trusted) {
+      rejected.push(portableEvidence(candidate, false, trust.reason_code));
       continue;
     }
     if (candidate.freshness !== 'fresh') {
