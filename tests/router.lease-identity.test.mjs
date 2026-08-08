@@ -1,8 +1,8 @@
 // Phase 40 — Plan 01, Task 1 (LEASE-01): Lease identity + durable store.
-// RED phase: failing tests asserting six-axis fingerprint independence,
-// per-runtime partition, atomic + private write, fail-closed read, and
-// exact-fingerprint lookup. No unredacted operator-prompt content in any
-// fixture.
+// RED phase: failing tests asserting five-axis fingerprint independence
+// (goal is stored as metadata only — see CR-01), per-runtime partition,
+// atomic + private write, fail-closed read, and exact-fingerprint lookup.
+// No unredacted operator-prompt content in any fixture.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,13 +29,16 @@ function fingerprint(overrides) {
   return computeLeaseFingerprint({ ...BASE_AXES, ...overrides });
 }
 
-test('computeLeaseFingerprint changes when each of the six axes changes independently', () => {
+test('computeLeaseFingerprint changes when each of the five hashed axes changes independently (goal is metadata-only)', () => {
   const baseline = fingerprint({});
   assert.equal(baseline, fingerprint({}));
   assert.notEqual(baseline, fingerprint({ repo: 'repo-B' }));
   assert.notEqual(baseline, fingerprint({ worktree: 'worktree-X' }));
   assert.notEqual(baseline, fingerprint({ runtime: 'codex' }));
-  assert.notEqual(baseline, fingerprint({ goal: 'ship-router-v2' }));
+  // goal is NOT hashed (CR-01: the hot path has no operator-declared goal, so
+  // hashing goal made lookup never match creation). Different goals MUST NOT
+  // change the fingerprint.
+  assert.equal(baseline, fingerprint({ goal: 'ship-router-v2' }));
   assert.notEqual(baseline, fingerprint({ schemaGeneration: 2 }));
   assert.notEqual(baseline, fingerprint({ projectFingerprint: 'pf2' }));
 });
@@ -124,7 +127,7 @@ test('readLease returns null on missing or corrupt file (fail-closed)', () => {
   } finally { rmSync(f.owned, { recursive: true, force: true }); }
 });
 
-test('findByFingerprint matches only the exact six-axis fingerprint', () => {
+test('findByFingerprint matches only the exact five-axis fingerprint', () => {
   const f = fixture();
   try {
     const store = createLeaseStore({ root: f.root });
