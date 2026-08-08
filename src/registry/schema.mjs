@@ -207,14 +207,16 @@ export function validateEligibility(eligibility) {
     if (eligibility.quarantined === true && eligibility.eligible !== false) {
       fail('capability.eligibility.quarantined requires eligible === false');
     }
-    if (!Array.isArray(eligibility.quarantine_reasons)
-      || eligibility.quarantine_reasons.length < 1
-      || eligibility.quarantine_reasons.length > 64) {
-      fail('capability.eligibility.quarantine_reasons must be a non-empty bounded array');
-    }
-    for (const reason of eligibility.quarantine_reasons) {
-      if (typeof reason !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(reason)) {
-        fail('capability.eligibility.quarantine_reasons must match the reason-token pattern');
+    if (eligibility.quarantined === true) {
+      if (!Array.isArray(eligibility.quarantine_reasons)
+        || eligibility.quarantine_reasons.length < 1
+        || eligibility.quarantine_reasons.length > 64) {
+        fail('capability.eligibility.quarantine_reasons must be a non-empty bounded array');
+      }
+      for (const reason of eligibility.quarantine_reasons) {
+        if (typeof reason !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(reason)) {
+          fail('capability.eligibility.quarantine_reasons must match the reason-token pattern');
+        }
       }
     }
   }
