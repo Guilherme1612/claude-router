@@ -35,7 +35,8 @@ export const RECEIPT_SCHEMA_VERSION = 1;
 //   failed            — non-zero exit or spawn failure
 //   recommendation_only — canDispatch() false / empty action: NO spawn, text only
 export const RECEIPT_STATES = Object.freeze([
-  'pending', 'invoked', 'paused', 'completed', 'failed', 'recommendation_only',
+  'pending', 'invoked', 'ignored', 'rejected', 'substituted', 'paused',
+  'partial', 'completed', 'failed', 'preserved-unknown', 'recommendation_only',
   'blocked',
   'quarantined',
 ]);

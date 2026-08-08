@@ -35,7 +35,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, validateStrategyBounds, preDispatchGate } from './contract.mjs';
 import {
-  ReceiptStore, defaultReceiptRoot, hashBytes, receiptId,
+  ReceiptStore, attributionFromAction, buildPendingReceipt, defaultReceiptRoot,
+  hashBytes, outcomeCredit, receiptIdentityFromAction,
+  transitionReceipt,
 } from './receipt.mjs';
 import { replanStrategy } from '../../orchestrator/strategy.mjs';
 import { createLeaseStore } from '../../lease/store.mjs';
@@ -138,48 +140,26 @@ export function createCodexDispatchAdapter({
     return { ok: true };
   }
 
-  function buildReceiptId(invocation, action) {
-    return receiptId({
-      adapter: CODEX_DISPATCH_VERSION,
-      runtime,
-      pid: invocation.pid,
-      command: invocation.command,
-      args: invocation.args,
-      lease_id: action?.lease_id || '',
-      idempotency_key: action?.idempotency_key || '',
-    });
-  }
-
   function recommendationOnly(action, reason, state = 'recommendation_only') {
-    const invocation = {
+    const pending = buildPendingReceipt({
+      schema_version: RECEIPT_SCHEMA_VERSION,
       adapter: CODEX_DISPATCH_VERSION,
       runtime,
-      pid: null,
-      command: null,
-      args: [],
-      lease_id: String(action?.lease_id || ''),
-      idempotency_key: String(action?.idempotency_key || ''),
-      spawned_at: null,
-      native_identity: null,
-    };
-    const completion_evidence = { state };
-    if (reason) {
-      if (state === 'blocked') {
-        completion_evidence.reason_codes = [reason];
-      } else {
-        completion_evidence.reason = reason;
-      }
-    }
-    const receipt = {
-      schema_version: RECEIPT_SCHEMA_VERSION,
-      receipt_id: buildReceiptId(invocation, action),
-      invocation_identity: invocation,
-      completion_evidence,
-      intent: String(action?.intent || ''),
-      authority: String(action?.authority || ''),
-      risk: String(action?.risk || ''),
+      identity: receiptIdentityFromAction(action),
+      intent: action?.intent,
+      selected: action?.selected,
+      alternatives: action?.alternatives,
+      bounded_evidence: action?.bounded_evidence,
       provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
-    };
+    });
+    const route_state = state === 'blocked' ? 'blocked' : reason === 'empty_action' ? 'ignored' : 'rejected';
+    const receipt = transitionReceipt(pending, state, {
+      route_state,
+      completion_evidence: reason
+        ? (state === 'blocked' ? { reason_codes: [reason] } : { reason })
+        : {},
+      ...attributionFromAction(action),
+    });
     store.publish(receipt);
     return receipt;
   }
@@ -209,6 +189,17 @@ export function createCodexDispatchAdapter({
       return recommendationOnly(action, 'idempotency_already_claimed');
     }
 
+    const pendingReceipt = buildPendingReceipt({
+      schema_version: RECEIPT_SCHEMA_VERSION,
+      adapter: CODEX_DISPATCH_VERSION,
+      runtime,
+      identity: receiptIdentityFromAction(action),
+      intent: action.intent,
+      ...attributionFromAction(action),
+      provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+    });
+    store.publish(pendingReceipt);
+
     const startNs = process.hrtime.bigint();
     const chunks = [];
     let child;
@@ -230,16 +221,11 @@ export function createCodexDispatchAdapter({
         spawned_at: new Date().toISOString(),
         native_identity: adapter.nativeIdentity || null,
       };
-      const receipt = {
-        schema_version: RECEIPT_SCHEMA_VERSION,
-        receipt_id: buildReceiptId(invocation, action),
+      const receipt = transitionReceipt(pendingReceipt, 'failed', {
         invocation_identity: invocation,
-        completion_evidence: { state: 'failed', reason: `spawn_failed: ${err?.message || String(err)}` },
-        intent: String(action.intent || ''),
-        authority: String(action.authority || ''),
-        risk: String(action.risk || ''),
-        provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
-      };
+        completion_evidence: { reason: `spawn_failed: ${err?.message || String(err)}` },
+        ...attributionFromAction(action),
+      });
       store.publish(receipt);
       return receipt;
     }
@@ -266,17 +252,11 @@ export function createCodexDispatchAdapter({
       spawned_at: spawnedAt,
       native_identity: adapter.nativeIdentity || null,
     };
-    const invokedReceipt = {
-      schema_version: RECEIPT_SCHEMA_VERSION,
-      receipt_id: buildReceiptId(invokedInvocation, action),
+    const invokedReceipt = transitionReceipt(pendingReceipt, 'invoked', {
       invocation_identity: invokedInvocation,
-      completion_evidence: { state: 'invoked' },
-      intent: String(action.intent || ''),
-      authority: String(action.authority || ''),
-      risk: String(action.risk || ''),
-      provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+      ...attributionFromAction(action),
       ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
-    };
+    });
     store.publish(invokedReceipt);
 
     child.on('exit', (code, signal) => {
@@ -290,17 +270,14 @@ export function createCodexDispatchAdapter({
         wall_ms: wallMs,
         ...(signal ? { signal } : {}),
       };
-      const completedReceipt = {
-        schema_version: RECEIPT_SCHEMA_VERSION,
-        receipt_id: buildReceiptId(invokedInvocation, action),
+      const completedReceipt = transitionReceipt(pendingReceipt, state, {
         invocation_identity: invokedInvocation,
         completion_evidence: completion,
-        intent: String(action.intent || ''),
-        authority: String(action.authority || ''),
-        risk: String(action.risk || ''),
-        provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+        invocation_evidence: { receipt_id: pendingReceipt.receipt_id, observed: true },
+        ...attributionFromAction(action),
         ...(action.strategy_plan ? { strategy_plan: action.strategy_plan, work_id: action.work_id || null } : {}),
-      };
+      });
+      completedReceipt.outcome_credit = outcomeCredit(completedReceipt);
       store.publish(completedReceipt);
       if (state !== 'completed' && action.replan_context) {
         const lease = action.lease_id ? createLeaseStore({ runtime: 'codex' }).inspect(action.lease_id) : null;
@@ -332,10 +309,7 @@ export function createCodexDispatchAdapter({
     if (!['invoked', 'pending', 'completed'].includes(existing.completion_evidence?.state)) {
       return existing;
     }
-    const paused = {
-      ...existing,
-      completion_evidence: { ...existing.completion_evidence, state: 'paused' },
-    };
+    const paused = transitionReceipt(existing, 'paused');
     store.publish(paused);
     return paused;
   }

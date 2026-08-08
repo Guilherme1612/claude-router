@@ -24,6 +24,7 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { RECEIPT_STATES } from './contract.mjs';
 
 // Secret/PII redaction BEFORE hashing (analog: router.mjs:1965-1977).
 // Same regex + case-insensitivity so the hash input never includes raw
@@ -59,6 +60,224 @@ export function receiptId({ adapter, runtime, pid, command, args, lease_id, idem
     idempotency_key: String(idempotency_key || ''),
   });
   return createHash('sha256').update(tuple, 'utf8').digest('hex');
+}
+
+const IDENTITY_FIELDS = [
+  'project_id', 'goal_id', 'route_id', 'action_id', 'mapping_generation',
+  'capability_fingerprint', 'authority', 'risk', 'idempotency_key',
+];
+const OMIT_KEYS = new Set([
+  'prompt', 'raw_prompt', 'content', 'stdout', 'stderr', 'env', 'environment',
+  'secret', 'secrets', 'token', 'tokens',
+]);
+const SAFE_ID_KEYS = new Set([
+  'receipt_id', 'project_id', 'goal_id', 'route_id', 'action_id',
+  'mapping_generation', 'capability_fingerprint', 'idempotency_key',
+  'invocation_id', 'verification_id', 'reference', 'actual_route_id',
+]);
+const SAFE_TECHNICAL_KEYS = new Set([
+  'state', 'reason', 'reason_code', 'reason_codes', 'stdout_sha256',
+  'artifact_ref', 'verification_ref', 'exit_code', 'wall_ms', 'signal',
+  'observed_at_ms', 'quality', 'latency_ms', 'negative_control', 'negative_control_pass',
+]);
+const ATTRIBUTION_FIELDS = new Set([
+  'identity', 'selected', 'actual', 'alternatives', 'bounded_evidence',
+  'invocation_evidence', 'postcondition_evidence', 'corrections',
+  'substitution', 'strategy_plan', 'work_id', 'provenance', 'route_state',
+]);
+
+function bounded(value, depth = 0) {
+  if (depth > 3 || value === null || value === undefined) return value ?? null;
+  if (typeof value === 'string') return redact(value).slice(0, 256);
+  if (typeof value === 'number' || typeof value === 'boolean') return value;
+  if (Array.isArray(value)) return value.slice(0, 32).map((item) => bounded(item, depth + 1));
+  if (typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value)
+      .filter(([key]) => !OMIT_KEYS.has(key.toLowerCase()))
+      .slice(0, 64)
+      .map(([key, item]) => [
+        key,
+        SAFE_ID_KEYS.has(key) || SAFE_TECHNICAL_KEYS.has(key)
+          ? (Array.isArray(item)
+            ? item.slice(0, 32).map((entry) => typeof entry === 'number' || typeof entry === 'boolean'
+              ? entry : String(entry ?? '').slice(0, 256))
+            : typeof item === 'number' || typeof item === 'boolean'
+              ? item : String(item ?? '').slice(0, 256))
+          : bounded(item, depth + 1),
+      ]));
+  }
+  return String(value).slice(0, 256);
+}
+
+function normalizeIdentity(identity = {}) {
+  return Object.fromEntries(IDENTITY_FIELDS.map((field) => [
+    field,
+    SAFE_ID_KEYS.has(field)
+      ? String(identity?.[field] ?? '').slice(0, 256)
+      : bounded(identity?.[field] ?? ''),
+  ]));
+}
+
+// Stable route identity deliberately excludes PID and process timing. It is
+// the causal anchor shared by pending, invoked, and terminal records.
+export function receiptIdentityId({ adapter, runtime, identity = {} } = {}) {
+  const tuple = JSON.stringify({
+    adapter: String(adapter || ''),
+    runtime: String(runtime || ''),
+    identity: normalizeIdentity(identity),
+  });
+  return createHash('sha256').update(tuple, 'utf8').digest('hex');
+}
+
+export function receiptIdentityFromAction(action = {}) {
+  action = action || {};
+  return {
+    project_id: action.project_id ?? action.projectId ?? '',
+    goal_id: action.goal_id ?? action.goalId ?? '',
+    route_id: action.route_id ?? action.routeId ?? '',
+    action_id: action.action_id ?? action.actionId ?? '',
+    mapping_generation: action.mapping_generation ?? action.mappingGeneration ?? '',
+    capability_fingerprint: action.capability_fingerprint ?? action.capabilityFingerprint ?? '',
+    authority: action.authority ?? '',
+    risk: action.risk ?? '',
+    idempotency_key: action.idempotency_key ?? '',
+    lease_id: action.lease_id ?? '',
+  };
+}
+
+export function attributionFromAction(action = {}) {
+  action = action || {};
+  return {
+    selected: action.selected ?? action.selected_route ?? null,
+    actual: action.actual ?? action.actual_composition ?? action.composition ?? null,
+    alternatives: action.alternatives ?? [],
+    bounded_evidence: action.bounded_evidence ?? action.evidence ?? {},
+    corrections: action.corrections ?? [],
+    substitution: action.substitution ?? action.substitution_evidence ?? null,
+    postcondition_evidence: action.postcondition_evidence ?? null,
+  };
+}
+
+export function buildPendingReceipt({
+  schema_version = 1,
+  adapter,
+  runtime,
+  identity = {},
+  intent = '',
+  selected = null,
+  alternatives = [],
+  bounded_evidence = {},
+  provenance = null,
+} = {}) {
+  if (!adapter || !runtime) throw new TypeError('adapter and runtime are required');
+  const normalized = normalizeIdentity(identity);
+  const receipt_id = receiptIdentityId({ adapter, runtime, identity: normalized });
+  return {
+    schema_version,
+    receipt_id,
+    invocation_identity: {
+      adapter: String(adapter),
+      runtime: String(runtime),
+      pid: null,
+      command: null,
+      args: [],
+      lease_id: String(identity.lease_id || ''),
+      idempotency_key: String(normalized.idempotency_key || ''),
+      spawned_at: null,
+      native_identity: null,
+      identity: normalized,
+    },
+    completion_evidence: { state: 'pending' },
+    route_state: 'pending',
+    intent: redact(String(intent || '')).slice(0, 256),
+    authority: String(normalized.authority || ''),
+    risk: String(normalized.risk || ''),
+    selected: bounded(selected),
+    actual: null,
+    alternatives: bounded(alternatives),
+    bounded_evidence: bounded(bounded_evidence),
+    provenance: bounded(provenance || { adapter: String(adapter) }),
+  };
+}
+
+function routeStateFor(state) {
+  return state === 'recommendation_only' ? 'ignored' : state;
+}
+
+// Pure transition helper. ReceiptStore remains responsible for persistence.
+export function transitionReceipt(receipt, state, patch = {}) {
+  if (!receipt || typeof receipt !== 'object' || !receipt.receipt_id) {
+    throw new TypeError('receipt is required');
+  }
+  if (!RECEIPT_STATES.includes(state)) throw new TypeError(`unknown receipt state: ${state}`);
+  const next = {
+    ...receipt,
+    invocation_identity: {
+      ...(receipt.invocation_identity || {}),
+      ...(patch.invocation_identity ? bounded(patch.invocation_identity) : {}),
+    },
+    completion_evidence: {
+      ...(receipt.completion_evidence || {}),
+      ...(patch.completion_evidence ? bounded(patch.completion_evidence) : {}),
+      state,
+    },
+    route_state: patch.route_state || routeStateFor(state),
+  };
+  for (const field of ATTRIBUTION_FIELDS) {
+    if (field in patch && field !== 'route_state' && field !== 'identity') {
+      next[field] = bounded(patch[field]);
+    }
+  }
+  if (patch.identity) {
+    next.invocation_identity.identity = normalizeIdentity(patch.identity);
+  }
+  return next;
+}
+
+export function outcomeCredit(receipt) {
+  if (!receipt || receipt.completion_evidence?.state !== 'completed') return false;
+  const invocation = receipt.invocation_evidence || {};
+  const postcondition = receipt.postcondition_evidence || {};
+  return invocation.receipt_id === receipt.receipt_id
+    && postcondition.receipt_id === receipt.receipt_id
+    && postcondition.verified === true;
+}
+
+export function inspectReceipt(receipt) {
+  if (!receipt || typeof receipt !== 'object') return null;
+  const identity = receipt.invocation_identity?.identity || {};
+  const selected = bounded(receipt.selected);
+  const actual = bounded(receipt.actual);
+  const selectedRoute = selected?.route_id || selected?.route || null;
+  const actualRoute = actual?.route_id || actual?.route || null;
+  return {
+    receipt_id: receipt.receipt_id,
+    schema_version: receipt.schema_version,
+    route_state: receipt.route_state || receipt.completion_evidence?.state,
+    completion_state: receipt.completion_evidence?.state || null,
+    identity: bounded(identity),
+    invocation: bounded({
+      adapter: receipt.invocation_identity?.adapter,
+      runtime: receipt.invocation_identity?.runtime,
+      pid: receipt.invocation_identity?.pid,
+      command: receipt.invocation_identity?.command,
+      args: receipt.invocation_identity?.args,
+      spawned_at: receipt.invocation_identity?.spawned_at,
+    }),
+    selected,
+    actual,
+    divergence: {
+      selected_route_id: selectedRoute,
+      actual_route_id: actualRoute,
+      changed: Boolean(selectedRoute && actualRoute && selectedRoute !== actualRoute),
+    },
+    alternatives: bounded(receipt.alternatives || []),
+    corrections: bounded(receipt.corrections || []),
+    substitution: bounded(receipt.substitution),
+    evidence: bounded(receipt.bounded_evidence || {}),
+    completion: bounded(receipt.completion_evidence || {}),
+    outcome_credit: outcomeCredit(receipt),
+  };
 }
 
 // Resolve the per-runtime receipts root. claude → ~/.claude/router/receipts/,
@@ -130,5 +349,8 @@ export class ReceiptStore {
   }
   observe(receiptId) {
     return read(receiptId, this.dir);
+  }
+  inspect(receiptId) {
+    return inspectReceipt(this.observe(receiptId));
   }
 }
