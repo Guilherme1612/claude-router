@@ -113,7 +113,21 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
       const path = join(leaseRoot, `${leaseId}.json`);
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf8'));
-      return data && typeof data === 'object' ? data : null;
+      // Minimal schema validation (WR-04): a stray or crafted .json dropped into
+      // the 0o700 lease dir must NOT be returned as a valid lease. Reject
+      // records missing required fields or with an out-of-enum status. This also
+      // closes the foreign-case gap in resolveLeaseAuthority (a crafted file
+      // with no freshness_evidence was previously treated as active).
+      if (!data || typeof data !== 'object') return null;
+      if (typeof data.lease_id !== 'string'
+          || typeof data.project_fingerprint !== 'string'
+          || typeof data.status !== 'string'
+          || !LEASE_STATUS_SET.has(data.status)
+          || !data.expiry || typeof data.expiry !== 'object'
+          || !data.freshness_evidence || typeof data.freshness_evidence !== 'object') {
+        return null;
+      }
+      return data;
     } catch {
       // T-40-03 fail-closed: corrupt/missing lease never authorizes work.
       return null;
