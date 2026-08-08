@@ -200,6 +200,7 @@ async function setupLeaseAndAdapter(testHome) {
 
 test('LEASE-05 at-most-once: second resume with same key is rejected by the durable claim', async () => {
   const TEST_HOME = mkdtempSync(join(tmpdir(), 'router-lease-resume-adapter-'));
+  const savedHome = process.env.HOME;
   process.env.HOME = TEST_HOME;
   try {
     const { fp, adapter } = await setupLeaseAndAdapter(TEST_HOME);
@@ -257,12 +258,14 @@ test('LEASE-05 at-most-once: second resume with same key is rejected by the dura
     assert.ok(inspected.claimed_actions.includes('k1'),
       'the durable claimed_actions array on the lease must contain k1');
   } finally {
+    process.env.HOME = savedHome;
     rmSync(TEST_HOME, { recursive: true, force: true });
   }
 });
 
 test('LEASE-05 adjacency: distinct actionIds claim independently on the resume path', async () => {
   const TEST_HOME = mkdtempSync(join(tmpdir(), 'router-lease-resume-distinct-'));
+  const savedHome = process.env.HOME;
   process.env.HOME = TEST_HOME;
   try {
     const { fp, adapter } = await setupLeaseAndAdapter(TEST_HOME);
@@ -296,6 +299,7 @@ test('LEASE-05 adjacency: distinct actionIds claim independently on the resume p
     assert.ok(inspected.claimed_actions.includes('k1'));
     assert.ok(inspected.claimed_actions.includes('k2'));
   } finally {
+    process.env.HOME = savedHome;
     rmSync(TEST_HOME, { recursive: true, force: true });
   }
 });
