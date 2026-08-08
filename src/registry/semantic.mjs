@@ -116,6 +116,10 @@ export function resolveSemanticOutcome({ outcome, records = [], relationships = 
       }
     }
   }
+  // Deterministic tiebreak: sort candidates by stable_id before selecting so
+  // the candidates[0] pick is byte-identical regardless of input record ordering
+  // (Map insertion order). Consistent with compileRelationshipGraph / deriveRelationships.
+  candidates.sort((a, b) => a.stable_id.localeCompare(b.stable_id));
   const match = candidates[0];
   return {
     schema_version: 1,
