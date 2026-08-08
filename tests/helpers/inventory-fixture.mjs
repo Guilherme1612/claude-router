@@ -173,6 +173,10 @@ export function contractEvidence(record, variant = 'accepted') {
     lifecycle_role: record.lifecycle_role,
     scope: record.scope,
     workflow_transitions: [],
+    action: record.invocation.availability === 'available' ? 'invoke' : 'none',
+    cost: 'unknown',
+    completion: { evidence_type: 'exit_code' },
+    native_invocation: { runtime: record.invocation.runtime || 'unknown' },
   };
   const evidence = Object.fromEntries(Object.entries(structural).map(([field, value]) => [field, [{
     value,

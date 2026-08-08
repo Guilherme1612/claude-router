@@ -16,7 +16,13 @@ export const CONTRACT_FIELDS = Object.freeze([
   'lifecycle_role',
   'scope',
   'workflow_transitions',
+  'action',
+  'cost',
+  'completion',
+  'native_invocation',
 ]);
+
+const EVIDENCE_CLASSES = new Set(['explicit', 'inferred', 'conflicting', 'unknown']);
 
 export const CONTRACT_POLICY = Object.freeze({
   policy_version: 'contract-policy-v1',
@@ -36,6 +42,10 @@ const DISPATCH_FIELDS = new Set([
   'invocation_kind',
   'scope',
   'workflow_transitions',
+  'action',
+  'cost',
+  'completion',
+  'native_invocation',
 ]);
 const FRESHNESS = new Set(['fresh', 'stale', 'unknown']);
 const SAFE_PROVENANCE = new Set(['adapter', 'manifest', 'correction', 'authored']);
@@ -56,7 +66,10 @@ const STRING_LIST_FIELDS = new Set([
 const ENUM_FIELDS = Object.freeze({
   reversibility: new Set(['unknown', 'reversible', 'irreversible']),
   risk: new Set(['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable']),
+  action: new Set(['unknown', 'invoke', 'query', 'observe', 'none']),
+  cost: new Set(['unknown', 'low', 'medium', 'high', 'critical']),
 });
+const OBJECT_FIELDS = new Set(['scope', 'completion', 'native_invocation']);
 
 function ordered(values) {
   return [...values].sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
@@ -78,10 +91,10 @@ export function validateContractFieldValue(field, value) {
       ? null
       : `contract_${field}_value_invalid`;
   }
-  if (field === 'scope') {
+  if (OBJECT_FIELDS.has(field)) {
     return value && typeof value === 'object' && !Array.isArray(value)
       ? null
-      : 'contract_scope_value_invalid';
+      : `contract_${field}_value_invalid`;
   }
   return typeof value === 'string' && value.length > 0
     ? null
@@ -158,6 +171,11 @@ function envelope(field, candidates) {
   if (!known) {
     rejected.push(...eligible.map(candidate => portableEvidence(candidate, false, reason)));
   }
+  let evidence_class;
+  if (assertedValues.size > 1) evidence_class = 'conflicting';
+  else if (!known) evidence_class = 'unknown';
+  else if (eligible.some(item => item.provenance === 'adapter')) evidence_class = 'explicit';
+  else evidence_class = 'inferred';
   return {
     state: known ? 'known' : 'unknown',
     ...(known ? { value: accepted.value } : {}),
@@ -170,6 +188,7 @@ function envelope(field, candidates) {
       ? Math.min(...eligible.map(item => item.confidence_basis_points))
       : 0,
     reason_codes: [reason],
+    evidence_class,
   };
 }
 
@@ -189,6 +208,10 @@ function authoritativeEvidence(record) {
     lifecycle_role: record.lifecycle_role,
     scope: record.scope,
     workflow_transitions: [],
+    action: record.invocation.availability === 'available' ? 'invoke' : 'none',
+    cost: 'unknown',
+    completion: { evidence_type: 'exit_code' },
+    native_invocation: { runtime: record.invocation.runtime || 'unknown' },
   };
   return Object.fromEntries(Object.entries(values).map(([field, value]) => [field, [{
     value,
@@ -414,6 +437,7 @@ export function applyContractOverlays(records, resolution) {
           freshness: 'fresh',
           confidence_basis_points: 10000,
           reason_codes: [`${field}_overlay_accepted`],
+          evidence_class: 'inferred',
         };
       }
     }
@@ -428,6 +452,7 @@ export function applyContractOverlays(records, resolution) {
           freshness: 'unknown',
           confidence_basis_points: 0,
           reason_codes: [`${field}_overlay_conflicting`],
+          evidence_class: 'conflicting',
         };
       }
     }
@@ -468,6 +493,9 @@ export function validateCapabilityContract(contract) {
       throw new TypeError(`capability.contract.fields.${field} explanation collections are required`);
     }
     if (!FRESHNESS.has(value.freshness)) throw new TypeError(`capability.contract.fields.${field}.freshness is invalid`);
+    if (value.evidence_class !== undefined && !EVIDENCE_CLASSES.has(value.evidence_class)) {
+      throw new TypeError(`capability.contract.fields.${field}.evidence_class is invalid`);
+    }
     if (!Number.isInteger(value.confidence_basis_points)
       || value.confidence_basis_points < 0
       || value.confidence_basis_points > 10000) {

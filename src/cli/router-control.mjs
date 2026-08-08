@@ -409,6 +409,7 @@ function fieldProjection(value) {
       ? Math.max(0, Math.min(10000, value.confidence_basis_points))
       : 0,
     reason_codes: safeTokenList(value?.reason_codes),
+    evidence_class: safeToken(value?.evidence_class, 'unknown'),
   };
 }
 
