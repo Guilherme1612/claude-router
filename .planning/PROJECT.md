@@ -8,18 +8,21 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.7 Runtime Safety and Release Truth (SHIPPED 2026-08-09)
+## Current Milestone: v1.8 Adaptive Semantic Routing and Continuity
 
-**Goal:** Make the v1.6 control-plane capabilities real, bounded, reproducible, and releasable in installed Claude and Codex runtimes.
+**Goal:** Infer each user's intended outcome, compose the least sufficient locally available capabilities, preserve truthful continuity and safe autonomy, and prove routing quality without adding prompt-path weight.
 
 **Target features:**
-- Dispatch and storage safety — atomically claim work, enforce resource bounds, contain lease/receipt paths, and preserve durable at-most-once behavior in both runtimes
-- Production integration — wire and deploy proportional planning, causal learning, migration, dispatch, and their transitive dependencies to Claude and Codex
-- Validation and release integrity — repair deterministic regressions, complete Nyquist evidence, prove installed-runtime behavior, and make archive/tag state reproducible
-
-**v1.7 completed and release-verified on 2026-08-09.** Phases 47-49 passed their safety, production-integration, validation, installed-runtime, audit, archive, and release gates. All 15 v1.7 requirements are satisfied; external publication remains owner-controlled.
+- Runtime-local typed coverage — classify every discoverable Claude and Codex skill, agent, command, tool, hook, and workflow without copying one user's setup into product truth
+- Semantic workflow composition — infer goals, subjects, operations, constraints, evidence, and execution signals from varied language, then select the least sufficient compatible local capability set
+- Truthful continuity and autonomy — show last verified work, current state, and one likely next action; resume automatically only under a valid scoped autonomy lease
+- Portable preferences — apply optional user/runtime/project/workflow preference overlays as tie-breakers without bypassing availability, compatibility, authority, risk, or workflow requirements
+- Independent evaluation — test paraphrase routing, composition, safety, latency, context, tool calls, receipts, verification, lifecycle, and installed-runtime parity without a composite score
+- Lightweight lifecycle — extend the existing compiled-index and installer paths with no prompt-time scan, LLM, network service, embeddings store, daemon, or second router
 
 ## Current State
+
+**v1.7 completed and release-verified on 2026-08-09.** Phases 47-49 passed their safety, production-integration, validation, installed-runtime, audit, archive, and release gates. All 15 v1.7 requirements are satisfied; external publication remains owner-controlled.
 
 **v1.4 shipped and verified on 2026-07-31.** Router closes the mode-map coverage gap: cache versioning folds `weightsMtime`, `routeTargetsExist` guards every cache hit against stale targets, and `capRouteRender` hard-caps injection counts before any curation could poison a cached route or creep latency (Phase 27, SAF-01..04); every manifest rebuild produces a typed coverage report classifying every capability into an `expected_*` taxonomy with bi-directional orphan detection, report-before-failure strict CI gating, and a fail-open freshness reminder in the hook (Phase 28, COV-01..05); and the curated schema-v3 mode-map ships 18 lifecycle/design skill routes with output-type-anchored signal patterns, canonical collision lint, and a zero-wrong-high 0.591/0.291/0.191 confidence tuple re-derived from an expanded 58-record calibration set (Phase 29, MAP-01..03, SIG-01..04).
 
@@ -109,11 +112,12 @@ The user can write the minimum useful prompt and still get the best available wo
 
 ### Active
 
-- Dispatch work is atomically claimed once and bounded by enforced time/output/resource contracts.
-- Lease and receipt state is private, contained, race-safe, and cross-runtime equivalent.
-- Strategy, learning, migration, and dispatch have production callers and ship in both installed runtime bundles.
-- Learning and migration use unique, protected, durable evidence rather than caller-attested booleans.
-- Repository, installed-runtime, Nyquist, audit, roadmap, archive, and tag evidence agree before release.
+- Every discoverable capability in each supported runtime has a typed, provenance-aware coverage classification and a safe semantic eligibility contract.
+- Natural-language intent resolves to workflow requirements and the least sufficient compatible local capability set without requiring exact capability names or trigger words.
+- Runtime-specific projections preserve canonical semantic behavior while invoking only host-native Claude or Codex capabilities.
+- Startup continuity reports only verified last/current/next state and resumes work only inside a valid autonomy lease.
+- Local preference overlays influence compatible selection without becoming product defaults or widening authority.
+- Deterministic fixtures and installed-runtime evidence independently measure correctness, safety, latency, context, tool calls, receipts, verification, and lifecycle behavior.
 
 ### Out of Scope
 
@@ -129,6 +133,7 @@ The user often provides intentionally short instructions. Prompt text alone is t
 
 The approved design and implementation plan are:
 
+- `docs/superpowers/specs/2026-08-09-router-v1.8-adaptive-semantic-routing-design.md`
 - `docs/superpowers/specs/2026-08-09-router-v1.7-runtime-safety-release-truth-design.md`
 - `docs/superpowers/specs/2026-08-02-router-v1.6-autonomous-control-plane-design.md`
 - `docs/superpowers/specs/2026-07-14-dual-runtime-auto-updating-router-design.md`
@@ -168,6 +173,10 @@ The approved design and implementation plan are:
 | Treat deployed gate fixtures and helper-directory cleanup as installer-owned lifecycle state | Installed release evidence must be executable and uninstall must remove all owned artifacts | ✓ Good |
 | gateAction composes OVER resolveAction (thin post-processor); blocked/clarify pass through unchanged with policy attached for telemetry | Preserve the 22 existing actions tests; keep the authority gate additive rather than re-implementing the dispatch gate | ✓ Good |
 | authority.mjs loaded via top-level await with fail-open null sentinel; router never emits decision:'block' (block policies produce no hint) | Hot path stays <100ms, read-only, fail-open; a missing/stale policy module never blocks a prompt | ✓ Good |
+| Define 100% mapping as complete runtime-local typed classification, not a phrase table | Exact trigger maps cannot remain portable across personalized installations | — Pending |
+| Resolve semantic workflow roles before capability names | Users should not need to know which local skill, agent, or command satisfies their outcome | — Pending |
+| Keep personal capability bundles in optional local preference overlays and test fixtures | Maintainer preferences must be tested without becoming framework requirements | — Pending |
+| Report routing, latency, context, tool-call, receipt, and verification dimensions separately | A composite score would hide safety or correctness regressions | — Pending |
 
 ## Evolution
 
@@ -187,4 +196,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-09 after v1.7 milestone closeout*
+*Last updated: 2026-08-09 after v1.8 milestone definition*

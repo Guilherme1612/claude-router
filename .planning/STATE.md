@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.7
-milestone_name: Runtime Safety and Release Truth
-current_phase: null
-status: Awaiting next milestone
-stopped_at: Milestone v1.7 complete; archive and tag closeout finished
-last_updated: "2026-08-09T02:09:12.365Z"
+milestone: v1.8
+milestone_name: Adaptive Semantic Routing and Continuity
+status: planning
+last_updated: "2026-08-09T12:18:13.654Z"
 last_activity: 2026-08-09
-last_activity_desc: Milestone v1.7 completed and archived
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 9
-  completed_plans: 9
-  percent: 100
-current_phase_name: "Milestone v1.7 complete"
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,10 +24,10 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 
 ## Current Position
 
-Phase: Milestone v1.7 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-09 — Milestone v1.7 completed and archived
+Status: Defining requirements
+Last activity: 2026-08-09 — Milestone v1.8 started
 
 ## Performance Metrics
 
