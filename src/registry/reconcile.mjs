@@ -388,8 +388,10 @@ export function reconcileCandidate(options = {}) {
     for (const record of candidate.records) {
       const inert = ['container', 'configuration', 'instruction', 'opaque'].includes(record.semantic_type)
         || ['container', 'configuration', 'instruction', 'opaque'].includes(record.lifecycle_role);
-      const recommendationOnly = record.contract?.fields?.risk?.value === 'unknown'
-        && record.contract?.fields?.reversibility?.value === 'unknown';
+      const recommendationOnly = record.dispatchable === false
+        && ['side_effects', 'authority', 'dependencies', 'risk'].some(
+          field => record.contract?.fields?.[field]?.state === 'unknown',
+        );
       if (inert && record.lifecycle === 'partial') continue;
       if (record.lifecycle === 'ready'
         && record.invocation.command?.trim()
