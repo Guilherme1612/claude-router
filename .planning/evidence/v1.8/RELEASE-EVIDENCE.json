@@ -60,7 +60,7 @@
   "milestone_audit": true,
   "roadmap": true,
   "archive": true,
-  "tag": false,
+  "tag": true,
   "architecture_graph": {
     "status": "queried-existing-graph",
     "report": "graphify-out/GRAPH_REPORT.md"
