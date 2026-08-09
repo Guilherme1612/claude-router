@@ -293,6 +293,88 @@ test('[phase21-red:convergence] incomplete scan degrades without replacing the l
   await h.controller.close();
 });
 
+test('watcher publication exposes bounded runtime coverage and withdraws stale active authority', async () => {
+  const writes = [], withdrawals = [];
+  const active = {
+    authority_status: 'active',
+    tuple_version_id: 't1-active',
+    bytes: '{"active":true}\n',
+    fingerprint: 'active-fingerprint',
+  };
+  const built = {
+    registry: {
+      schema_version: 1,
+      records: [
+        { dispatchable: true, coverage: { classification: 'routable' } },
+        { dispatchable: false, coverage: { classification: 'unavailable' } },
+      ],
+    },
+    diagnostics: [{ code: 'bounded_diagnostic', logical_root: 'claude_global' }],
+    summary: { runtimes: { claude: 1, codex: 1 }, dispatchable_count: 1, record_count: 2 },
+  };
+  const reconcile = createRegistryReconciler({
+    candidate_path: '/candidate', report_path: '/report', activation_root: '/owned',
+  }, {
+    acquireRegistry: () => ({ generation: 0 }),
+    refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+    assembleRegistry: () => built,
+    readActive: async () => active,
+    reconcileCandidate: () => ({
+      disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report',
+      verdicts: [], active_bytes: active.bytes, active_fingerprint: active.fingerprint,
+    }),
+    writeJson: async (path, value) => writes.push({ path, value }),
+    withdrawActive: async value => withdrawals.push(value),
+  });
+
+  await reconcile({
+    diff: { events: [], diagnostics: [] }, trigger: 'startup',
+    current: {
+      hash: 'a'.repeat(64),
+      logicalRoots: [
+        { logicalRoot: 'claude_global', complete: true, diagnosticCodes: [] },
+        { logicalRoot: 'codex_home', complete: true, diagnosticCodes: [] },
+      ],
+    },
+  });
+  assert.equal(reconcile.lastReconciliation.inventory_epoch, 'a'.repeat(64));
+  assert.deepEqual(reconcile.lastReconciliation.runtime_observation_counts, { claude: 1, codex: 1 });
+  assert.deepEqual(reconcile.lastReconciliation.coverage_classification_counts, { routable: 1, unavailable: 1 });
+  assert.equal(reconcile.lastReconciliation.dispatchable_count, 1);
+  assert.equal(reconcile.lastReconciliation.authority_status, 'active');
+
+  await reconcile({
+    diff: { events: [{ primary: 'removed', facets: [], old_provenance: [], new_provenance: [] }], diagnostics: [] },
+    trigger: 'dropped-events',
+    current: {
+      hash: 'b'.repeat(64),
+      logicalRoots: [
+        { logicalRoot: 'claude_global', complete: false, diagnosticCodes: ['root_missing'] },
+        { logicalRoot: 'codex_home', complete: true, diagnosticCodes: [] },
+      ],
+    },
+  });
+  assert.deepEqual(withdrawals, [{ reason_code: 'incomplete_scan', stale_roots: ['claude_global'] }]);
+  const staleReport = writes.at(-1).value;
+  assert.equal(staleReport.disposition, 'quarantined');
+  assert.equal(staleReport.authority_status, 'empty');
+  assert.equal(staleReport.candidate_disposition, 'quarantined');
+  assert.equal(staleReport.dispatchable_count, 0);
+  assert.equal(reconcile.lastReconciliation.watcher_state, 'degraded');
+  assert.equal(reconcile.lastReconciliation.next_recovery_action, 'authoritative-repair');
+  assert.equal(reconcile.lastReconciliation.authority_status, 'empty');
+  assert.equal(JSON.stringify(staleReport).includes('active'), false);
+});
+
+test('production verification keeps the six runtime-truth gate identities independent', () => {
+  const ids = ['privacy', 'latency', 'token_budget', 'reconciliation_safety', 'regression_suite', 'incremental_full_equivalence'];
+  for (const id of ids) {
+    assert.equal(PRODUCTION_GATE_RUNNERS[id]?.id, id);
+    assert.equal(typeof PRODUCTION_GATE_RUNNERS[id]?.run, 'function');
+  }
+  assert.deepEqual(ids.filter(id => REQUIRED_ACTIVATION_GATES.includes(id)), ids);
+});
+
 test('deployed reconciler consumes the real lifecycle diff and advances acquisition only after both publications', async () => {
   const initial = { claude: { observations: [], diagnostics: [] }, codex: { observations: [], diagnostics: [] }, generation: 0 };
   const lifecycle = { events: [], diagnostics: [], marker: 'authoritative-diff' };
