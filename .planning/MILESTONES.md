@@ -1,5 +1,16 @@
 # Milestones
 
+## v1.9 Live Runtime Deployment & Observability Hardening (Shipped: 2026-08-09)
+
+**Phases completed:** 4 phases, 6 plans, 0 tasks
+
+**Key accomplishments:**
+
+- A reusable, privacy-safe snapshot boundary now proves live runtime identity without persisting raw user content.
+- The live Claude/Codex installation now has recorded upgrade, preservation, restart, uninstall, and reinstall evidence with bounded ownership cleanup.
+
+---
+
 ## v1.8 Adaptive Semantic Routing and Continuity (Shipped: 2026-08-09)
 
 **Phases completed:** 6 phases, 12 plans, 5 tasks

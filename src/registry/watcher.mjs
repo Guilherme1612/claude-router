@@ -741,6 +741,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
     };
     if (onPublished) await onPublished(reconcile.lastReconciliation);
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
+    let verificationEvidence = null;
     if (config.activation_root) {
       let recoveryReady = recovered || active.authority_status === 'empty';
       let knownGood = null;
@@ -786,6 +787,13 @@ export function createRegistryReconciler(config, dependencies = {}) {
             candidate: built.registry, reconciliation: report, mapping, policy: config.activation_policy || {},
             equivalence: { previous: baseline, diff: equivalenceDiff, options: acquisitionOptions },
           });
+          verificationEvidence = {
+            disposition: verification?.disposition || null,
+            complete: verification?.complete === true,
+            gate_count: Array.isArray(verification?.gates) ? verification.gates.length : 0,
+            failed_gate_ids: (verification?.gates || []).filter(gate => gate?.passed !== true).map(gate => gate?.id).filter(Boolean).slice(0, 8),
+            verification_fingerprint: verification?.verification_fingerprint || null,
+          };
           if (verification.disposition === 'passing' && verification.complete === true) {
             if (knownGood === null) {
               // Bootstrap path: no known-good version exists to canary against.
@@ -954,6 +962,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
         activation_reason: activation.reason_code || null,
         ...(activation.tuple_version_id ? { tuple_version_id: activation.tuple_version_id } : {}),
       } : {}),
+      ...(verificationEvidence ? { verification: verificationEvidence } : {}),
     };
   };
   return reconcile;

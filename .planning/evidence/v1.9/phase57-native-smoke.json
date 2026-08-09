@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "evidence": "phase57-native-smoke-v1",
+  "fixture": "installed/tests/phase-38/fixtures/harmless.mjs",
+  "receipt_policy": "isolated temporary receipt roots; raw fixture output excluded",
+  "runs": [
+    {
+      "runtime": "claude",
+      "adapter": "claude-dispatch/1",
+      "identity_runtime": "claude",
+      "pid_type": "number",
+      "completion": "completed",
+      "exit_code": 0,
+      "receipt_verified": true,
+      "receipt_id": "8a4354f414de0ff0cc3b16cb752f53aaae306491026f7173839e9ffc32000cbf"
+    },
+    {
+      "runtime": "codex",
+      "adapter": "codex-dispatch/1",
+      "identity_runtime": "codex",
+      "pid_type": "number",
+      "completion": "completed",
+      "exit_code": 0,
+      "receipt_verified": true,
+      "receipt_id": "42a00b6365cd3883afc44f82e8cef5aca1897c80e6eff5f2b4c1df5082f4c5b5"
+    }
+  ]
+}

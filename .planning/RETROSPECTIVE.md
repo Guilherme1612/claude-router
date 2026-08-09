@@ -230,3 +230,38 @@ v1.3.1/v1.5 — release-gate hardening (deferred items above) + maintenance risk
 ### Next Milestone
 
 Define the next release with `/gsd-new-milestone`.
+
+## v1.9 — Live Runtime Deployment & Observability Hardening
+
+**Shipped:** 2026-08-09
+**Phases:** 4 (56–59) | **Plans:** 6 | **Tests:** 1,656/1,656 serial
+
+### What Was Built
+
+- Owned live Claude/Codex upgrade, preservation, restart, recovery, and uninstall evidence with privacy-safe snapshots.
+- Truthful native health and bounded watcher fallback, including isolated Claude/Codex invocation receipts.
+- A route-anchored, off-hot-path observability report that correlates bounded outcomes and classifies graph-missing records without raw prompts.
+- Production acceptance evidence, archive invariant verification, safe-empty release preflight, and final tag gates.
+
+### What Worked
+
+- Native evidence was separated from fixture-only evidence, so both runtimes have explicit identity, completion, verification, and receipt proof.
+- The controller preserved an empty active authority when the live inventory had zero dispatchable routes instead of fabricating an executable tuple.
+- Parse-clean telemetry, audit, shadow, receipt, and health artifacts made the remaining evidence gaps measurable rather than implicit.
+
+### What Was Inefficient
+
+- The first full-suite capture was transiently inconsistent; a second serial corpus run established the authoritative 1,656/1,656 result.
+- The delegated integration checker stalled after bounded waits, so the final cross-phase review was completed inline from source, tests, planning artifacts, and live evidence.
+- The archive verifier assumed the older `.planning/archive` layout and needed a small compatibility fix for the current `.planning/milestones` layout.
+
+### Tech Debt Carried Forward
+
+- Historical telemetry still has null outcome/downstream fields because old records are not rewritten.
+- Graph-missing remediation remains open for 848 Claude and 4 Codex records.
+- Current live receipts have zero telemetry links; owner-authorized dispatch against a dispatchable live inventory is still needed for continuous end-to-end linkage.
+- Resource-exhaustion fallback still rescans all roots; measure before introducing per-root polling.
+
+### Next Milestone
+
+Not defined. Start with `/gsd-new-milestone` after choosing whether the next increment prioritizes live dispatch linkage, graph remediation, or fallback-scan performance.

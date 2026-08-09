@@ -48,6 +48,52 @@ test('LIFE-06: unsupported runtimes must remain recommendation-only', () => {
   assert.ok(result.blockers.includes('unsupported_runtime_dispatchable'));
 });
 
+test('v1.9: verified zero-dispatchable inventory may preserve an empty active tuple', () => {
+  const result = reconcileReleaseEvidence(evidence({
+    installed: {
+      claude: {
+        ...installed('claude'),
+        semantic_active: false,
+        safe_empty_active: true,
+        candidate_disposition: 'eligible',
+        verification_passing: true,
+        active_tuple_absent: true,
+        dispatchable_count: 0,
+      },
+      codex: {
+        ...installed('codex'),
+        semantic_active: false,
+        safe_empty_active: true,
+        candidate_disposition: 'eligible',
+        verification_passing: true,
+        active_tuple_absent: true,
+        dispatchable_count: 0,
+      },
+    },
+  }));
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.blockers, []);
+});
+
+test('v1.9: incomplete safe-empty evidence remains blocked', () => {
+  const result = reconcileReleaseEvidence(evidence({
+    installed: {
+      claude: {
+        ...installed('claude'),
+        semantic_active: false,
+        safe_empty_active: true,
+        candidate_disposition: 'eligible',
+        verification_passing: true,
+        active_tuple_absent: true,
+        dispatchable_count: 1,
+      },
+      codex: installed('codex'),
+    },
+  }));
+  assert.equal(result.status, 'blocked');
+  assert.ok(result.blockers.includes('installed_claude_semantic_missing'));
+});
+
 test('LIFE-02/05: installed module closure includes the activated semantic and continuity seams', () => {
   const source = readFileSync(join(REPO_ROOT, 'src/lifecycle/router-lifecycle.mjs'), 'utf8');
   for (const module of ['intent/semantic.mjs', 'orchestrator/compose.mjs', 'orchestrator/preferences.mjs', 'steward/continuity.mjs']) {

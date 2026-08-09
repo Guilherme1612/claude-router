@@ -116,6 +116,7 @@ test('telemetry: telemetryEntryFromState emits a runtime field in {claude, codex
     typeof entry.runtime === 'string' && ['claude', 'codex'].includes(entry.runtime),
     `runtime field must be claude|codex, got ${entry.runtime}`,
   );
+  assert.equal(entry.route_id, 'gsd-debug', 'telemetry must carry the selected route anchor');
 });
 
 // --- Fail-open enum clamp (V5 input validation boundary / T-31-01) ----------

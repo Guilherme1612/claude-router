@@ -73,6 +73,16 @@ test('Claude native discovery covers global, plugin, agents-store, project, hook
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('Claude root hook package metadata is not treated as a native hook', () => {
+  const f = fixture();
+  try {
+    put(join(f.claudeRoot, 'hooks/package.json'), { type: 'commonjs' });
+    const result = claude.discoverRoots({ claudeRoot: f.claudeRoot });
+    assert.equal(result.observations.some((entry) => entry.provenance?.[0]?.relative_path === 'hooks/package.json'), false);
+    assert.equal(result.diagnostics.some((entry) => entry.relative_path === 'hooks/package.json'), false);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('Codex native discovery covers skills, plugins, agents, hooks, configuration, project scope, and dependencies', () => {
   const f = fixture();
   try {

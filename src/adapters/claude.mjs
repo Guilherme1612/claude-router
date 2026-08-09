@@ -204,6 +204,7 @@ function claudeLayout(rel) {
   // `plugins/cache/<id>/<ver>/...` (still scanned) or `plugins/<id>/...`; the
   // recognized plugin metadata path is `plugins/<id>/plugin.json`.
   if (rel.startsWith('plugins/marketplaces/')) return null;
+  if (rel === 'hooks/package.json') return null;
   if (rel === 'settings.json') return { type: 'settings', format: 'json' };
   if (/^(CLAUDE|AGENTS)\.md$/.test(rel) || /^instructions\/[^/]+\.md$/.test(rel)) {
     return { type: 'instruction', semanticType: 'instruction', lifecycleRole: 'instruction', format: 'text' };

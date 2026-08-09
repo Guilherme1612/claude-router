@@ -141,7 +141,7 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 2 = coverage/audit.mjs × 2 roots
     // + 8 = 4 Phase 38 dispatch adapter modules (contract, receipt, claude, codex) × 2 roots
     // = 101 (modules-only deploy)
-    // + 110 = 55 moduleNames mirrored to src/ × 2 roots (including the complete
+    // + 114 = 57 moduleNames mirrored to src/ × 2 roots (including the complete
     //   registry, health, steward, and approval dependency closure)
     //   gate fixtures + router.calibrate.mjs `../src/...` imports resolve in production)
     // + 10 = 5 gate entrypoints (router.calibrate.mjs, calibration-tasks.json,
@@ -160,8 +160,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 12 = 3 production integration modules × 2 roots × 2 deploy paths
     //   (Phase 48 PROD-02: strategy, learning, migration)
     // + 20 = 5 v1.8 semantic/continuity modules × 2 roots × 2 deploy paths
-    // = 323
-    assert.equal(manifest.files.length, 323);
+    // + 8 = 2 gate runtime modules deployed to modules/ and src/ × 2 roots
+    // = 331
+    assert.equal(manifest.files.length, 331);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

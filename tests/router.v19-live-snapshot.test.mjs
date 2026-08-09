@@ -55,6 +55,10 @@ function fixture() {
   writeJson(join(ownedRoot, 'controller', 'config.json'), { schema_version: 1, state_path: 'controller/scan-state.json' });
   writeJson(join(ownedRoot, 'controller', 'status.json'), {
     state: 'ready', heartbeat: 100, pid: 1, instance_id: 'instance-1', configuration_fingerprint: 'config-hash',
+    reconciliation: {
+      activation_reason: 'verification_non_passing', activation_status: 'preserved', disposition: 'eligible',
+      verification: { disposition: 'non_passing', complete: true, gate_count: 8, failed_gate_ids: ['latency'], verification_fingerprint: 'verify-hash', raw: 'omit me' },
+    },
   });
   writeJson(join(ownedRoot, 'controller', 'request.json'), { schema_version: 1, action: 'none' });
   writeJson(join(ownedRoot, 'controller', 'scan-state.json'), { schema_version: 1, state: 'idle', generation: 2 });
@@ -102,6 +106,9 @@ test('live snapshot is explicit-root, allowlisted, and stable apart from capture
     assert.deepEqual(a, b);
     assert.equal(a.source.router.sha256, sha256(readFileSync(f.sourceRouter)));
     assert.equal(a.runtimes.claude.controller.status.fields.state, 'ready');
+    assert.deepEqual(a.runtimes.claude.controller.status.fields.reconciliation.verification, {
+      disposition: 'non_passing', complete: true, gate_count: 8, failed_gate_ids: ['latency'], verification_fingerprint: 'verify-hash',
+    });
     assert.equal(a.runtimes.claude.active_tuple.fields.tuple_version_id, 'tuple-1');
     assert.equal(a.runtimes.codex.ownership_marker.exists, true);
     const serialized = JSON.stringify(a);

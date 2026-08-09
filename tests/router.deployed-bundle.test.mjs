@@ -16,6 +16,11 @@ const EXPECTED_EVOLUTION_MODULES = [
   'evolution/telemetry-bridge.mjs',
 ];
 
+const EXPECTED_GATE_RUNTIME_MODULES = [
+  'runtime/router.mjs',
+  'runtime/router.evolve.mjs',
+];
+
 test('Task3.1 moduleNames array includes all four evolution/* modules', () => {
   // moduleNames is a local const inside installRouter; assert each entry
   // appears as a string literal in the source.
@@ -33,6 +38,13 @@ test('Task3.2 source files exist on disk at expected relative path', () => {
   for (const name of EXPECTED_EVOLUTION_MODULES) {
     const path = resolve(sourceRoot, name);
     assert.doesNotThrow(() => readFileSync(path), `missing source file: ${name}`);
+  }
+});
+
+test('production latency fixtures receive runtime sources in the deployed mirror', () => {
+  for (const name of EXPECTED_GATE_RUNTIME_MODULES) {
+    assert.ok(lifecycleSrc.includes(`'${name}'`), `moduleNames missing gate runtime entry: ${name}`);
+    assert.doesNotThrow(() => readFileSync(resolve(sourceRoot, name)), `missing source file: ${name}`);
   }
 });
 

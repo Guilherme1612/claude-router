@@ -138,6 +138,13 @@ function jsonSummary(file, fields) {
         ]);
         selected[key] = Object.fromEntries(Object.entries(value[key] || {})
           .filter(([nestedKey]) => allowed.has(nestedKey)));
+        if (value[key]?.verification && typeof value[key].verification === 'object') {
+          const verification = value[key].verification;
+          selected[key].verification = Object.fromEntries([
+            'disposition', 'complete', 'gate_count', 'failed_gate_ids', 'verification_fingerprint',
+          ].filter(field => Object.prototype.hasOwnProperty.call(verification, field))
+            .map(field => [field, verification[field]]));
+        }
       } else {
         selected[key] = value[key];
       }

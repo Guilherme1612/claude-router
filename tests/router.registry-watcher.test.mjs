@@ -399,6 +399,30 @@ test('eligible watcher pipeline maps then verifies then activates, including saf
   assert.equal(reconcile.lastReconciliation.activation_status, 'activated');
 });
 
+test('eligible watcher publishes bounded verification gate evidence when activation is preserved', async () => {
+  const reconcile = createTestRegistryReconciler({ candidate_path: '/candidate', report_path: '/report', activation_root: '/owned' }, {
+    acquireRegistry: () => ({ generation: 0 }),
+    refreshIncrementalAcquisition: previous => ({ generation: previous.generation + 1 }),
+    assembleRegistry: () => ({ registry: { schema_version: 1, records: [reconcilerCapability()] }, diagnostics: [], summary: {} }),
+    readActive: async () => ({ bytes: '{}\\n', fingerprint: 'active' }),
+    reconcileCandidate: () => ({ disposition: 'eligible', candidate_fingerprint: 'candidate', report_fingerprint: 'report', verdicts: [], active_bytes: '{}\\n', active_fingerprint: 'active' }),
+    writeJson: async () => {},
+    recoverActiveVersion: async () => ({ recovery_status: 'healthy' }),
+    mapCandidateRegistry: async () => ({ schema_version: 1, subjects: [{ disposition: 'unmapped' }], summary: { disposition: 'complete', ambiguous: 0 } }),
+    produceActivationVerification: async () => ({
+      disposition: 'non_passing', complete: true, verification_fingerprint: 'verification',
+      gates: [{ id: 'latency', passed: true }, { id: 'privacy', passed: false }, { id: 'regression_suite', passed: false }],
+    }),
+  });
+
+  await reconcile({ diff: { events: [], diagnostics: [] } });
+  assert.deepEqual(reconcile.lastReconciliation.verification, {
+    disposition: 'non_passing', complete: true, gate_count: 3,
+    failed_gate_ids: ['privacy', 'regression_suite'], verification_fingerprint: 'verification',
+  });
+  assert.equal(reconcile.lastReconciliation.activation_reason, 'verification_non_passing');
+});
+
 test('installed activation paths bootstrap one immutable version and active pointer', async () => {
   const ownedRoot = mkdtempSync(join(tmpdir(), 'router-watcher-activation-'));
   const candidate = { schema_version: 1, records: [reconcilerCapability()] };

@@ -8,17 +8,13 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.9 Live Runtime Deployment & Observability Hardening
+## Current Milestone: None — v1.9 shipped 2026-08-09
 
-**Goal:** Move v1.8 from isolated release proof into a verifiable live Claude/Codex installation without weakening safety, privacy, or prompt-path performance.
-
-**Target features:**
-- Live Claude/Codex upgrade truth — install the current owned bundle, preserve user configuration, and prove active tuples, manifests, hooks, rollback, and uninstall
-- Native runtime health — verify controllers, watcher recovery, native invocation, and bounded resource-exhaustion fallback under the real runtime environment
-- Actionable observability — correlate selected/invoked/completed outcomes without raw prompts and resolve or explain graph-missing telemetry
-- Production acceptance — run live UAT, full regression, release preflight, archive, and tag gates before claiming v1.9
+The next milestone is not defined yet. Start with `/gsd-new-milestone` when the next owner-approved scope is ready.
 
 ## Current State
+
+**v1.9 "Live Runtime Deployment & Observability Hardening" shipped on 2026-08-09.** All 16 requirements across Phases 56-59 are satisfied. The live Claude/Codex installations are upgraded and verified, native smoke evidence is captured for both runtimes, observability reports are parse-clean and privacy-safe, and the serial full suite is 1,656/1,656. The live controller deliberately preserves an empty active authority because the current inventory has zero dispatchable routes; historical outcome nulls and graph-missing records remain explicit follow-up work.
 
 **v1.7 completed and release-verified on 2026-08-09.** Phases 47-49 passed their safety, production-integration, validation, installed-runtime, audit, archive, and release gates. All 15 v1.7 requirements are satisfied; external publication remains owner-controlled.
 
@@ -108,13 +104,11 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Deterministic local learning with calibrated evidence gates and reversible rollback — v1.6 (Phase 45, LEARN-01..04)
 - ✓ Atomic migration, lifecycle scope, and dual-runtime release verification — v1.6 (Phase 46, MIG-01..05)
 - ✓ Runtime-local semantic routing, continuity, independent evaluation, and isolated Claude/Codex release proof — v1.8 (Phases 50–55)
+- ✓ Live installer truth, native runtime health, privacy-safe observability, and production release acceptance — v1.9 (Phases 56–59)
 
 ### Active
 
-- Live Claude and Codex installations can be upgraded and recovered without overwriting user-owned configuration.
-- Runtime controllers and watchers report truthful ready/current/reconciled state, including bounded recovery when native watching is unavailable.
-- Runtime telemetry correlates outcomes and graph availability while preserving the no-raw-prompt privacy boundary.
-- A live production acceptance gate proves native invocation, receipts, performance, rollback, and release truth.
+- No milestone requirements are active. Define the next milestone before adding new scope.
 
 ### Out of Scope
 
@@ -174,7 +168,7 @@ The approved design and implementation plan are:
 | Resolve semantic workflow roles before capability names | Users should not need to know which local skill, agent, or command satisfies their outcome | — Pending |
 | Keep personal capability bundles in optional local preference overlays and test fixtures | Maintainer preferences must be tested without becoming framework requirements | — Pending |
 | Report routing, latency, context, tool-call, receipt, and verification dimensions separately | A composite score would hide safety or correctness regressions | — Pending |
-| Treat v1.9 as live deployment and observability hardening, not new routing functionality | The v1.8 gap is operational proof in real homes, not another semantic feature layer | — Pending |
+| Treat v1.9 as live deployment and observability hardening, not new routing functionality | The v1.8 gap is operational proof in real homes, not another semantic feature layer | ✓ Good |
 
 ## Evolution
 
@@ -194,4 +188,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-09 after v1.9 milestone definition*
+*Last updated: 2026-08-09 after v1.9 milestone archival*

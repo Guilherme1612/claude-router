@@ -3399,6 +3399,9 @@ export function telemetryEntryFromState(decision, startNs) {
   const ts = Date.now();
   const prompt_signature = denyFiltered ? null : promptSignature(decision.normalizedPrompt, decision.intentKeywords || []);
   const suggested_mode = decision.route ? decision.route.mode : null;
+  // OBS-01: carry the selected route anchor into telemetry. Receipt attribution
+  // already accepts the same bounded route identity; correlation stays off-path.
+  const route_id = decision.route ? (decision.route.id || decision.route.mode || null) : null;
   const suggested_skills = decision.route ? (decision.route.recommended_skills || []) : [];
   const suggested_agents = decision.route ? (decision.route.recommended_agents || []) : [];
   const cache_status = decision.cache?.status || 'miss';
@@ -3406,6 +3409,7 @@ export function telemetryEntryFromState(decision, startNs) {
     ts,
     prompt_signature,
     suggested_mode,
+    route_id,
     suggested_skills,
     suggested_agents,
     cache_hit: cache_status === 'hit',

@@ -382,6 +382,9 @@ export async function installRouter(options) {
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
   const repoRoot = resolve(sourceRoot, '..');
   const moduleNames = [
+    // The latency gate runs from the deployed ownedRoot and resolves these
+    // runtime sources relative to its fixture cwd.
+    'runtime/router.mjs', 'runtime/router.evolve.mjs',
     'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',

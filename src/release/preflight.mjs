@@ -13,7 +13,12 @@ function runtimeBlockers(runtime, evidence) {
   const blockers = [];
   if (evidence?.pass !== true) blockers.push(`installed_${runtime}_evidence_missing`);
   if (!evidence?.ownership_ledger) blockers.push(`installed_${runtime}_ownership_missing`);
-  if (!evidence?.semantic_active) blockers.push(`installed_${runtime}_semantic_missing`);
+  const safeEmptyActive = evidence?.safe_empty_active === true
+    && evidence?.candidate_disposition === 'eligible'
+    && evidence?.verification_passing === true
+    && evidence?.active_tuple_absent === true
+    && evidence?.dispatchable_count === 0;
+  if (!evidence?.semantic_active && !safeEmptyActive) blockers.push(`installed_${runtime}_semantic_missing`);
   if (!evidence?.continuity) blockers.push(`installed_${runtime}_continuity_missing`);
   if (!evidence?.native_invocation_identity) blockers.push(`installed_${runtime}_native_evidence_missing`);
   if (!evidence?.receipt_verification) blockers.push(`installed_${runtime}_receipt_verification_missing`);

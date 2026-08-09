@@ -15,8 +15,8 @@ const { logTelemetry, promptSignature, redact } = await import(HOOK);
 
 // --- Schema: every §9 field present -----------------------------------------
 const SCHEMA_FIELDS = [
-  'ts', 'prompt_signature', 'suggested_mode', 'suggested_skills',
-  'suggested_agents', 'confidence_tier', 'invoke_kind', 'graphify_queried',
+    'ts', 'prompt_signature', 'suggested_mode', 'suggested_skills',
+  'suggested_agents', 'route_id', 'confidence_tier', 'invoke_kind', 'graphify_queried',
   'graph_status', 'guards_fired', 'downstream_invocations', 'outcome', 'latency_ms',
 ];
 
@@ -30,6 +30,7 @@ test('telemetry: line has all §9 schema fields', () => {
       suggested_mode: 'gsd-debug',
       suggested_skills: ['systematic-debugging'],
       suggested_agents: [],
+      route_id: 'gsd-debug',
       confidence_tier: 'high',
       invoke_kind: 'slash',
       graphify_queried: false,

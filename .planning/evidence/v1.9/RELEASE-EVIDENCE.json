@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "milestone": "v1.9",
+  "captured": "2026-08-09",
+  "repository_tests": true,
+  "repository_test_command": "rtk node --test --test-concurrency=1",
+  "repository_test_result": {
+    "tests": 1656,
+    "passed": 1656,
+    "failed": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0,
+    "evidence": "serial full-corpus rerun"
+  },
+  "focused_acceptance": {
+    "tests": 117,
+    "passed": 117,
+    "failed": 0,
+    "command": "rtk node --test --test-concurrency=1 tests/router.adapters.test.mjs tests/router.registry-watcher.test.mjs tests/router.deployed-bundle.test.mjs tests/router.lifecycle.test.mjs tests/router.v19-live-snapshot.test.mjs tests/router.v19-observability.test.mjs tests/router.release-preflight.test.mjs tests/phase-38/native-dispatch.test.mjs tests/phase-38/claude-adapter.test.mjs tests/phase-38/codex-adapter.test.mjs tests/router.failopen.test.mjs tests/router.safety-release.test.mjs"
+  },
+  "independent_evaluation": true,
+  "independent_evaluation_result": {
+    "claude": { "status": "passed", "warm_p95_ms": 21.099458, "prompt_max_ms": 100 },
+    "codex": { "status": "passed", "warm_p95_ms": 20.964666, "prompt_max_ms": 100 },
+    "evaluation_version": "v1.8-evaluation-v1",
+    "corpus_fingerprint": "6edd7c4e3185ba74586afdde309a5978ac261462844f8dd4a113c71f834a076e",
+    "machine_class": "darwin-arm64"
+  },
+  "security": true,
+  "security_evidence": "focused native, watcher, lifecycle, storage, trust, privacy, fail-open, and safety-release coverage plus full serial suite",
+  "nyquist": true,
+  "nyquist_evidence": "Phase 56-58 verification artifacts and Phase 59 acceptance plan",
+  "installed": {
+    "claude": {
+      "pass": true,
+      "runtime": "claude",
+      "ownership_ledger": true,
+      "semantic_active": false,
+      "safe_empty_active": true,
+      "candidate_disposition": "eligible",
+      "verification_passing": true,
+      "active_tuple_absent": true,
+      "dispatchable_count": 0,
+      "continuity": true,
+      "native_invocation_identity": "phase57-native-smoke.json",
+      "receipt_verification": true,
+      "tuple_integrity": true,
+      "live_snapshot": "live-after-phase59.json",
+      "observability": "phase58-observability.json"
+    },
+    "codex": {
+      "pass": true,
+      "runtime": "codex",
+      "ownership_ledger": true,
+      "semantic_active": false,
+      "safe_empty_active": true,
+      "candidate_disposition": "eligible",
+      "verification_passing": true,
+      "active_tuple_absent": true,
+      "dispatchable_count": 0,
+      "continuity": true,
+      "native_invocation_identity": "phase57-native-smoke.json",
+      "receipt_verification": true,
+      "tuple_integrity": true,
+      "live_snapshot": "live-after-phase59.json",
+      "observability": "phase58-observability.json"
+    }
+  },
+  "native_resource_constraints": {
+    "resource_error": "EMFILE",
+    "fallback": "bounded polling",
+    "evidence": "phase57 verification and focused watcher suite"
+  },
+  "unsupported": [
+    { "runtime": "future-runtime", "recommendation_only": true }
+  ],
+  "milestone_audit": true,
+  "roadmap": true,
+  "archive": true,
+  "tag": true,
+  "archive_verification": {
+    "status": "passed",
+    "command": "rtk node scripts/verify-gsd-archive.mjs",
+    "active_phases_empty": true,
+    "archived_phase_count": 4,
+    "archived_milestone": "v1.9"
+  },
+  "final_preflight": {
+    "command": "rtk node scripts/v18-release-preflight.mjs .planning/evidence/v1.9/RELEASE-EVIDENCE.json",
+    "status": "ready",
+    "blockers": []
+  },
+  "architecture_graph": {
+    "status": "queried-existing-graph",
+    "report": "graphify-out/GRAPH_REPORT.md"
+  },
+  "live_runtime_observation": {
+    "evidence": "phase58-observability.json",
+    "claude_telemetry_records": 4896,
+    "codex_telemetry_records": 240,
+    "jsonl_parse_errors": 0,
+    "claude_graph_missing": 848,
+    "codex_graph_missing": 4,
+    "historical_outcome_nulls": true,
+    "current_receipt_links": 0,
+    "graph_remediation": "provide_local_graph_or_mark_not_applicable"
+  },
+  "archive_note": "Archive invariant passed; the annotated v1.9 tag is created at the final release commit and final preflight is rerun against this evidence."
+}

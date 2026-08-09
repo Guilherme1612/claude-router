@@ -1,0 +1,175 @@
+{
+  "schema_version": "v19-observability-v1",
+  "captured_at": "2026-08-09T20:00:28.920Z",
+  "privacy": {
+    "raw_prompt": false,
+    "raw_jsonl_lines": false,
+    "raw_commands": false,
+    "raw_stdout": false,
+    "raw_cwd": false
+  },
+  "runtimes": {
+    "claude": {
+      "telemetry": {
+        "exists": true,
+        "records": 4969,
+        "malformed_lines": 0,
+        "selected_records": 2801,
+        "route_anchor_records": 25,
+        "outcome_null_records": 4969,
+        "downstream_invocations_null_records": 4969,
+        "graph_status_counts": {
+          "graph_missing": 855,
+          "not_triggered": 4049,
+          "ok": 65
+        }
+      },
+      "shadow": {
+        "exists": true,
+        "records": 34,
+        "malformed_lines": 0,
+        "outcome_counts": {
+          "rejected": 26,
+          "no_signal": 8
+        }
+      },
+      "receipts": {
+        "exists": true,
+        "records": 124,
+        "malformed_lines": 0,
+        "state_counts": {
+          "blocked": 117,
+          "pending": 2,
+          "invoked": 2,
+          "completed": 2,
+          "paused": 1
+        },
+        "latest_state_counts": {
+          "blocked": 6,
+          "completed": 1
+        },
+        "route_linked_records": 0,
+        "native_identity_records": 0,
+        "runtime_identity_records": 7,
+        "verified_completion_records": 0
+      },
+      "health": {
+        "exists": true,
+        "records": 1,
+        "malformed_lines": 0,
+        "outcome_kind_counts": {
+          "selected": 1
+        }
+      },
+      "audit": {
+        "exists": true,
+        "records": 7824,
+        "malformed_lines": 0,
+        "outcome_counts": {
+          "completed": 7824
+        }
+      },
+      "correlation": {
+        "outcome_counts": {
+          "selected": 2767,
+          "ignored": 2176,
+          "rejected": 26,
+          "substituted": 0,
+          "completed": 0,
+          "failed": 0,
+          "accepted": 0
+        },
+        "receipt_linked_records": 0,
+        "shadow_linked_records": 34,
+        "health_linked_records": 0,
+        "receipt_ids_observed": 0
+      },
+      "graph": {
+        "status_counts": {
+          "graph_missing": 855,
+          "not_triggered": 4049,
+          "ok": 65
+        },
+        "graph_missing": {
+          "count": 855,
+          "state": "open",
+          "reason_code": "local_graph_unavailable",
+          "remediation": "provide_local_graph_or_mark_not_applicable"
+        }
+      }
+    },
+    "codex": {
+      "telemetry": {
+        "exists": true,
+        "records": 240,
+        "malformed_lines": 0,
+        "selected_records": 46,
+        "route_anchor_records": 0,
+        "outcome_null_records": 240,
+        "downstream_invocations_null_records": 240,
+        "graph_status_counts": {
+          "not_triggered": 189,
+          "ok": 47,
+          "graph_missing": 4
+        }
+      },
+      "shadow": {
+        "exists": false,
+        "records": 0,
+        "malformed_lines": 0,
+        "outcome_counts": {}
+      },
+      "receipts": {
+        "exists": false,
+        "records": 0,
+        "malformed_lines": 0,
+        "state_counts": {},
+        "latest_state_counts": {},
+        "route_linked_records": 0,
+        "native_identity_records": 0,
+        "runtime_identity_records": 0,
+        "verified_completion_records": 0
+      },
+      "health": {
+        "exists": false,
+        "records": 0,
+        "malformed_lines": 0,
+        "outcome_kind_counts": {}
+      },
+      "audit": {
+        "exists": false,
+        "records": 0,
+        "malformed_lines": 0,
+        "outcome_counts": {}
+      },
+      "correlation": {
+        "outcome_counts": {
+          "selected": 46,
+          "ignored": 194,
+          "rejected": 0,
+          "substituted": 0,
+          "completed": 0,
+          "failed": 0,
+          "accepted": 0
+        },
+        "receipt_linked_records": 0,
+        "shadow_linked_records": 0,
+        "health_linked_records": 0,
+        "receipt_ids_observed": 0
+      },
+      "graph": {
+        "status_counts": {
+          "not_triggered": 189,
+          "ok": 47,
+          "graph_missing": 4
+        },
+        "graph_missing": {
+          "count": 4,
+          "state": "open",
+          "reason_code": "local_graph_unavailable",
+          "remediation": "provide_local_graph_or_mark_not_applicable"
+        }
+      }
+    }
+  }
+}
