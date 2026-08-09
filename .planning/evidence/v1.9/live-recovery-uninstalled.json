@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "policy": "v19-live-snapshot-v1",
+  "captured_at": "2026-08-09T18:40:29.477Z",
+  "source": {
+    "router": {
+      "exists": true,
+      "bytes": 192195,
+      "sha256": "e5c90c2cf36ea29ef2a37923a5dd3cd2b315876bffbd0bfae588b6941a1aea71"
+    },
+    "evolve": {
+      "exists": true,
+      "bytes": 34581,
+      "sha256": "80b114908026077a6e6bc9630e7e690576e3898794698759a571f5a68f92ef23"
+    }
+  },
+  "runtimes": {
+    "claude": {
+      "root_exists": true,
+      "hooks": {
+        "exists": true,
+        "bytes": 6013,
+        "sha256": "5e9badf76348e06f99560b1f1b3ed278ed59e9fbf2ac47cc00358d31f9385855",
+        "fields": {
+          "events": [
+            {
+              "event": "FileChanged",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "PostToolUse",
+              "count": 4,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "PreCompact",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "PreToolUse",
+              "count": 7,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "SessionStart",
+              "count": 3,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "Stop",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "SubagentStop",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            }
+          ],
+          "user_projection_sha256": "2436543ac49872744298ce145164c97312cb97b245d35c2546c76a7f10cb971f"
+        }
+      },
+      "ownership": {
+        "exists": false,
+        "fields": {
+          "state": "missing",
+          "files": []
+        }
+      },
+      "controller": {
+        "config": {
+          "exists": false,
+          "fields": {}
+        },
+        "status": {
+          "exists": false,
+          "fields": {}
+        },
+        "request": {
+          "exists": false,
+          "fields": {}
+        },
+        "scan_state": {
+          "exists": false,
+          "fields": {}
+        }
+      },
+      "active_tuple": {
+        "exists": false,
+        "fields": {}
+      },
+      "active_pointer": {
+        "exists": false,
+        "fields": {}
+      },
+      "candidate": {
+        "registry": {
+          "exists": false,
+          "fields": {}
+        },
+        "report": {
+          "exists": false,
+          "fields": {}
+        }
+      },
+      "lifecycle": {
+        "active_generation": {
+          "exists": false,
+          "fields": {}
+        },
+        "known_good_generation": {
+          "exists": false,
+          "fields": {}
+        },
+        "state": {
+          "exists": false,
+          "fields": {}
+        }
+      },
+      "external_state": {
+        "excluded_policy": "router-settings-and-session-noise-v1",
+        "file_count": 3138,
+        "aggregate_sha256": "c20674fd026872dbf80df41387256a5c1e8601285cb0a89506ed0d0868a9b331"
+      }
+    },
+    "codex": {
+      "root_exists": true,
+      "hooks": {
+        "exists": true,
+        "bytes": 1487,
+        "sha256": "a2a2e06c1a6d30cbfe0ed30751430a42db5a5dec4af74f7483ca6675bfeea966",
+        "fields": {
+          "events": [
+            {
+              "event": "PostToolUse",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "PreToolUse",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "SessionStart",
+              "count": 2,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "Stop",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            },
+            {
+              "event": "SubagentStart",
+              "count": 1,
+              "managed_count": 0,
+              "managed_router_paths": []
+            }
+          ],
+          "user_projection_sha256": "66cc1e3d989a6cb2535857760097f02de55ec2def37259e5a7f2537a73d42516"
+        }
+      },
+      "ownership_marker": {
+        "exists": false,
+        "fields": {}
+      },
+      "active_tuple": {
+        "exists": false,
+        "fields": {}
+      },
+      "active_pointer": {
+        "exists": false,
+        "fields": {}
+      },
+      "candidate": {
+        "registry": {
+          "exists": false,
+          "fields": {}
+        },
+        "report": {
+          "exists": false,
+          "fields": {}
+        }
+      },
+      "lifecycle": {
+        "active_generation": {
+          "exists": false,
+          "fields": {}
+        },
+        "known_good_generation": {
+          "exists": false,
+          "fields": {}
+        },
+        "state": {
+          "exists": false,
+          "fields": {}
+        }
+      },
+      "external_state": {
+        "excluded_policy": "router-settings-and-session-noise-v1",
+        "file_count": 9807,
+        "aggregate_sha256": "c5efea29e793491efa2482b94e89fb83c9740409adf2835b2c54fe4c203c35d7"
+      }
+    }
+  }
+}

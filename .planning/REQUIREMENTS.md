@@ -7,10 +7,10 @@
 
 ### Live Installer Truth
 
-- [ ] **LIVE-01**: An operator can capture the current Claude and Codex manifests, hooks, controller state, active tuple, and owned mutable files before an upgrade without persisting raw prompts.
-- [ ] **LIVE-02**: The existing installer upgrades the current owned Router bundle into both supported runtime homes and records the exact source and installed fingerprints.
-- [ ] **LIVE-03**: Upgrade preserves unrelated user configuration, coexisting hooks, plugins, and user-owned files, with conflicts failing closed before mutation.
-- [ ] **LIVE-04**: Rollback, uninstall, interruption recovery, and last-known-good restoration pass against the live owned state without leaving orphaned Router artifacts.
+- [x] **LIVE-01**: An operator can capture the current Claude and Codex manifests, hooks, controller state, active tuple, and owned mutable files before an upgrade without persisting raw prompts.
+- [x] **LIVE-02**: The existing installer upgrades the current owned Router bundle into both supported runtime homes and records the exact source and installed fingerprints.
+- [x] **LIVE-03**: Upgrade preserves unrelated user configuration, coexisting hooks, plugins, and user-owned files, with conflicts failing closed before mutation.
+- [x] **LIVE-04**: Rollback, uninstall, interruption recovery, and last-known-good restoration pass against the live owned state without leaving orphaned Router artifacts.
 
 ### Native Runtime Health
 
@@ -54,10 +54,10 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| LIVE-01 | Phase 56 | Pending |
-| LIVE-02 | Phase 56 | Pending |
-| LIVE-03 | Phase 56 | Pending |
-| LIVE-04 | Phase 56 | Pending |
+| LIVE-01 | Phase 56 | Complete |
+| LIVE-02 | Phase 56 | Complete |
+| LIVE-03 | Phase 56 | Complete |
+| LIVE-04 | Phase 56 | Complete |
 | HEALTH-01 | Phase 57 | Pending |
 | HEALTH-02 | Phase 57 | Pending |
 | HEALTH-03 | Phase 57 | Pending |
@@ -72,6 +72,7 @@
 | ACC-04 | Phase 59 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 16 total
 - Mapped to phases: 16
 - Unmapped: 0

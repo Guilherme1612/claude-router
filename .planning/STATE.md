@@ -2,18 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.9
 milestone_name: Live Runtime Deployment & Observability Hardening
-current_phase_name: Phase 56 — Live Installer and Upgrade Truth
+current_phase: 57
+current_phase_name: Native Runtime Health and Watcher Resilience
 status: executing
-stopped_at: Phase 56 planned; ready to execute
-last_updated: "2026-08-09T18:24:00.000Z"
+stopped_at: Phase 57 ready to execute
+last_updated: "2026-08-09T19:03:03.749Z"
 last_activity: 2026-08-09
-last_activity_desc: Phase 56 planned with 2 plans
+last_activity_desc: Phase 56 complete, transitioned to Phase 57
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 2
-  completed_plans: 0
-  percent: 0
+  completed_plans: 2
+  percent: 25
 ---
 
 # Project State
@@ -23,27 +24,27 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-09)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
-**Current focus:** Execute Phase 56 — Live Installer and Upgrade Truth
+**Current focus:** Execute Phase 57 — Native Runtime Health and Watcher Resilience
 
 ## Current Position
 
-Phase: 56 — Live Installer and Upgrade Truth
-Plan: 01 → 02
+Phase: 57 — Native Runtime Health and Watcher Resilience
+Plan: Not started
 Status: Ready to execute
-Last activity: 2026-08-09 — Phase 56 planned with 2 plans
+Last activity: 2026-08-09 — Phase 56 complete, transitioned to Phase 57
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Previous milestone: v1.8 completed 12 plans across Phases 50-55
-- Current milestone: 2 plans ready across 4 phases
+- Current milestone: 2 plans complete in Phase 56; Phases 57-59 remain
 
 **By Phase:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 56. Live Installer and Upgrade Truth | 0/2 | Planned |
+| 56. Live Installer and Upgrade Truth | 2/2 | Complete |
 | 57. Native Runtime Health and Watcher Resilience | 0/TBD | Not started |
 | 58. Outcome and Graph Observability | 0/TBD | Not started |
 | 59. Production Acceptance and Release Truth | 0/TBD | Not started |
@@ -67,6 +68,7 @@ None yet.
 - Live deployment follow-up: Claude's global install is stale and Codex has no current install manifest; deploy only through the owner-controlled installation workflow.
 - Observability follow-up: telemetry JSONL parses cleanly, but outcome fields are null and graph-missing records remain visible.
 - Performance follow-up: resource-exhaustion fallback rescans all roots; measure before considering per-root polling.
+- Native health follow-up: the live controller is ready but quarantines the candidate on path-escape, cycle, and hook-invalid diagnostics; no active tuple is claimed until Phase 57 resolves the inventory truth.
 
 ## Deferred Items
 
@@ -80,9 +82,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-08-09 Europe/Lisbon
-Stopped at: Phase 56 planned; ready to execute
+Stopped at: Phase 57 ready to execute
 Resume file: None
 
 ## Operator Next Steps
 
-- Execute Phase 56: Live Installer and Upgrade Truth
+- Execute Phase 57: Native Runtime Health and Watcher Resilience
