@@ -1,5 +1,6 @@
 import { stableCapabilityId } from '../registry/identity.mjs';
 import { retrieveSemanticCandidates } from '../registry/semantic.mjs';
+import { applyPreferences } from './preferences.mjs';
 
 export const COMPOSITION_POLICY_VERSION = 'composition-policy-v1';
 export const COMPOSITION_LIMITS = Object.freeze({
@@ -37,7 +38,8 @@ function conflictsWith(candidate, selected, records) {
 }
 
 function candidateScore(candidate) {
-  return Number.isFinite(candidate?.score) ? candidate.score : (candidate?.intent_fit || 0);
+  const score = Number.isFinite(candidate?.score) ? candidate.score : (candidate?.intent_fit || 0);
+  return score + (candidate?.preference_rank > -1 ? (candidate.preference_rank + 1) / 100000 : 0);
 }
 
 function ordered(selected, requiredRoles) {
@@ -117,8 +119,34 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
   };
 }
 
-export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits } = {}) {
-  const retrieval = retrieveSemanticCandidates({ intent, records, workflows });
+export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, now } = {}) {
+  let retrieval = retrieveSemanticCandidates({ intent, records, workflows });
+  const preferenceList = Array.isArray(preferences) ? preferences : [];
+  if (retrieval.status === 'ambiguous' && preferenceList.length) {
+    const tiedIds = new Set(retrieval.fallback?.candidates || []);
+    const tied = retrieval.candidates.filter(candidate => tiedIds.has(candidate.stable_id));
+    const preferred = applyPreferences({
+      candidates: tied,
+      preferences: preferenceList,
+      scope: { ...preferenceScope, workflow_id: preferenceScope.workflow_id || tied[0]?.workflow_id },
+      now,
+    });
+    if (preferred.preference_applied) {
+      retrieval = {
+        ...retrieval,
+        status: 'resolved',
+        dispatch_eligible: intent.dispatch_eligible === true,
+        reason_codes: ['preference_tiebreak_resolved'],
+        workflow_id: preferred.selected.workflow_id,
+        selected: preferred.selected,
+        match: preferred.selected,
+        candidates: preferred.candidates,
+        preference_warnings: preferred.warnings,
+      };
+    } else if (preferred.warnings.length) {
+      retrieval = { ...retrieval, preference_warnings: preferred.warnings };
+    }
+  }
   if (retrieval.status !== 'resolved') return { status: retrieval.status, dispatch_eligible: false, reason_code: retrieval.reason_codes?.[0] || 'semantic_retrieval_blocked', retrieval };
   const workflow = (workflows || []).find(item => item.workflow_id === retrieval.workflow_id)
     || { workflow_id: retrieval.workflow_id, roles: retrieval.selected.workflow_coverage.required_roles };

@@ -228,6 +228,10 @@ function candidateDiagnostics(record, intent, workflow, eligibility) {
   const eligible = availability && eligibility.eligible === true;
   return {
     stable_id: stableCapabilityId(record),
+    canonical_id: record?.canonical_identity || null,
+    aliases: textValues(semantic.aliases).slice(0, RETRIEVAL_LIMITS.max_terms).sort(),
+    roles: roles.slice(0, RETRIEVAL_LIMITS.max_roles).sort(),
+    source_fingerprint: record?.source_freshness?.fingerprint || record?.source_fingerprint || null,
     workflow_id: workflow.workflow_id,
     intent_fit: intentFit,
     workflow_coverage: workflowCoverage,

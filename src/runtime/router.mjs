@@ -3593,6 +3593,10 @@ export function inspectDecision(prompt, options = {}) {
         records: semanticRecords,
         workflows: opts.semanticWorkflows,
         runtime: RUNTIME,
+        preferences: Array.isArray(opts.semanticPreferences)
+          ? opts.semanticPreferences
+          : (Array.isArray(manifest.semantic_preferences) ? manifest.semantic_preferences : []),
+        preferenceScope: { runtime: RUNTIME, ...(opts.preferenceScope || {}) },
       });
       state.semantic = { intent: semanticIntent, result: semanticResult };
       state.candidates = semanticResult.retrieval?.candidates || [];
