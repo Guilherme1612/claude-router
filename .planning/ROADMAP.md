@@ -56,75 +56,96 @@ v1.8 moves from runtime-local typed capability truth to structured semantic retr
 ## Phase Details
 
 ### Phase 50: Portable Runtime-Local Contracts and Fixture Boundary
+
 **Goal**: Each supported runtime has complete, portable, safe typed truth for every locally discoverable capability.
 **Depends on**: Phase 49
 **Requirements**: CVRG-01, CVRG-02, CVRG-03, CVRG-04, CVRG-05, CVRG-06
 **Success Criteria** (what must be TRUE):
+
   1. Claude and Codex each discover skills, agents, commands, tools, hooks, and workflows from their actual configured roots and report exactly one typed classification for every discovered record, even when their inventories differ.
   2. An operator can inspect each record's stable semantic identity, runtime-local locator, provenance, availability, freshness, and semantic eligibility contract.
   3. Records with invalid or unknown execution-critical metadata remain visible with deterministic reasons but cannot be selected for execution.
   4. The default coverage suite passes against anonymous empty, minimal, renamed, conflicting, invalid, project-scoped, plugin-heavy, and asymmetric runtime homes without reading or committing private live-home content.
-**Plans**: TBD
+
+**Plans**: 1/2 plans executed
+
+- [x] 50-01-PLAN.md
+- [ ] 50-02-PLAN.md
 
 ### Phase 51: Structured Intent, Generic Workflows, and Semantic Retrieval
+
 **Goal**: Users' varied natural-language requests resolve to bounded generic workflow requirements and safe, explainable local candidates.
 **Depends on**: Phase 50
 **Requirements**: SEMR-01, SEMR-02, SEMR-03, SEMR-04, SEMR-05, SEMR-06
 **Success Criteria** (what must be TRUE):
+
   1. A routing inspection shows bounded goal, subjects, operations, constraints, evidence needs, execution signal, and confidence before any capability is ranked.
   2. Paraphrases, indirect wording, misspellings, and unknown capability names select the intended workflow, including database relationship inspection and substantial UI redesign, without requiring product names or exact trigger phrases.
   3. Quoted, explanatory, hypothetical, negated, prohibited, ambiguous, and policy-discussion wording never becomes execute intent.
   4. Candidate diagnostics report intent fit, workflow coverage, availability, authority, risk, cost, and evidence separately from a bounded compiled index, while absent eligible coverage produces a truthful safe fallback.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 52: Least-Sufficient Composition and Single-Path Semantic Cutover
+
 **Goal**: Authorized requests use the smallest sufficient compatible native capability set through one production routing path with causal completion proof.
 **Depends on**: Phase 51
 **Requirements**: COMP-01, COMP-02, COMP-03, COMP-04, COMP-05, COMP-06, COMP-07
 **Success Criteria** (what must be TRUE):
+
   1. A request resolves to one capability when it covers every required role, and to only the smallest compatible ordered set when distinct roles remain uncovered.
   2. Composed workflows collapse redundancy, reject conflicts, union effects and risk, and remain inside explicit capability, context, and tool-call caps; substantial UI redesign covers design, UX/system, implementation, and review roles without unnecessary selections.
   3. Missing or incompatible coverage yields the safest native action, recommendation, clarification, or missing-capability explanation without invented or cross-runtime targets.
   4. Production routing has one semantic decision owner, so legacy lexical routing cannot disagree with, bypass, or dispatch beside the activated projection.
   5. Authorized execution uses only the active host's native locator and emits linked intent, route, workflow, capability, action, lease, invocation, completion, and verification evidence; behavioral tests fail if actual use or verification is missing.
+
 **Plans**: TBD
 **UI hint**: yes
 
 ### Phase 53: Scoped Preferences and Truthful Startup Continuity
+
 **Goal**: Users receive safe preference-aware routing and truthful project continuity without preferences or history widening execution authority.
 **Depends on**: Phase 52
 **Requirements**: PREF-01, PREF-02, PREF-03, PREF-04, STRT-01, STRT-02, STRT-03, STRT-04, STRT-05, STRT-06
 **Success Criteria** (what must be TRUE):
+
   1. Optional global-user, runtime, project, and workflow preferences break eligible ties deterministically with narrower scopes winning, but cannot bypass compatibility, authority, risk, effects, requirements, or composition caps.
   2. Stale or unresolved preference aliases produce inert audit warnings while unrelated routing and active defaults continue unchanged; equivalent anonymous capabilities satisfy the same workflows as maintainer-preferred fixtures.
   3. A returning project with meaningful fresh proof receives one bounded digest containing the last verified outcome, current authoritative state, one deterministic likely-next action, and resume disposition.
   4. First visits, acknowledged unchanged state, meaningless state, unverified plans or prose, and stale or conflicting evidence remain silent or request refresh without leaking continuity across projects.
   5. Automatic continuation happens only when the next action fits every bound of an unexpired explicit lease, while publication, destructive work, credentials, payments, privileged operations, and other owner gates remain blocked.
+
 **Plans**: TBD
 
 ### Phase 54: Independent Evaluation and Hot-Path Budgets
+
 **Goal**: Maintainers can independently prove semantic routing correctness, safety, efficiency, parity, and production-path performance against reproducible evidence.
 **Depends on**: Phase 53
 **Requirements**: EVAL-01, EVAL-02, EVAL-03, EVAL-04, EVAL-05, EVAL-06, EVAL-07
 **Success Criteria** (what must be TRUE):
+
   1. One deterministic local entry point runs versioned, fingerprinted fixtures covering discovery through lifecycle prechecks and reports every required quality, safety, efficiency, receipt, verification, parity, and lifecycle dimension separately.
   2. Any mandatory typed-coverage, correctness, safety, verification, lifecycle, or performance regression fails evaluation regardless of gains in another dimension; no composite score can mask it.
   3. Baseline and candidate runs use matched corpus, machine class, runtime mode, and cold/warm conditions and measure actual production prompt and startup paths, with prompt routing below 100ms and all other budgets recorded explicitly from the v1.7 baseline.
   4. Full and incremental builds activate equivalent semantics for the same fingerprint, and every rejected or failed candidate leaves the last-known-good tuple active.
   5. The default suite passes in isolated synthetic homes without private capability bodies or raw prompts, while live Claude and Codex homes remain optional integration evidence.
+
 **Plans**: TBD
 
 ### Phase 55: Installer, Native Parity, and Release Truth
+
 **Goal**: Users can install, operate, recover, and remove v1.8 safely in Claude and Codex, with installed native evidence supporting every release claim.
 **Depends on**: Phase 54
 **Requirements**: LIFE-01, LIFE-02, LIFE-03, LIFE-04, LIFE-05, LIFE-06, LIFE-07
 **Success Criteria** (what must be TRUE):
+
   1. Installation detects actual supported runtime roots, installs only shared core and detected adapters, and preserves unrelated user configuration, hooks, and plugins.
   2. Installation discovers local capabilities, builds runtime-specific registries and semantic projections, validates compatibility and safety, and atomically activates only a complete valid tuple.
   3. Clean install, upgrade, rollback, uninstall, interruption recovery, and last-known-good recovery pass in isolated Claude and Codex homes using an exact ownership ledger and no dependency, database, daemon, embeddings model, network service, or second router.
   4. Installed Claude and Codex smoke tests prove runtime-local typed coverage, active semantic behavior, native invocation identity, startup continuity, receipt/verification linkage, and release-tuple integrity; unsupported runtimes remain recommendation-only.
   5. Completion is claimed only when repository tests, independent evaluation, installed-runtime evidence, security, Nyquist validation, milestone audit, roadmap, archive, and tag state reconcile.
+
 **Plans**: TBD
 
 ## Progress
@@ -133,7 +154,7 @@ v1.8 moves from runtime-local typed capability truth to structured semantic retr
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 50. Portable Runtime-Local Contracts and Fixture Boundary | v1.8 | 0/TBD | Not started | - |
+| 50. Portable Runtime-Local Contracts and Fixture Boundary | v1.8 | 1/2 | In Progress|  |
 | 51. Structured Intent, Generic Workflows, and Semantic Retrieval | v1.8 | 0/TBD | Not started | - |
 | 52. Least-Sufficient Composition and Single-Path Semantic Cutover | v1.8 | 0/TBD | Not started | - |
 | 53. Scoped Preferences and Truthful Startup Continuity | v1.8 | 0/TBD | Not started | - |
