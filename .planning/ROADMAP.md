@@ -180,7 +180,10 @@ v1.9 moves the proven v1.8 Router from isolated release evidence into safe live 
 2. The existing installer upgrades both runtime homes with current source and installed fingerprints.
 3. Unrelated configuration and coexisting hooks survive; conflicts fail closed before mutation.
 4. Rollback, uninstall, interruption recovery, and last-known-good restoration pass against owned live state.
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
+
+- [ ] 56-01-PLAN.md — Privacy-safe live snapshot and isolated privacy tests (Wave 1)
+- [ ] 56-02-PLAN.md — Owned live upgrade, preservation, and recovery evidence (Wave 2, depends on 56-01)
 
 ### Phase 57: Native Runtime Health and Watcher Resilience
 
@@ -234,7 +237,7 @@ v1.9 moves the proven v1.8 Router from isolated release evidence into safe live 
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
-| 56. Live Installer and Upgrade Truth | v1.9 | 0/TBD | Not started | - |
+| 56. Live Installer and Upgrade Truth | v1.9 | 0/2 | Planned | - |
 | 57. Native Runtime Health and Watcher Resilience | v1.9 | 0/TBD | Not started | - |
 | 58. Outcome and Graph Observability | v1.9 | 0/TBD | Not started | - |
 | 59. Production Acceptance and Release Truth | v1.9 | 0/TBD | Not started | - |
