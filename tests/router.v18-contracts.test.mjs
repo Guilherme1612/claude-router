@@ -35,6 +35,17 @@ test('v1.8 scenario materializer rejects escaping paths and cleans one temporary
       /relative normalized path/,
     );
   }
+  await assert.rejects(
+    materializeRuntimeInventoryScenario({ claude: { files: {} }, codex: { files: [] } }),
+    /files must be an array/,
+  );
+  await assert.rejects(
+    materializeRuntimeInventoryScenario({
+      claude: { files: [{ path: 'skills/not-text.json', content: {} }] },
+      codex: { files: [] },
+    }),
+    /content must be a string/,
+  );
 
   const materialized = await materializeRuntimeInventoryScenario({
     claude: { files: [{ path: 'skills/safe.json', content: '{"schema_version":1,"name":"safe"}' }] },
@@ -79,11 +90,11 @@ test('v1.8 scenarios discover runtime-local inventories without outside or live-
   assert.deepEqual(found.get('minimal-codex').codex.observations.map(record => record.name), ['quiet-lantern']);
 
   const asymmetric = found.get('asymmetric-runtimes');
-  assert.deepEqual(asymmetric.claude.observations.map(record => record.name), [
-    'amber-orbit', 'paper-kite', 'soft-bell', 'blue-ruler', 'copper-loop',
+  assert.deepEqual(asymmetric.claude.observations.map(record => record.name).sort(), [
+    'amber-orbit', 'blue-ruler', 'copper-loop', 'paper-kite', 'soft-bell',
   ]);
-  assert.deepEqual(asymmetric.codex.observations.map(record => record.name), [
-    'silver-leaf', 'river-stone-renamed',
+  assert.deepEqual(asymmetric.codex.observations.map(record => record.name).sort(), [
+    'river-stone-renamed', 'silver-leaf',
   ]);
   assert.notEqual(asymmetric.claude.observations.length, asymmetric.codex.observations.length);
 

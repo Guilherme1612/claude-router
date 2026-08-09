@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path';
 import { canonicalizeCapability, stableStringify } from '../../src/registry/schema.mjs';
 
 export const syntheticRoots = Object.freeze({
@@ -21,6 +24,76 @@ export const mutationPlayback = Object.freeze([
 export const recommendationKinds = Object.freeze([
   'command', 'skill', 'agent', 'workflow', 'mcp', 'tool',
 ]);
+
+function scenarioObject(value, label) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value;
+}
+
+function scenarioFiles(runtime, key) {
+  const value = runtime[key] ?? (key === 'projectFiles' ? [] : undefined);
+  if (!Array.isArray(value)) throw new TypeError(`${key} must be an array`);
+  return value.map((entry, index) => {
+    scenarioObject(entry, `${key}[${index}]`);
+    const path = entry.path;
+    const normalized = typeof path === 'string' ? posix.normalize(path) : '';
+    if (!path || path.includes('\\') || isAbsolute(path) || win32.isAbsolute(path)
+      || normalized !== path || normalized === '.' || path.split('/').includes('..')) {
+      throw new TypeError(`${key}[${index}].path must be a relative normalized path`);
+    }
+    if (typeof entry.content !== 'string') throw new TypeError(`${key}[${index}].content must be a string`);
+    return { path, content: entry.content };
+  });
+}
+
+export async function materializeRuntimeInventoryScenario(scenarioOrPath) {
+  const scenario = scenarioObject(typeof scenarioOrPath === 'string'
+    ? JSON.parse(await readFile(scenarioOrPath, 'utf8'))
+    : scenarioOrPath, 'scenario');
+  const claude = scenarioObject(scenario.claude, 'claude');
+  const codex = scenarioObject(scenario.codex, 'codex');
+  const files = {
+    claude: scenarioFiles(claude, 'files'),
+    codex: scenarioFiles(codex, 'files'),
+    claudeProject: scenarioFiles(claude, 'projectFiles'),
+    codexProject: scenarioFiles(codex, 'projectFiles'),
+  };
+
+  const root = await mkdtemp(join(tmpdir(), 'router-v18-inventory-'));
+  const claudeRoot = join(root, 'claude');
+  const codexRoot = join(root, 'codex');
+  const projectRoot = files.claudeProject.length || files.codexProject.length ? join(root, 'project') : null;
+  const cleanup = () => rm(root, { recursive: true, force: true });
+  const writeEntries = async (base, entries) => {
+    for (const entry of entries) {
+      const target = resolve(base, entry.path);
+      const fromBase = relative(base, target);
+      if (fromBase === '..' || fromBase.startsWith(`..${sep}`) || isAbsolute(fromBase)) {
+        throw new TypeError('scenario path escapes its runtime root');
+      }
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, entry.content, 'utf8');
+    }
+  };
+
+  try {
+    await mkdir(claudeRoot, { recursive: true });
+    await mkdir(codexRoot, { recursive: true });
+    await writeEntries(claudeRoot, files.claude);
+    await writeEntries(codexRoot, files.codex);
+    if (projectRoot) {
+      await writeEntries(join(projectRoot, '.claude'), files.claudeProject);
+      await writeEntries(join(projectRoot, '.codex'), files.codexProject);
+    }
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+
+  return { claudeRoot, codexRoot, ...(projectRoot ? { projectRoot } : {}), cleanup };
+}
 
 function record(name, overrides = {}) {
   const runtime = overrides.runtime || 'claude';
