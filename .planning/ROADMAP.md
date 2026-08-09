@@ -11,10 +11,11 @@
 - ✅ **[v1.6 Autonomous Control Plane](milestones/v1.6-ROADMAP.md)** — Phases 38-46 (shipped 2026-08-08)
 - ✅ **[v1.7 Runtime Safety and Release Truth](milestones/v1.7-ROADMAP.md)** — Phases 47-49 (shipped 2026-08-09)
 - ✅ **[v1.8 Adaptive Semantic Routing and Continuity](milestones/v1.8-ROADMAP.md)** — Phases 50-55 (shipped 2026-08-09)
+- 🚧 **v1.9 Live Runtime Deployment & Observability Hardening** — Phases 56-59 (in progress)
 
 ## Overview
 
-v1.8 moves from runtime-local typed capability truth to structured semantic retrieval, least-sufficient native composition, truthful continuity, independent production-path evaluation, and finally installed Claude/Codex release proof. Each phase extends the existing zero-dependency control plane and keeps discovery, inference, compilation, learning, and evaluation off prompt and startup paths.
+v1.9 moves the proven v1.8 Router from isolated release evidence into safe live Claude/Codex operation: owned upgrades, truthful runtime health, actionable local observability, and production acceptance. It keeps the existing zero-dependency control plane, privacy boundary, and sub-100ms prompt path.
 
 ## Phases
 
@@ -166,6 +167,54 @@ v1.8 moves from runtime-local typed capability truth to structured semantic retr
 
 </details>
 
+### 🚧 v1.9 Live Runtime Deployment & Observability Hardening (In Progress)
+
+**Milestone Goal:** Move v1.8 from isolated release proof into a verifiable live Claude/Codex installation without weakening safety, privacy, or prompt-path performance.
+
+### Phase 56: Live Installer and Upgrade Truth
+
+**Goal**: Upgrade the owned Claude and Codex installations safely and prove rollback, uninstall, recovery, and preservation of user-owned state.
+**Requirements**: LIVE-01, LIVE-02, LIVE-03, LIVE-04
+**Success Criteria**:
+1. Pre-upgrade snapshots cover manifests, hooks, controllers, active tuples, and owned mutable state without raw prompts.
+2. The existing installer upgrades both runtime homes with current source and installed fingerprints.
+3. Unrelated configuration and coexisting hooks survive; conflicts fail closed before mutation.
+4. Rollback, uninstall, interruption recovery, and last-known-good restoration pass against owned live state.
+**Plans**: TBD
+
+### Phase 57: Native Runtime Health and Watcher Resilience
+
+**Goal**: Make controller, watcher, reconciliation, native invocation, and active-tuple health truthful under the real runtime environment.
+**Requirements**: HEALTH-01, HEALTH-02, HEALTH-03, HEALTH-04
+**Success Criteria**:
+1. Both controllers reach ready/current/reconciled state with inspectable candidate and active evidence.
+2. Normal mutations and resource-exhaustion watcher errors produce bounded reconciliation and recovery.
+3. Safe native smoke actions prove invocation identity, completion, verification, and receipts in both runtimes.
+4. Installed hashes, ownership markers, manifests, tuples, and controller projections agree.
+**Plans**: TBD
+
+### Phase 58: Outcome and Graph Observability
+
+**Goal**: Turn current parse-clean but incomplete runtime logs into privacy-safe actionable outcome and graph-health evidence.
+**Requirements**: OBS-01, OBS-02, OBS-03, OBS-04
+**Success Criteria**:
+1. Verified smoke actions correlate selection, invocation, outcome, receipt, and verification without raw prompts.
+2. Null outcome fields are replaced by explicit bounded outcome states where evidence exists.
+3. Graph-missing records are resolved or classified with actionable remediation state.
+4. Audit, telemetry, shadow, controller, and release logs remain parseable and bounded.
+**Plans**: TBD
+
+### Phase 59: Production Acceptance and Release Truth
+
+**Goal**: Certify the live deployment through UAT, regression, performance, rollback, and final release evidence.
+**Requirements**: ACC-01, ACC-02, ACC-03, ACC-04
+**Success Criteria**:
+1. Live Claude/Codex UAT covers install, upgrade, startup, safe invocation, reconciliation, rollback, and recovery.
+2. Focused safety and full serial suites pass with native constraints represented in evidence.
+3. Preflight reconciles live evidence, tests, security, archive, roadmap, and peeled tag equality.
+4. Prompt routing remains private, deterministic, and below 100 ms with no new service architecture.
+**Plans**: TBD
+
 ## Progress
 
 **Execution Order:** Phase 50 → Phase 51 → Phase 52 → Phase 53 → Phase 54 → Phase 55
@@ -178,6 +227,17 @@ v1.8 moves from runtime-local typed capability truth to structured semantic retr
 | 53. Scoped Preferences and Truthful Startup Continuity | v1.8 | 2/2 | Complete | 2026-08-09 |
 | 54. Independent Evaluation and Hot-Path Budgets | v1.8 | 2/2 | Complete | 2026-08-09 |
 | 55. Installer, Native Parity, and Release Truth | v1.8 | 2/2 | Complete | 2026-08-09 |
+
+### v1.9 Progress
+
+**Execution Order:** Phase 56 → Phase 57 → Phase 58 → Phase 59
+
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 56. Live Installer and Upgrade Truth | v1.9 | 0/TBD | Not started | - |
+| 57. Native Runtime Health and Watcher Resilience | v1.9 | 0/TBD | Not started | - |
+| 58. Outcome and Graph Observability | v1.9 | 0/TBD | Not started | - |
+| 59. Production Acceptance and Release Truth | v1.9 | 0/TBD | Not started | - |
 
 ## Deferred / Out of Scope
 

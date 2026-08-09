@@ -8,17 +8,15 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.8 Adaptive Semantic Routing and Continuity
+## Current Milestone: v1.9 Live Runtime Deployment & Observability Hardening
 
-**Goal:** Infer each user's intended outcome, compose the least sufficient locally available capabilities, preserve truthful continuity and safe autonomy, and prove routing quality without adding prompt-path weight.
+**Goal:** Move v1.8 from isolated release proof into a verifiable live Claude/Codex installation without weakening safety, privacy, or prompt-path performance.
 
 **Target features:**
-- Runtime-local typed coverage — classify every discoverable Claude and Codex skill, agent, command, tool, hook, and workflow without copying one user's setup into product truth
-- Semantic workflow composition — infer goals, subjects, operations, constraints, evidence, and execution signals from varied language, then select the least sufficient compatible local capability set
-- Truthful continuity and autonomy — show last verified work, current state, and one likely next action; resume automatically only under a valid scoped autonomy lease
-- Portable preferences — apply optional user/runtime/project/workflow preference overlays as tie-breakers without bypassing availability, compatibility, authority, risk, or workflow requirements
-- Independent evaluation — test paraphrase routing, composition, safety, latency, context, tool calls, receipts, verification, lifecycle, and installed-runtime parity without a composite score
-- Lightweight lifecycle — extend the existing compiled-index and installer paths with no prompt-time scan, LLM, network service, embeddings store, daemon, or second router
+- Live Claude/Codex upgrade truth — install the current owned bundle, preserve user configuration, and prove active tuples, manifests, hooks, rollback, and uninstall
+- Native runtime health — verify controllers, watcher recovery, native invocation, and bounded resource-exhaustion fallback under the real runtime environment
+- Actionable observability — correlate selected/invoked/completed outcomes without raw prompts and resolve or explain graph-missing telemetry
+- Production acceptance — run live UAT, full regression, release preflight, archive, and tag gates before claiming v1.9
 
 ## Current State
 
@@ -109,15 +107,14 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Causal receipts and compact selected-versus-actual attribution — v1.6 (Phase 44, RCPT-01..05)
 - ✓ Deterministic local learning with calibrated evidence gates and reversible rollback — v1.6 (Phase 45, LEARN-01..04)
 - ✓ Atomic migration, lifecycle scope, and dual-runtime release verification — v1.6 (Phase 46, MIG-01..05)
+- ✓ Runtime-local semantic routing, continuity, independent evaluation, and isolated Claude/Codex release proof — v1.8 (Phases 50–55)
 
 ### Active
 
-- Every discoverable capability in each supported runtime has a typed, provenance-aware coverage classification and a safe semantic eligibility contract.
-- Natural-language intent resolves to workflow requirements and the least sufficient compatible local capability set without requiring exact capability names or trigger words.
-- Runtime-specific projections preserve canonical semantic behavior while invoking only host-native Claude or Codex capabilities.
-- Startup continuity reports only verified last/current/next state and resumes work only inside a valid autonomy lease.
-- Local preference overlays influence compatible selection without becoming product defaults or widening authority.
-- Deterministic fixtures and installed-runtime evidence independently measure correctness, safety, latency, context, tool calls, receipts, verification, and lifecycle behavior.
+- Live Claude and Codex installations can be upgraded and recovered without overwriting user-owned configuration.
+- Runtime controllers and watchers report truthful ready/current/reconciled state, including bounded recovery when native watching is unavailable.
+- Runtime telemetry correlates outcomes and graph availability while preserving the no-raw-prompt privacy boundary.
+- A live production acceptance gate proves native invocation, receipts, performance, rollback, and release truth.
 
 ### Out of Scope
 
@@ -177,6 +174,7 @@ The approved design and implementation plan are:
 | Resolve semantic workflow roles before capability names | Users should not need to know which local skill, agent, or command satisfies their outcome | — Pending |
 | Keep personal capability bundles in optional local preference overlays and test fixtures | Maintainer preferences must be tested without becoming framework requirements | — Pending |
 | Report routing, latency, context, tool-call, receipt, and verification dimensions separately | A composite score would hide safety or correctness regressions | — Pending |
+| Treat v1.9 as live deployment and observability hardening, not new routing functionality | The v1.8 gap is operational proof in real homes, not another semantic feature layer | — Pending |
 
 ## Evolution
 
@@ -196,4 +194,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-09 after v1.8 milestone definition*
+*Last updated: 2026-08-09 after v1.9 milestone definition*

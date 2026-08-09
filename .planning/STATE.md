@@ -1,20 +1,16 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.8
-milestone_name: Adaptive Semantic Routing and Continuity
-current_phase: 55
-status: Awaiting next milestone
-stopped_at: Milestone v1.8 completed and archived
-last_updated: "2026-08-09T17:16:45.715Z"
+milestone: v1.9
+milestone_name: Live Runtime Deployment & Observability Hardening
+status: planning
+last_updated: "2026-08-09T18:05:29.426Z"
 last_activity: 2026-08-09
-last_activity_desc: Milestone v1.8 completed and archived
 progress:
-  total_phases: 6
-  completed_phases: 6
-  total_plans: 12
-  completed_plans: 12
-  percent: 100
-current_phase_name: Planning next milestone
+  total_phases: 0
+  completed_phases: 0
+  total_plans: 0
+  completed_plans: 0
+  percent: 0
 ---
 
 # Project State
@@ -28,28 +24,26 @@ See: .planning/PROJECT.md (updated 2026-08-09)
 
 ## Current Position
 
-Phase: Milestone v1.8 complete
+Phase: Not started (defining requirements)
 Plan: —
-Status: Awaiting next milestone
-Last activity: 2026-08-09 — Milestone v1.8 completed and archived
+Status: Defining requirements
+Last activity: 2026-08-09 — Milestone v1.9 started
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Previous milestone: v1.7 completed 9 plans across Phases 47-49
-- Current milestone: 12 plans completed across 6 phases
+- Previous milestone: v1.8 completed 12 plans across Phases 50-55
+- Current milestone: 0 plans completed across 4 phases
 
 **By Phase:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 50. Portable Runtime-Local Contracts and Fixture Boundary | 2/2 | Complete |
-| 51. Structured Intent, Generic Workflows, and Semantic Retrieval | 2/2 | Complete |
-| 52. Least-Sufficient Composition and Single-Path Semantic Cutover | 2/2 | Complete |
-| 53. Scoped Preferences and Truthful Startup Continuity | 2/2 | Complete |
-| 54. Independent Evaluation and Hot-Path Budgets | 2/2 | Complete |
-| 55. Installer, Native Parity, and Release Truth | 2/2 | Complete |
+| 56. Live Installer and Upgrade Truth | 0/TBD | Not started |
+| 57. Native Runtime Health and Watcher Resilience | 0/TBD | Not started |
+| 58. Outcome and Graph Observability | 0/TBD | Not started |
+| 59. Production Acceptance and Release Truth | 0/TBD | Not started |
 
 ## Accumulated Context
 
@@ -83,9 +77,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-08-09 Europe/Lisbon
-Stopped at: Milestone v1.8 completed and archived
+Stopped at: v1.9 requirements and roadmap initialized
 Resume file: None
 
 ## Operator Next Steps
 
-- Start the next milestone with /gsd-new-milestone
+- Plan Phase 56: Live Installer and Upgrade Truth
