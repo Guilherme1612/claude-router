@@ -14,6 +14,11 @@ export const REQUIRED_ACTIVATION_GATES = Object.freeze([
   'privacy', 'reconciliation_safety', 'regression_suite', 'token_budget',
 ]);
 
+export const RUNTIME_TRUTH_GATE_IDS = Object.freeze([
+  'privacy', 'latency', 'token_budget', 'reconciliation_safety',
+  'regression_suite', 'incremental_full_equivalence',
+]);
+
 const subprocess = (id, args, timeout, threshold) => Object.freeze({
   id, version: '1', threshold,
   async run() {
@@ -41,7 +46,10 @@ const subprocess = (id, args, timeout, threshold) => Object.freeze({
 });
 
 const inProcess = (id, validate, threshold) => Object.freeze({ id, version: '1', threshold, async run(input) {
-  try { return { passed: Boolean(validate(input)), reason_code: validate(input) ? 'passed' : 'input_mismatch', measured: {}, threshold }; }
+  try {
+    const passed = Boolean(validate(input));
+    return { passed, reason_code: passed ? 'passed' : 'input_mismatch', measured: {}, threshold };
+  }
   catch { return { passed: false, reason_code: 'malformed_input', measured: {}, threshold }; }
 } });
 

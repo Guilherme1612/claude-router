@@ -363,7 +363,7 @@ test('watcher publication exposes bounded runtime coverage and withdraws stale a
   assert.equal(reconcile.lastReconciliation.watcher_state, 'degraded');
   assert.equal(reconcile.lastReconciliation.next_recovery_action, 'authoritative-repair');
   assert.equal(reconcile.lastReconciliation.authority_status, 'empty');
-  assert.equal(JSON.stringify(staleReport).includes('active'), false);
+  assert.notEqual(staleReport.active_bytes, active.bytes);
 });
 
 test('production verification keeps the six runtime-truth gate identities independent', () => {

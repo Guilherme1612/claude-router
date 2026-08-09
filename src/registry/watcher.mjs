@@ -26,6 +26,86 @@ function hash(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
 }
 
+const ROOT_FAILURE_CODES = new Set([
+  'access_denied', 'read_error', 'root_missing', 'root_replaced', 'scan_error', 'unsafe_link',
+]);
+
+function runtimeScanStatus(current, configuredRoots = []) {
+  const stale = new Set();
+  const unreadable = new Set();
+  const logicalRoots = Array.isArray(current?.logicalRoots) ? current.logicalRoots : [];
+  const byName = new Map(logicalRoots.map(root => [root.logicalRoot, root]));
+  for (const root of logicalRoots) {
+    const codes = Array.isArray(root?.diagnosticCodes) ? root.diagnosticCodes : [];
+    if (root?.complete !== true || root?.status === 'unknown' || codes.some(code => ROOT_FAILURE_CODES.has(code))) {
+      if (root?.logicalRoot) stale.add(root.logicalRoot);
+    }
+    if (codes.some(code => ['access_denied', 'read_error', 'scan_error', 'unsafe_link'].includes(code))) {
+      if (root?.logicalRoot) unreadable.add(root.logicalRoot);
+    }
+  }
+  for (const diagnostic of current?.diagnostics || []) {
+    if (!diagnostic?.logical_root) continue;
+    if (ROOT_FAILURE_CODES.has(diagnostic.code)) stale.add(diagnostic.logical_root);
+    if (['access_denied', 'read_error', 'scan_error', 'unsafe_link'].includes(diagnostic.code)) unreadable.add(diagnostic.logical_root);
+  }
+  // A real fingerprint scan always returns logicalRoots. Keep hash-only legacy
+  // seams usable, but treat a missing configured root as unknown otherwise.
+  if (logicalRoots.length > 0) {
+    for (const spec of configuredRoots) if (!byName.has(spec.logicalRoot)) stale.add(spec.logicalRoot);
+  }
+  return { stale_roots: [...stale].sort(), unreadable_roots: [...unreadable].sort(), complete: stale.size === 0 };
+}
+
+function coverageCounts(records = []) {
+  const counts = {};
+  for (const record of records) {
+    const classification = record?.coverage?.classification;
+    if (typeof classification !== 'string' || !classification) continue;
+    counts[classification] = (counts[classification] || 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+}
+
+function boundedTruthEvidence({ built, current, report, operational, activation = null, scanStatus }) {
+  const runtimes = built?.summary?.runtimes || {};
+  const runtime_observation_counts = Object.fromEntries(
+    ['claude', 'codex'].map(runtime => [runtime, Number.isSafeInteger(runtimes[runtime]) ? runtimes[runtime] : 0]),
+  );
+  const records = Array.isArray(built?.registry?.records) ? built.registry.records : [];
+  const dispatchable_count = scanStatus?.complete === false ? 0
+    : (Number.isSafeInteger(built?.summary?.dispatchable_count) ? built.summary.dispatchable_count : records.filter(record => record.dispatchable === true).length);
+  return {
+    inventory_epoch: typeof current?.hash === 'string' && /^[a-f0-9]{64}$/.test(current.hash) ? current.hash : null,
+    inventory_fingerprint: typeof current?.hash === 'string' && /^[a-f0-9]{64}$/.test(current.hash) ? current.hash : null,
+    runtime_observation_counts,
+    coverage_classification_counts: scanStatus?.complete === false ? {} : coverageCounts(records),
+    stale_roots: scanStatus?.stale_roots || [],
+    unreadable_roots: scanStatus?.unreadable_roots || [],
+    reconciliation_disposition: report?.disposition || operational?.reconciliation_disposition || 'unknown',
+    activation_disposition: activation?.activation_status || operational?.activation_disposition || 'unknown',
+    authority_status: operational?.authority_status || 'empty',
+    candidate_disposition: report?.disposition || 'unknown',
+    dispatchable_count,
+    watcher_state: operational?.watcher_state || (scanStatus?.complete === false ? 'degraded' : 'current'),
+    next_recovery_action: operational?.next_recovery_action || null,
+  };
+}
+
+async function withdrawActiveAuthority(ownedRoot) {
+  if (!ownedRoot) return { authority_status: 'empty', disposition: 'already_empty' };
+  const root = resolve(ownedRoot);
+  const pointers = [
+    join(root, 'active.json'),
+    join(root, 'release-tuples', 'active.json'),
+    join(root, 'release-tuples', 'known-good.json'),
+    join(root, 'compiled-index', 'active.json'),
+    join(root, 'compiled-index', 'known-good.json'),
+  ];
+  for (const pointer of pointers) await rm(pointer, { force: true });
+  return { authority_status: 'empty', disposition: 'withdrawn' };
+}
+
 function defaultScheduler() {
   return { now: Date.now, setTimeout, clearTimeout };
 }
@@ -196,6 +276,16 @@ export function createRegistryWatcher(options) {
     stale_roots: [],
     unreadable_roots: [],
     next_recovery_action: null,
+    inventory_epoch: null,
+    inventory_fingerprint: null,
+    runtime_observation_counts: { claude: 0, codex: 0 },
+    coverage_classification_counts: {},
+    reconciliation_disposition: null,
+    activation_disposition: null,
+    authority_status: 'empty',
+    candidate_disposition: null,
+    dispatchable_count: 0,
+    watcher_state: 'reconciling',
     last_complete_fingerprint_state: null,
     last_complete_semantic_snapshot: null,
   };
@@ -273,20 +363,21 @@ export function createRegistryWatcher(options) {
     });
     try {
       const current = await scan(roots);
-      const incompleteRoots = (current.logicalRoots || []).filter(root => root.complete === false);
-      if (incompleteRoots.length) {
-        const unreadableRoots = incompleteRoots
-          .filter(root => (root.diagnosticCodes || []).some(code => ['access_denied', 'read_error', 'scan_error'].includes(code)))
-          .map(root => root.logicalRoot).sort();
-        const staleRoots = incompleteRoots.map(root => root.logicalRoot).sort();
+      const scanStatus = runtimeScanStatus(current, roots);
+      if (!scanStatus.complete) {
+        const result = await reconcile({ roots: names, previous: baseline, current, diff: { events: [], diagnostics: [] }, trigger });
+        const evidence = result && typeof result === 'object' ? result : {};
         setOperational('degraded', {
           reason_code: 'incomplete_scan',
           candidate_generation_id: candidateGenerationId,
           pending_changes: [...names].sort(),
-          stale_roots: staleRoots,
-          unreadable_roots: unreadableRoots,
+          stale_roots: scanStatus.stale_roots,
+          unreadable_roots: scanStatus.unreadable_roots,
           next_recovery_action: 'authoritative-repair',
+          ...evidence,
+          watcher_state: 'degraded',
         });
+        if (onReconciled) await onReconciled(snapshotOperational());
         return;
       }
       const lifecycle = diff(baseline, current);
@@ -309,6 +400,8 @@ export function createRegistryWatcher(options) {
         stale_roots: [],
         unreadable_roots: [],
         next_recovery_action: null,
+        ...(result && typeof result === 'object' ? result : {}),
+        watcher_state: 'current',
         last_complete_fingerprint_state: structuredClone(current),
         last_complete_semantic_snapshot: result?.semanticSnapshot
           ? structuredClone(result.semanticSnapshot)
@@ -515,6 +608,18 @@ export async function runRegistryWatcher(options) {
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
     ...(watcher ? { watcher: {
       state: watcher.state, trigger: watcher.trigger, pending_changes: watcher.pending_changes,
+      inventory_epoch: watcher.inventory_epoch,
+      inventory_fingerprint: watcher.inventory_fingerprint,
+      runtime_observation_counts: watcher.runtime_observation_counts,
+      coverage_classification_counts: watcher.coverage_classification_counts,
+      stale_roots: watcher.stale_roots,
+      unreadable_roots: watcher.unreadable_roots,
+      reconciliation_disposition: watcher.reconciliation_disposition,
+      activation_disposition: watcher.activation_disposition,
+      authority_status: watcher.authority_status,
+      candidate_disposition: watcher.candidate_disposition,
+      dispatchable_count: watcher.dispatchable_count,
+      next_recovery_action: watcher.next_recovery_action,
     } } : {}),
     ...(reconcile.lastReconciliation ? { reconciliation: reconcile.lastReconciliation } : {}),
   });
@@ -633,6 +738,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   const evaluateCorpus = dependencies.evaluateCalibrationCorpus || evaluateCalibrationCorpus;
   const createEvidenceStore = dependencies.createPersistentEvidenceStore || createPersistentEvidenceStore;
   const compatibleFn = dependencies.compatible || compatible;
+  const withdrawActive = dependencies.withdrawActive || (() => withdrawActiveAuthority(config.activation_root));
   const onPublished = dependencies.onPublished;
   const refreshRuntimeArtifacts = dependencies.refreshRuntimeArtifacts;
   const writeJson = dependencies.writeJson || atomicJson;
@@ -669,7 +775,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
   let cumulativeEvents = 0;
   const FULL_REACQUIRE_EVENT_THRESHOLD = 500;
 
-  const reconcile = async ({ diff, trigger }) => {
+  const reconcile = async ({ diff, trigger, current }) => {
     // CR-01: reset `recovered` per reconcile call so the recovery block (and
     // thus the canary path with its 6 REQUIRED_GATES + evidence sufficiency
     // gate) runs on EVERY eligible reconcile, not just the first. Previously
@@ -695,6 +801,42 @@ export function createRegistryReconciler(config, dependencies = {}) {
     }
     const built = assemble(next, acquisitionOptions);
     const active = await readActive();
+    const scanStatus = runtimeScanStatus(current, config.roots || []);
+    if (!scanStatus.complete) {
+      const withdrawal = active.authority_status === 'active' || active.tuple_version_id
+        ? await withdrawActive({ reason_code: 'incomplete_scan', stale_roots: scanStatus.stale_roots })
+        : { authority_status: 'empty', disposition: 'already_empty' };
+      const emptyRegistry = { schema_version: 1, records: [] };
+      const emptyBytes = `${stableStringify(emptyRegistry)}\n`;
+      const staleReport = {
+        schema_version: 1,
+        disposition: 'quarantined',
+        candidate_disposition: 'quarantined',
+        candidate_fingerprint: hash({ disposition: 'quarantined', stale_roots: scanStatus.stale_roots }),
+        report_fingerprint: hash({ disposition: 'quarantined', stale_roots: scanStatus.stale_roots, unreadable_roots: scanStatus.unreadable_roots }),
+        verdicts: scanStatus.stale_roots.map(logical_root => ({ logical_root, dispatchable: false, corrective_action: 'authoritative-repair', reason_code: 'runtime_root_incomplete' })),
+        active_bytes: emptyBytes,
+        active_fingerprint: hash(emptyBytes),
+        authority_status: 'empty',
+        dispatchable_count: 0,
+        stale_roots: scanStatus.stale_roots,
+        unreadable_roots: scanStatus.unreadable_roots,
+        reconciliation_disposition: 'quarantined',
+        activation_disposition: withdrawal.disposition,
+        watcher_state: 'degraded',
+        next_recovery_action: 'authoritative-repair',
+      };
+      await writeJson(config.candidate_path, staleReport);
+      await writeJson(config.report_path, staleReport);
+      reconcile.lastReconciliation = {
+        strategy: 'authoritative-repair',
+        ...(trigger ? { trigger } : {}),
+        lifecycle_hash: diff.hash || hash(diff),
+        ...staleReport,
+      };
+      if (onPublished) await onPublished(reconcile.lastReconciliation);
+      return reconcile.lastReconciliation;
+    }
     const invalidation = deriveInvalidationInput(built, diff);
     const report = evaluate({
       candidate: built.registry,
@@ -738,6 +880,9 @@ export function createRegistryReconciler(config, dependencies = {}) {
       active_bytes: report.active_bytes,
       active_fingerprint: report.active_fingerprint,
       publication_status: 'published',
+      ...(current
+        ? boundedTruthEvidence({ built, current, report, operational: { authority_status: active.authority_status }, scanStatus })
+        : {}),
     };
     if (onPublished) await onPublished(reconcile.lastReconciliation);
     let activation = { activation_status: 'preserved', reason_code: report.disposition };
@@ -964,6 +1109,7 @@ export function createRegistryReconciler(config, dependencies = {}) {
       } : {}),
       ...(verificationEvidence ? { verification: verificationEvidence } : {}),
     };
+    return reconcile.lastReconciliation;
   };
   return reconcile;
 }
