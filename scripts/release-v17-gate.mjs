@@ -90,7 +90,7 @@ export async function verifyReleaseGate({ root = resolve(dirname(new URL(import.
   const planning = planningProjection(root, final);
   const archive = final ? verifyArchiveInvariant({ root }) : { ok: true, skipped: true };
   const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
-  const tag = spawnSync('git', ['rev-parse', 'v1.7'], { cwd: root, encoding: 'utf8' });
+  const tag = spawnSync('git', ['rev-parse', 'v1.7^{commit}'], { cwd: root, encoding: 'utf8' });
   const tagCommit = tag.status === 0 ? tag.stdout.trim() : null;
   const tagCheck = { ok: !final || tagCommit === head, head, tag: tagCommit };
   const result = { status: [focused, full, installed, planning, archive, tagCheck].every(item => item.ok) ? 'passed' : 'blocked', focused, full, installed, planning, archive, tag: tagCheck };
