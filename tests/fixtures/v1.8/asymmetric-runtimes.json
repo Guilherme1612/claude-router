@@ -1,0 +1,38 @@
+{
+  "claude": {
+    "files": [
+      {
+        "path": "agents/amber-orbit.md",
+        "content": "---\nschema_version: 1\nname: amber-orbit\ndescription: Anonymous fixture agent\ncommand: amber-orbit\n---\n"
+      },
+      {
+        "path": "commands/paper-kite.md",
+        "content": "---\nschema_version: 1\nname: paper-kite\ndescription: Anonymous fixture command\ncommand: paper-kite\n---\n"
+      },
+      {
+        "path": "hooks/soft-bell.json",
+        "content": "{\"schema_version\":1,\"name\":\"soft-bell\",\"event\":\"SyntheticEvent\",\"command\":\"hooks/soft-bell.json\"}"
+      },
+      {
+        "path": "plugins/linen-box/tools/blue-ruler.json",
+        "content": "{\"schema_version\":1,\"name\":\"blue-ruler\",\"description\":\"Anonymous plugin tool\",\"command\":\"blue-ruler\"}"
+      },
+      {
+        "path": "skills/copper-loop/SKILL.md",
+        "content": "---\nschema_version: 1\nname: copper-loop\ndescription: Anonymous workflow-shaped fixture\ncommand: copper-loop\nmapping: {fixture_kind: workflow, fixture_cases: [runtime-only]}\n---\n"
+      }
+    ]
+  },
+  "codex": {
+    "files": [
+      {
+        "path": "skills/river-stone/SKILL.md",
+        "content": "---\nschema_version: 1\nname: river-stone-renamed\ndescription: Anonymous renamed fixture skill\ncommand: river-stone-renamed\nmapping: {fixture_cases: [renamed]}\n---\n"
+      },
+      {
+        "path": "agents/silver-leaf.json",
+        "content": "{\"schema_version\":1,\"name\":\"silver-leaf\",\"description\":\"Anonymous Codex-only agent\",\"command\":\"silver-leaf\",\"mapping\":{\"fixture_cases\":[\"runtime-only\"]}}"
+      }
+    ]
+  }
+}

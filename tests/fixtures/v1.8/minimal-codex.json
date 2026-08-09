@@ -1,0 +1,13 @@
+{
+  "claude": {
+    "files": []
+  },
+  "codex": {
+    "files": [
+      {
+        "path": "skills/quiet-lantern/SKILL.md",
+        "content": "---\nschema_version: 1\nname: quiet-lantern\ndescription: Anonymous minimal fixture skill\ncommand: quiet-lantern\n---\n"
+      }
+    ]
+  }
+}

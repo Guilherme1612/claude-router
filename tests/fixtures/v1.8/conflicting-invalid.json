@@ -1,0 +1,60 @@
+{
+  "claude": {
+    "files": [
+      {
+        "path": "skills/faded-map.json",
+        "content": "{\"schema_version\":1,\"name\":\"faded-map\",\"canonical_identity\":\"fixture/shared-shape\",\"description\":\"Anonymous stale evidence fixture\",\"command\":\"faded-map\",\"mapping\":{\"fixture_kind\":\"workflow\",\"fixture_cases\":[\"stale\",\"conflicting\"]}}"
+      },
+      {
+        "path": "plugins/cedar-pack/plugin.json",
+        "content": "{\"schema_version\":1,\"name\":\"cedar-pack\",\"description\":\"Anonymous plugin container\"}"
+      },
+      {
+        "path": "plugins/cedar-pack/commands/square-wave.json",
+        "content": "{\"schema_version\":1,\"name\":\"square-wave\",\"description\":\"Anonymous plugin command\",\"command\":\"square-wave\"}"
+      },
+      {
+        "path": "plugins/cedar-pack/tools/plain-needle.json",
+        "content": "{\"schema_version\":1,\"name\":\"plain-needle\",\"description\":\"Anonymous plugin tool\",\"command\":\"plain-needle\"}"
+      },
+      {
+        "path": "plugins/cedar-pack/hooks/dry-chime.json",
+        "content": "{\"schema_version\":1,\"name\":\"dry-chime\",\"event\":\"SyntheticEvent\",\"command\":\"plugins/cedar-pack/hooks/dry-chime.json\"}"
+      }
+    ],
+    "projectFiles": [
+      {
+        "path": "agents/local-cloud.md",
+        "content": "---\nschema_version: 1\nname: local-cloud\ndescription: Anonymous project-scoped fixture agent\ncommand: local-cloud\n---\n"
+      }
+    ]
+  },
+  "codex": {
+    "files": [
+      {
+        "path": "skills/bright-map.json",
+        "content": "{\"schema_version\":1,\"name\":\"bright-map\",\"canonical_identity\":\"fixture/shared-shape\",\"description\":\"Anonymous conflicting fixture\",\"command\":\"bright-map\",\"dependencies\":[{\"id\":\"missing-shape\",\"available\":false}],\"mapping\":{\"fixture_cases\":[\"conflicting\"]}}"
+      },
+      {
+        "path": "agents/broken-shape.json",
+        "content": "{broken"
+      },
+      {
+        "path": "capabilities/future-surface",
+        "content": "anonymous future layout"
+      },
+      {
+        "path": "plugins/flax-bundle/plugin.json",
+        "content": "{\"schema_version\":1,\"name\":\"flax-bundle\",\"description\":\"Anonymous plugin-heavy container\"}"
+      },
+      {
+        "path": "plugins/flax-bundle/skills/moss-line/SKILL.md",
+        "content": "---\nschema_version: 1\nname: moss-line\ndescription: Anonymous plugin skill\ncommand: moss-line\n---\n"
+      },
+      {
+        "path": "plugins/flax-bundle/agents/pale-sun.json",
+        "content": "{\"schema_version\":1,\"name\":\"pale-sun\",\"description\":\"Anonymous plugin agent\",\"command\":\"pale-sun\"}"
+      }
+    ]
+  }
+}
