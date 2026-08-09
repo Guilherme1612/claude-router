@@ -226,8 +226,10 @@ test('mode-map stamping seeds record mapping.explicit_subjects so the mapper pub
         runtime: record.invocation.runtime,
       },
       fields: {
+        authority: { value: 'one-turn' },
         reversibility: { value: 'reversible' },
         risk: { value: 'low' },
+        side_effects: { value: ['none'] },
       },
     }));
     const options = { ...baseOptions, overlays };

@@ -13,6 +13,52 @@ import {
 import { evaluateEligibility } from './eligibility.mjs';
 import { compileRelationshipGraph, deriveRelationships } from './relationships.mjs';
 
+export const COVERAGE_CLASSES = Object.freeze([
+  'routable', 'composable', 'direct-only', 'hook-owned', 'project-scoped',
+  'unavailable', 'invalid', 'excluded',
+]);
+
+const CRITICAL_COVERAGE_GATES = Object.freeze([
+  'side_effects', 'authority', 'dependency_closure', 'risk', 'permission', 'field_confidence',
+]);
+
+export function classifyCoverage(record, eligibility) {
+  const gateReasons = Array.isArray(eligibility?.reason_codes)
+    ? eligibility.reason_codes.filter(reason => reason !== 'eligibility_all_gates_passed') : [];
+  const critical = gateReasons.filter(reason => CRITICAL_COVERAGE_GATES.some(gate => (
+    reason.startsWith(`${gate}_`)
+  )));
+  if (record?.lifecycle === 'invalid' || eligibility?.quarantined || critical.length) {
+    return { classification: 'invalid', reasons: [...new Set([
+      ...(record?.lifecycle === 'invalid' ? ['metadata_invalid'] : []),
+      ...(eligibility?.quarantine_reasons || []),
+      ...critical,
+    ])].sort() };
+  }
+  if (record?.enabled === false || record?.invocation?.availability !== 'available'
+    || eligibility?.gates?.target_existence === 'failed') {
+    return { classification: 'unavailable', reasons: gateReasons.length ? gateReasons : ['target_unavailable'] };
+  }
+  if (record?.excluded === true || record?.coverage?.classification === 'excluded') {
+    return { classification: 'excluded', reasons: record.coverage?.reasons?.length
+      ? [...new Set(record.coverage.reasons)].sort() : ['explicitly_excluded'] };
+  }
+  if (record?.lifecycle_role === 'event-bound') {
+    return { classification: 'hook-owned', reasons: ['event_bound'] };
+  }
+  if (record?.scope?.kind !== 'global') {
+    return { classification: 'project-scoped', reasons: ['non_global_scope'] };
+  }
+  if (record?.direct_only === true || record?.invocation?.kind === 'direct-only') {
+    return { classification: 'direct-only', reasons: ['direct_invocation_only'] };
+  }
+  if (eligibility?.eligible && record?.composition?.roles?.length && !record.composition.exclusive) {
+    return { classification: 'composable', reasons: ['eligible_composition_role'] };
+  }
+  if (eligibility?.eligible) return { classification: 'routable', reasons: ['eligible'] };
+  return { classification: 'invalid', reasons: gateReasons.length ? gateReasons : ['eligibility_incomplete'] };
+}
+
 function key(value) {
   return stableStringify(value);
 }
@@ -355,7 +401,8 @@ export function assembleRegistry(acquisition, options = {}) {
       records: overlaidRecords,
       relationships,
     });
-    return { ...authoritative, dispatchable: eligibility.eligible, eligibility };
+    const coverage = classifyCoverage(authoritative, eligibility);
+    return { ...authoritative, dispatchable: eligibility.eligible, eligibility, coverage };
   });
   enrichedRecords.sort((a, b) => `${a.id}:${key(a.provenance)}`.localeCompare(`${b.id}:${key(b.provenance)}`));
   const diagnostics = [...claude.diagnostics, ...codex.diagnostics].map(({ local_path: _local, ...portable }) => portable)

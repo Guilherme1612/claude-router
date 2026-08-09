@@ -245,7 +245,68 @@ function mapped(row, mappings) {
   return row.category === 'agents' && mappings.agent.has(row.id);
 }
 
-export function auditCoverage({ manifest, modeMap, baseline, routeDiagnostics = [] } = {}) {
+const REGISTRY_COVERAGE_CLASSES = new Set([
+  'routable', 'composable', 'direct-only', 'hook-owned', 'project-scoped',
+  'unavailable', 'invalid', 'excluded',
+]);
+
+function auditRegistryCoverage(registry) {
+  const source = Array.isArray(registry?.records) ? registry.records : [];
+  const ids = new Map();
+  for (const record of source) ids.set(record?.id, (ids.get(record?.id) || 0) + 1);
+  const unclassified = [];
+  const records = source.map(record => {
+    const classification = record?.coverage?.classification;
+    const reasons = Array.isArray(record?.coverage?.reasons) ? record.coverage.reasons : [];
+    const runtime = record?.invocation?.runtime || record?.provenance?.[0]?.runtime || 'unknown';
+    const entry = { id: record?.id || '', runtime, kind: record?.semantic_type || record?.type || 'unknown', classification, reasons };
+    if (!entry.id) unclassified.push({ id: '', reason: 'missing_id' });
+    else if (ids.get(entry.id) !== 1) unclassified.push({ id: entry.id, reason: 'duplicate_id' });
+    if (!REGISTRY_COVERAGE_CLASSES.has(classification)) {
+      unclassified.push({ id: entry.id, reason: classification ? 'unknown_classification' : 'missing_classification' });
+    }
+    return entry;
+  }).sort((left, right) => left.id.localeCompare(right.id));
+  const byClassification = {};
+  const byRuntime = {};
+  for (const entry of records) {
+    const classification = REGISTRY_COVERAGE_CLASSES.has(entry.classification) ? entry.classification : 'unclassified';
+    byClassification[classification] = (byClassification[classification] || 0) + 1;
+    if (!byRuntime[entry.runtime]) byRuntime[entry.runtime] = { discovered: 0, classified: 0 };
+    byRuntime[entry.runtime].discovered += 1;
+    if (REGISTRY_COVERAGE_CLASSES.has(entry.classification) && ids.get(entry.id) === 1) {
+      byRuntime[entry.runtime].classified += 1;
+    }
+  }
+  const mappedCount = records.filter(entry => ['routable', 'composable', 'direct-only'].includes(entry.classification)).length;
+  return {
+    schema_version: 1,
+    records,
+    forward_diagnostics: [],
+    quarantined_diagnostics: [],
+    baseline_diagnostics: [],
+    counts: {
+      total: records.length,
+      mapped: mappedCount,
+      unmapped: records.length - mappedCount,
+      forward_diagnostics: 0,
+      quarantined_diagnostics: 0,
+      baseline_diagnostics: 0,
+      by_classification: Object.fromEntries(Object.entries(byClassification).sort(([a], [b]) => a.localeCompare(b))),
+      by_runtime: Object.fromEntries(Object.entries(byRuntime).sort(([a], [b]) => a.localeCompare(b))),
+    },
+    unclassified: unclassified.sort((left, right) => left.id.localeCompare(right.id) || left.reason.localeCompare(right.reason)),
+    unacknowledged_gaps: [],
+    fingerprints: {
+      manifest: fingerprint(records),
+      mode_map: fingerprint([]),
+      baseline: fingerprint([]),
+    },
+  };
+}
+
+export function auditCoverage({ registry, manifest, modeMap, baseline, routeDiagnostics = [] } = {}) {
+  if (registry !== undefined) return auditRegistryCoverage(registry);
   const rows = capabilities(manifest);
   const indexes = targetIndexes(rows);
   const routes = typedMappings(modeMap, indexes);
