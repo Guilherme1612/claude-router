@@ -417,8 +417,10 @@ export async function installRouter(options) {
     // by runtime at read time per RESEARCH §Pitfall 3 / PARITY-02). The hook
     // trigger (router.mjs) resolves the deployed claude.mjs worker off the hot
     // path; the codex.mjs worker is the Codex variant.
-    'adapters/dispatch/contract.mjs', 'adapters/dispatch/receipt.mjs',
-    'adapters/dispatch/claude.mjs', 'adapters/dispatch/codex.mjs',
+  'adapters/dispatch/contract.mjs', 'adapters/dispatch/receipt.mjs',
+  'adapters/dispatch/claude.mjs', 'adapters/dispatch/codex.mjs',
+  // Phase 48 / PROD-02: production dispatch closure, deployed to both roots.
+  'orchestrator/strategy.mjs', 'evolution/local-learning.mjs', 'lifecycle/migration.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
     'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
@@ -813,6 +815,15 @@ function removeEmptyDirectory(directory) {
   if (readdirSync(directory).length === 0) rmdirSync(directory);
 }
 
+function pruneEmptyTree(directory) {
+  if (!existsSync(directory) || !statSync(directory).isDirectory()) return;
+  for (const entry of readdirSync(directory)) {
+    const child = join(directory, entry);
+    if (statSync(child).isDirectory()) pruneEmptyTree(child);
+  }
+  removeEmptyDirectory(directory);
+}
+
 export async function uninstallRouter(options) {
   const p = paths(options);
   if (!existsSync(p.manifestPath)) {
@@ -951,10 +962,9 @@ export async function uninstallRouter(options) {
   ]) {
     if (existsSync(generatedAsset)) rmSync(generatedAsset, { force: true });
   }
-  // Re-prune the owned roots now that lifecycle state is gone so they are removed when empty.
-  for (const directory of [p.ownedRoot, p.codexOwnedRoot]) {
-    removeEmptyDirectory(directory);
-  }
+  // Re-prune all empty installer-owned subtrees now that lifecycle state is gone.
+  // Directory ordering in old manifests is not trusted; files are never removed here.
+  for (const directory of [p.ownedRoot, p.codexOwnedRoot]) pruneEmptyTree(directory);
   return { status: 'uninstalled', removed, retained };
 }
 

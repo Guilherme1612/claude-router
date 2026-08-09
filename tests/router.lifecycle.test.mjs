@@ -157,8 +157,10 @@ test('one command installs router, binding, Codex marker, and complete ownership
     //   (modules/ flatMap + src/ mirror — Phase 40 LEASE-01..06, T-39-03 regression backstop)
     // + 4 = 1 new module (src/registry/trust.mjs) × 2 roots × 2 deploy paths
     //   (modules/ flatMap + src/ mirror — Phase 41 TRUST-02 untrusted-evidence policy)
-    // = 283
-    assert.equal(manifest.files.length, 283);
+    // + 12 = 3 production integration modules × 2 roots × 2 deploy paths
+    //   (Phase 48 PROD-02: strategy, learning, migration)
+    // = 303
+    assert.equal(manifest.files.length, 303);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

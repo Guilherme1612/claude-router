@@ -17,6 +17,8 @@
 // node:fs, node:path, node:os). No npm imports, no native modules.
 
 import { realpathSync, statSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { resolve, sep } from 'node:path';
 import { validateStrategyBounds as validateStrategyBoundsFromStrategy } from '../../orchestrator/strategy.mjs';
 
@@ -26,6 +28,11 @@ export const DISPATCH_CONTRACT_VERSION = 1;
 // evolutions (Phase 44 attribution) bump this and migrate; Phase 38 only
 // writes version 1.
 export const RECEIPT_SCHEMA_VERSION = 1;
+
+export const MAX_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+export const MAX_RETRY_LIMIT = 10;
+export const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+export const MAX_OUTPUT_LINES = 1_000_000;
 
 // Receipt state machine (HOST-01 / RCPT-02 preview):
 //   pending           — receipt created before invocation (Phase 44)
@@ -254,6 +261,241 @@ export function validateStrategyBounds(action) {
   return validateStrategyBoundsFromStrategy(action);
 }
 
+function positiveBound(value, maximum) {
+  return Number.isSafeInteger(value) && value > 0 && value <= maximum;
+}
+
+function normalizedOutputBounds(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, reason: 'missing_output_bounds' };
+  }
+  const bytes = value.max_bytes ?? value.bytes;
+  const lines = value.max_lines ?? value.lines;
+  if (bytes === undefined && lines === undefined) {
+    return { ok: false, reason: 'missing_output_bounds' };
+  }
+  if (bytes !== undefined && !positiveBound(bytes, MAX_OUTPUT_BYTES)) {
+    return { ok: false, reason: Number.isFinite(bytes) && bytes > MAX_OUTPUT_BYTES
+      ? 'output_bounds_oversized' : 'invalid_output_bounds' };
+  }
+  if (lines !== undefined && !positiveBound(lines, MAX_OUTPUT_LINES)) {
+    return { ok: false, reason: Number.isFinite(lines) && lines > MAX_OUTPUT_LINES
+      ? 'output_bounds_oversized' : 'invalid_output_bounds' };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(bytes !== undefined ? { max_bytes: bytes } : {}),
+      ...(lines !== undefined ? { max_lines: lines } : {}),
+    },
+  };
+}
+
+function normalizedCompletionContract(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, reason: 'missing_completion_contract' };
+  }
+  const evidenceType = value.evidence_type;
+  const hasExitExpectation = value.expected_exit_code !== undefined
+    || value.exit_code !== undefined
+    || value.success_exit_codes !== undefined
+    || value.exit_codes !== undefined;
+  const hasStateExpectation = typeof value.state === 'string' && value.state.length > 0;
+  if (evidenceType !== undefined && evidenceType !== 'exit_code' && evidenceType !== 'state') {
+    return { ok: false, reason: 'invalid_completion_contract' };
+  }
+  if (!hasExitExpectation && !hasStateExpectation && evidenceType === undefined) {
+    return { ok: false, reason: 'invalid_completion_contract' };
+  }
+  const expected = value.expected_exit_code ?? value.exit_code;
+  if (expected !== undefined && !Number.isSafeInteger(expected)) {
+    return { ok: false, reason: 'invalid_completion_contract' };
+  }
+  const codes = value.success_exit_codes ?? value.exit_codes;
+  if (codes !== undefined && (!Array.isArray(codes) || codes.length === 0
+    || codes.some((code) => !Number.isSafeInteger(code)))) {
+    return { ok: false, reason: 'invalid_completion_contract' };
+  }
+  if (expected !== undefined && codes !== undefined) {
+    return { ok: false, reason: 'invalid_completion_contract' };
+  }
+  return {
+    ok: true,
+    value: {
+      ...(evidenceType ? { evidence_type: evidenceType } : {}),
+      ...(expected !== undefined ? { expected_exit_code: expected } : {}),
+      ...(codes !== undefined ? { success_exit_codes: [...codes] } : {}),
+      ...(hasStateExpectation ? { state: value.state } : {}),
+    },
+  };
+}
+
+export function normalizeExecutionContract(action = {}) {
+  const source = action.execution_contract ?? action.executionContract ?? action;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) {
+    return { ok: false, reason: 'missing_execution_contract' };
+  }
+  const timeout = source.timeout_ms ?? source.timeout;
+  if (!Number.isSafeInteger(timeout) || timeout <= 0) {
+    return { ok: false, reason: 'missing_timeout' };
+  }
+  if (timeout > MAX_TIMEOUT_MS) return { ok: false, reason: 'timeout_oversized' };
+  const retry = source.retry_limit ?? source.retry;
+  if (!Number.isSafeInteger(retry) || retry < 0) {
+    return { ok: false, reason: 'unbounded_retry' };
+  }
+  if (retry > MAX_RETRY_LIMIT) return { ok: false, reason: 'retry_oversized' };
+  const output = normalizedOutputBounds(source.output_bounds);
+  if (!output.ok) return output;
+  const completion = normalizedCompletionContract(source.completion_contract);
+  if (!completion.ok) return completion;
+  return {
+    ok: true,
+    value: {
+      timeout_ms: timeout,
+      retry_limit: retry,
+      output_bounds: output.value,
+      completion_contract: completion.value,
+    },
+  };
+}
+
+function completionMatches(contract, code, state) {
+  if (contract.state !== undefined) return contract.state === state;
+  if (contract.expected_exit_code !== undefined) return code === contract.expected_exit_code;
+  if (contract.success_exit_codes !== undefined) return contract.success_exit_codes.includes(code);
+  return code === 0;
+}
+
+function killChild(child, signal) {
+  try { if (child && child.exitCode === null) child.kill(signal); } catch { /* already closed */ }
+}
+
+function runOneChild({ command, args, options, contract }) {
+  return new Promise((resolveOutcome) => {
+    let child;
+    try {
+      child = spawn(command, args, options);
+    } catch {
+      resolveOutcome({ spawned: false });
+      return;
+    }
+    const started = process.hrtime.bigint();
+    const hash = createHash('sha256');
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let outputLines = 0;
+    let overflow = false;
+    let timedOut = false;
+    let terminated = false;
+    let closed = false;
+    let timeoutTimer;
+    let killTimer;
+    const terminate = (reason) => {
+      if (terminated) return;
+      terminated = true;
+      if (reason === 'timeout_exceeded') timedOut = true;
+      if (reason === 'output_bound_exceeded') overflow = true;
+      killChild(child, 'SIGTERM');
+      killTimer = setTimeout(() => killChild(child, 'SIGKILL'), 100);
+      killTimer.unref?.();
+    };
+    const count = (chunk, stream) => {
+      const bytes = Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      if (stream === 'stdout') {
+        stdoutBytes += bytes;
+        hash.update(chunk);
+      } else {
+        stderrBytes += bytes;
+      }
+      outputLines += (Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))).reduce(
+        (total, byte) => total + (byte === 10 ? 1 : 0), 0,
+      );
+      if ((contract.output_bounds.max_bytes !== undefined
+        && stdoutBytes + stderrBytes > contract.output_bounds.max_bytes)
+        || (contract.output_bounds.max_lines !== undefined
+          && outputLines > contract.output_bounds.max_lines)) {
+        terminate('output_bound_exceeded');
+      }
+    };
+    child.stdout?.on('data', (chunk) => count(chunk, 'stdout'));
+    child.stderr?.on('data', (chunk) => count(chunk, 'stderr'));
+    child.once('error', () => {
+      if (!Number.isSafeInteger(child.pid) || child.pid <= 0) {
+        clearTimeout(timeoutTimer);
+        clearTimeout(killTimer);
+        resolveOutcome({ spawned: false });
+      }
+    });
+    const grace = () => clearTimeout(killTimer);
+    child.once('close', (code, signal) => {
+      closed = true;
+      clearTimeout(timeoutTimer);
+      grace();
+      const wallMs = Number(process.hrtime.bigint() - started) / 1e6;
+      const state = completionMatches(contract.completion_contract, code, 'completed')
+        ? 'completed' : 'failed';
+      const reason_codes = [];
+      if (timedOut) reason_codes.push('timeout_exceeded');
+      if (overflow) reason_codes.push('output_bound_exceeded');
+      if (!timedOut && !overflow && state !== 'completed') reason_codes.push('completion_contract_failed');
+      resolveOutcome({
+        spawned: Number.isSafeInteger(child.pid) && child.pid > 0,
+        pid: child.pid,
+        state,
+        code,
+        signal,
+        wall_ms: wallMs,
+        stdout_sha256: hash.digest('hex'),
+        captured_bytes: stdoutBytes + stderrBytes,
+        captured_lines: outputLines,
+        timed_out: timedOut,
+        output_truncated: overflow,
+        reason_codes,
+      });
+    });
+    timeoutTimer = setTimeout(() => terminate('timeout_exceeded'), contract.timeout_ms);
+    timeoutTimer.unref?.();
+    if (closed) clearTimeout(timeoutTimer);
+  });
+}
+
+export async function runBoundedChild({
+  command = process.execPath,
+  args = [],
+  cwd,
+  env,
+  execution_contract,
+  spawn_options = {},
+} = {}) {
+  const normalized = normalizeExecutionContract({ execution_contract });
+  if (!normalized.ok) return { state: 'failed', reason_codes: [normalized.reason], attempt_count: 0 };
+  const contract = normalized.value;
+  let attempt_count = 0;
+  let last;
+  while (attempt_count <= contract.retry_limit) {
+    attempt_count += 1;
+    last = await runOneChild({
+      command,
+      args,
+      contract,
+      options: {
+        ...spawn_options,
+        ...(cwd ? { cwd } : {}),
+        ...(env ? { env } : {}),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    });
+    if (last.spawned) return { ...last, attempt_count, retry_limit: contract.retry_limit };
+  }
+  return {
+    state: 'failed',
+    reason_codes: ['retry_exhausted'],
+    attempt_count,
+    retry_limit: contract.retry_limit,
+  };
+}
+
 // --- TRUST-04: preDispatchGate ----------------------------------------------
 // Pure function validating the invocation contract (not the capability record).
 // Called inside invokeImpl at dispatch time after validateInvocation and
@@ -275,7 +517,9 @@ export function preDispatchGate(action, adapter, context) {
   // Determine if any contract field is declared. If none are declared, this
   // is a legacy action that does not participate in the dispatch contract —
   // permissive (backward compatible with pre-TRUST-04 actions).
-  const hasAnyContract = action?.timeout !== undefined
+  const hasAnyContract = action?.execution_contract !== undefined
+    || action?.executionContract !== undefined
+    || action?.timeout !== undefined
     || action?.retry !== undefined
     || action?.output_bounds !== undefined
     || action?.completion_contract !== undefined;
@@ -295,26 +539,5 @@ export function preDispatchGate(action, adapter, context) {
     }
   }
 
-  // c. Timeout contract
-  if (!Number.isInteger(action?.timeout) || action.timeout <= 0) {
-    return { ok: false, reason: 'missing_timeout' };
-  }
-
-  // d. Retry policy
-  const retry = action?.retry;
-  if (!Number.isInteger(retry) || retry < 0 || !Number.isFinite(retry)) {
-    return { ok: false, reason: 'unbounded_retry' };
-  }
-
-  // e. Output bounds
-  if (!action?.output_bounds || typeof action.output_bounds !== 'object') {
-    return { ok: false, reason: 'missing_output_bounds' };
-  }
-
-  // f. Completion contract
-  if (!action?.completion_contract || typeof action.completion_contract !== 'object') {
-    return { ok: false, reason: 'missing_completion_contract' };
-  }
-
-  return { ok: true };
+  return normalizeExecutionContract(action);
 }

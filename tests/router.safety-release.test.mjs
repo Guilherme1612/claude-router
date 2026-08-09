@@ -225,7 +225,7 @@ test('SAF-03/SAF-07: hot-path files have no per-prompt external classifier or ho
 test('SAF-03/SAF-07: detached local evolution worker spawn remains the only hot-path child process exception', () => {
   const src = readFileSync(HOOK, 'utf8');
   assert.match(src, /import\s+\{\s*spawn\s*\}\s+from\s+['"]node:child_process['"]/, 'router may import stdlib spawn for local worker');
-  assert.match(src, /spawn\(\s*process\.execPath\s*,\s*\[\s*WORKER_PATH\s*\]/, 'worker spawn must target local router.evolve.mjs via process.execPath');
+  assert.match(src, /spawn\(\s*process\.execPath\s*,\s*\[\s*(?:WORKER_PATH|workerPath)\s*\]/, 'worker spawn must target the local evolution worker via process.execPath');
   assert.doesNotMatch(src, /spawn\([^)]*(?:curl|wget|openai|anthropic|classifier)/i, 'spawn must not shell out to a classifier');
 });
 

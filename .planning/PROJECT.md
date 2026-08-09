@@ -8,17 +8,16 @@ A global routing control layer that inventories Claude and Codex capabilities, i
 
 The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
 
-## Current Milestone: v1.6 Autonomous Control Plane
+## Current Milestone: v1.7 Runtime Safety and Release Truth (SHIPPED 2026-08-09)
 
-**Goal:** Extend the deterministic framework-neutral Router into a guarded control plane with native dispatch, persistent scoped authority, proportional execution, truthful continuity, attributable outcomes, and reversible local learning across Claude and Codex.
+**Goal:** Make the v1.6 control-plane capabilities real, bounded, reproducible, and releasable in installed Claude and Codex runtimes.
 
 **Target features:**
-- Cross-runtime feasibility and safety foundation — prove native dispatch, outcome observation, startup delivery, and lifecycle hooks in Claude and Codex before downstream autonomy depends on them
-- Intent, authority, and autonomy leases — separate confidence from permission; understand advice, inspection, action, persistent goals, quotations, examples, negation, and policy discussion
-- Framework-neutral semantic execution — resolve installed public, private, proprietary, plugin, service, and native capabilities through canonical contracts without named-framework branches
-- Adaptive execution and continuity — select proportionate skills, commands, agents, and tools; resume only safe unfinished work with truthful startup briefings and idempotent checkpoints
-- Outcome observability and reversible learning — attribute recommendation, invocation, substitution, rejection, completion, cost, and correction; promote only deterministic shadow/canary-proven local changes
-- Migration and trust hardening — safely migrate v1.5 state, fail closed on untrusted capability metadata and invocation arguments, preserve last-known-good rollback, and verify uninstall cleanup
+- Dispatch and storage safety — atomically claim work, enforce resource bounds, contain lease/receipt paths, and preserve durable at-most-once behavior in both runtimes
+- Production integration — wire and deploy proportional planning, causal learning, migration, dispatch, and their transitive dependencies to Claude and Codex
+- Validation and release integrity — repair deterministic regressions, complete Nyquist evidence, prove installed-runtime behavior, and make archive/tag state reproducible
+
+**v1.7 completed and release-verified on 2026-08-09.** Phases 47-49 passed their safety, production-integration, validation, installed-runtime, audit, archive, and release gates. All 15 v1.7 requirements are satisfied; external publication remains owner-controlled.
 
 ## Current State
 
@@ -28,7 +27,7 @@ The user can write the minimum useful prompt and still get the best available wo
 
 **v1.5 completed and release-verified on 2026-08-02.** Phases 30–36, 32.1, and 37.1 passed their review, security, Nyquist, verification, integration, and release gates. The installed controller is ready with one owned watcher, the active and known-good release tuple is healthy, and recommendation-only candidates are never promoted without safe dispatch targets.
 
-**v1.6 "Autonomous Control Plane" in progress.** Phase 38 (Cross-Runtime Native Feasibility) complete and verified 2026-08-06: a router-owned `NativeDispatchAdapter` spawns an authorized harmless fixture off the prompt hot path on both Claude and Codex, producing adapter-issued `invocation_identity` + verifiable `completion_evidence` receipts (byte-identical `stdout_sha256` across runtimes), with cross-runtime partition, truthful recommendation-only fallback, and prompt-path budget/read-only/fail-open invariants preserved (HOST-01..04). Dispatch adapters + fixture shipped in the deploy bundle. Phase 39 (Intent, Authority, Risk, and Invocation Policy) complete and verified 2026-08-07: a self-contained `authority.mjs` taxonomy + sealed-input `evaluateAuthorityPolicy` (independent of confidence/weights — AUTH-03) + `gateAction` thin post-processor composing over `resolveAction` + shared frozen `PROTECTED_EFFECT_TOKENS` + router.mjs hot-path wiring via top-level-await fail-open load + dispatch receipt intent/authority/risk threading (AUTH-01..05); 150 relevant tests green, fail-open preserved (router never emits `decision:'block'`). Phases 40–46 remain.
+**v1.6 "Autonomous Control Plane" shipped and verified on 2026-08-08.** Phases 38–43 establish native Claude/Codex dispatch, independent authority and risk gates, durable scoped leases, trusted capability contracts, semantic composition, and proportionate production dispatch. Phases 44–46 add stable causal receipts, truthful outcome credit, isolated deterministic local learning with exact calibrated thresholds and reversible canaries, plus fail-closed v1.5 migration and dual-runtime release evidence. All 42 v1.6 requirements are satisfied; the milestone audit found no critical gaps. Repository-wide baseline lifecycle/install/recovery/performance/watcher failures remain tracked as technical debt.
 
 ## Last Milestone: v1.4 Coverage Completeness & Auto-Skill Routing Improvement (SHIPPED 2026-07-31)
 
@@ -100,14 +99,21 @@ The user can write the minimum useful prompt and still get the best available wo
 - ✓ Live install, cold-start, lifecycle, and release-gate hardening — v1.5 (REL-08..10)
 - ✓ Cross-runtime native dispatch feasibility — real native invocation + attributable completion receipt on Claude and Codex via a router-owned adapter off the prompt hot path (fire-and-forget unref), cross-runtime equivalence with byte-identical stdout_sha256, truthful recommendation-only fallback (no silent downgrade), warm p95 <25ms / max <100ms prompt budget, read-only/fail-open invariants, dispatch layer shipped in the deploy bundle — v1.6 (Phase 38, HOST-01..04)
 - ✓ Intent/authority/risk invocation policy — advice, inspection, one-turn action, persistent-goal action, and non-authorizing discussion distinguished before capability execution; quotations/examples/negations/hypotheticals/audits/policy discussion never widen authority (incl. autonomous wording); confidence/authority/risk/compatibility shown independent (confidence/history never grant permission); explicitly-authorized reversible local action proceeds after fit validation without a repeated command while conflicting/low-fit evidence blocks or asks; protected/external/privileged/destructive/credentialed/costly/published/deployed/scope-expanding effects pause for host-mediated confirmation — v1.6 (Phase 39, AUTH-01..05)
+- ✓ Project identity, leases, continuity, and safe resume — v1.6 (Phase 40, LEASE-01..06)
+- ✓ Manifest trust, typed invocation validation, pre-dispatch contracts, and quarantine — v1.6 (Phase 41, TRUST-01..05)
+- ✓ Semantic graph resolution and contract-compatible substitution — v1.6 (Phase 42, SEM-01..04)
+- ✓ Proportional planning and production dispatch — v1.6 (Phase 43, STRAT-01..04)
+- ✓ Causal receipts and compact selected-versus-actual attribution — v1.6 (Phase 44, RCPT-01..05)
+- ✓ Deterministic local learning with calibrated evidence gates and reversible rollback — v1.6 (Phase 45, LEARN-01..04)
+- ✓ Atomic migration, lifecycle scope, and dual-runtime release verification — v1.6 (Phase 46, MIG-01..05)
 
 ### Active
 
-- Native host dispatch with independent intent, authority, confidence, and risk policy
-- Scoped project-goal leases with deterministic expiry, revocation, binding, and restart idempotency
-- Semantic capability resolution and proportionate execution across Claude and Codex
-- Truthful continuity, complete outcome receipts, and deterministic shadow/canary learning
-- Atomic v1.5 migration, metadata/argument trust boundaries, rollback, and lifecycle cleanup
+- Dispatch work is atomically claimed once and bounded by enforced time/output/resource contracts.
+- Lease and receipt state is private, contained, race-safe, and cross-runtime equivalent.
+- Strategy, learning, migration, and dispatch have production callers and ship in both installed runtime bundles.
+- Learning and migration use unique, protected, durable evidence rather than caller-attested booleans.
+- Repository, installed-runtime, Nyquist, audit, roadmap, archive, and tag evidence agree before release.
 
 ### Out of Scope
 
@@ -123,6 +129,7 @@ The user often provides intentionally short instructions. Prompt text alone is t
 
 The approved design and implementation plan are:
 
+- `docs/superpowers/specs/2026-08-09-router-v1.7-runtime-safety-release-truth-design.md`
 - `docs/superpowers/specs/2026-08-02-router-v1.6-autonomous-control-plane-design.md`
 - `docs/superpowers/specs/2026-07-14-dual-runtime-auto-updating-router-design.md`
 - `docs/superpowers/plans/2026-07-14-dual-runtime-auto-updating-router-implementation.md`
@@ -180,4 +187,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-07 after Phase 39*
+*Last updated: 2026-08-09 after v1.7 milestone closeout*

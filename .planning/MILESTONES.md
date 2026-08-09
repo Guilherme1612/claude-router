@@ -1,5 +1,37 @@
 # Milestones
 
+## v1.7 Runtime Safety and Release Truth (Shipped: 2026-08-09)
+
+**Phases completed:** 3 phases, 9 plans, 0 tasks
+
+**Key accomplishments:**
+
+- Dispatch and storage safety: durable at-most-once claims, bounded workers, and private path containment.
+- Production integration: strategy, learning, migration, and dual-runtime dispatch closure.
+- Validation and release integrity: serial full-corpus proof, installed parity, audit, archive, and tag gates.
+
+---
+
+## v1.6 Autonomous Control Plane (Shipped: 2026-08-08)
+
+**Phases completed:** 9 phases, 20 plans, 11 tasks
+
+**Key accomplishments:**
+
+- 1. [Rule 1 - Bug] Worker entrypoint isMain() used fileURLToPath instead of pathToFileURL
+- 1. [Rule 1 - Bug] pause/resume idempotency blocked resume (claude.mjs + codex.mjs)
+- 1. [Rule 3 - Blocking] Lifecycle test deployed-file count assertion broke (231 -> 259)
+- Pure-function authority.mjs shipping AUTH-01 5-class taxonomy + AUTH-02 framing guard + AUTH-03 sealed-input policy evaluator, layered over classifyIntent without editing it, deployed to both runtimes via the lifecycle bundle
+- gateAction composing over resolveAction + shared PROTECTED_EFFECT_TOKENS + router.mjs hot-path policy wiring + dispatch receipt field threading — AUTH-04/05 enforced at the dispatch boundary and observable on the suggestion path, fail-open preserved
+- Contract envelope extended with provenance-class evidence states (explicit/inferred/conflicting/unknown) + 4 new fields, and a trust.mjs untrusted-evidence policy that prevents manifest/plugin/private/learned provenance from populating authority-critical fields
+- validateInvocation (TRUST-03) and preDispatchGate (TRUST-04) added to dispatch/contract.mjs, wired into both claude.mjs and codex.mjs invokeImpl before spawn — blocked invocations return no-spawn receipts with attributable reason codes
+- Per-capability quarantine disposition in evaluateEligibility with injection_bearing/scope_escaping/stale_unavailable reason codes, validateEligibility extended, RECEIPT_STATES gains 'quarantined' — independent valid fallbacks remain eligible (Pitfall 5 backstop)
+- 1. [Rule 1 - Bug] Fixed non-deterministic diagnostic ordering breaking REG-03 byte-identical test
+- 1. [Rule 1 - Bug] Fixed edge matching subjectId computation in semanticProjection
+- Pure deterministic `planStrategy()` now selects bounded proportional execution strategies from authorized structured facts, with hard constraints evaluated before cost.
+
+---
+
 ## v1.5 Framework-Neutral Adaptive Routing (Shipped: 2026-08-02)
 
 **Phases completed:** 9 phases, 27 plans, 21 tasks

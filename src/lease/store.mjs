@@ -15,12 +15,20 @@
 
 import { randomUUID } from 'node:crypto';
 import {
-  closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
-  readdirSync, renameSync, rmSync, writeFileSync,
+  chmodSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync,
+  readdirSync, renameSync, rmSync, writeFileSync, realpathSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { stableStringify } from '../registry/schema.mjs';
+
+const PERSISTED_ID_RE = /^[a-f0-9]{64}$/;
+const LEGACY_LEASE_ID_RE = /^lease-[A-Za-z0-9_-]+$/;
+
+function validatePersistedId(value) {
+  return typeof value === 'string'
+    && (PERSISTED_ID_RE.test(value) || LEGACY_LEASE_ID_RE.test(value));
+}
 
 const waitArray = new Int32Array(new SharedArrayBuffer(4));
 
@@ -96,21 +104,32 @@ function mutationLock(root, { timeout_ms = 2_000, stale_ms = 30_000 } = {}) {
 
 function durableWrite(path, value) {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  chmodSync(dirname(path), 0o700);
   const tmp = `${path}.tmp-${process.pid}-${randomUUID()}`;
   writeFileSync(tmp, `${stableStringify(value)}\n`, { mode: 0o600 });
   let fd;
   try { fd = openSync(tmp, 'r'); fsyncSync(fd); } finally { if (fd !== undefined) closeSync(fd); }
   renameSync(tmp, path);
+  chmodSync(path, 0o600);
   try { fd = openSync(dirname(path), 'r'); fsyncSync(fd); } catch { /* best effort */ } finally { if (fd !== undefined) try { closeSync(fd); } catch { /* best effort */ } }
 }
 
 export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
   const leaseRoot = root || defaultLeaseRoot(runtime || 'claude');
   mkdirSync(leaseRoot, { recursive: true, mode: 0o700 });
+  chmodSync(leaseRoot, 0o700);
+  const ownedRoot = realpathSync(leaseRoot);
+
+  function leasePath(leaseId) {
+    if (!validatePersistedId(leaseId)) return null;
+    const path = join(ownedRoot, `${leaseId}.json`);
+    return path.startsWith(`${ownedRoot}/`) ? path : null;
+  }
 
   function readLease(leaseId) {
     try {
-      const path = join(leaseRoot, `${leaseId}.json`);
+      const path = leasePath(leaseId);
+      if (!path) return null;
       if (!existsSync(path)) return null;
       const data = JSON.parse(readFileSync(path, 'utf8'));
       // Minimal schema validation (WR-04): a stray or crafted .json dropped into
@@ -136,19 +155,25 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
 
   function createLease(record) {
     const leaseId = record && record.lease_id;
-    if (!leaseId) return { status: 'blocked', reason_code: 'invalid_lease_id' };
-    const existing = readLease(leaseId);
-    if (existing) {
-      if (existing.project_fingerprint === record.project_fingerprint) {
-        // LEASE-03 adjacency: identical six-axis fingerprint ⇒ same lease.
-        return { status: 'unchanged', lease_id: leaseId };
+    if (!validatePersistedId(leaseId)) return { status: 'blocked', reason_code: 'invalid_lease_id' };
+    const lock = mutationLock(leaseRoot, lockOptions);
+    if (!lock.acquired) return { status: 'blocked', reason_code: lock.reason_code };
+    try {
+      const existing = readLease(leaseId);
+      if (existing) {
+        if (existing.project_fingerprint === record.project_fingerprint) {
+          // LEASE-03 adjacency: identical six-axis fingerprint ⇒ same lease.
+          return { status: 'unchanged', lease_id: leaseId };
+        }
+        // WR-02: a lease_id collision with a differing project_fingerprint is
+        // a silent data-loss path — reject instead of overwriting the record.
+        return { status: 'blocked', reason_code: 'lease_id_collision' };
       }
-      // WR-02: a lease_id collision with a differing project_fingerprint is
-      // a silent data-loss path — reject instead of overwriting the record.
-      return { status: 'blocked', reason_code: 'lease_id_collision' };
+      durableWrite(leasePath(leaseId), record);
+      return { status: 'stored', lease_id: leaseId };
+    } finally {
+      lock.release();
     }
-    durableWrite(join(leaseRoot, `${leaseId}.json`), record);
-    return { status: 'stored', lease_id: leaseId };
   }
 
   function findByFingerprint(fp) {
@@ -171,7 +196,7 @@ export function createLeaseStore({ root, runtime, lock: lockOptions } = {}) {
       if (!lease) return { status: 'blocked', reason_code: 'lease_not_found' };
       const result = cb(lease);
       if (!result.changed) return { status: 'unchanged', ...result.data };
-      durableWrite(join(leaseRoot, `${leaseId}.json`), lease);
+      durableWrite(leasePath(leaseId), lease);
       return { status: 'stored', ...result.data };
     } finally { lock.release(); }
   }

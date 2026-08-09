@@ -258,3 +258,36 @@ export function planStrategy({ workflow, closure, tasks, candidates, bounds: raw
     strategy: { contract_version: STRATEGY_CONTRACT_VERSION, kind: chosen.kind, child_agents: chosen.child_agents, work, dependencies: work.flatMap(task => task.depends_on.map(depends_on => ({ task_id: task.id, depends_on }))), hard_constraints: chosen.hard_constraints, resource_limits: bounds, measured_facts: facts.tasks.map(({ id, size, verification_need, specialist_value, quality_required, risk }) => ({ id, size, verification_need, specialist_value, quality_required, risk })), cost: chosen.cost, reason_code: chosen.kind === 'direct' ? 'direct_proportional_baseline' : 'eligible_strategy_minimum_cost', candidates: options.evaluated.map(({ id, kind, hard_constraints, cost }) => ({ id, kind, hard_constraints, cost })) },
   };
 }
+
+// Production seam: markers from older installs contain only lease metadata.
+// Give those markers the same validated direct baseline as fully populated
+// workflow markers, while preserving supplied planning inputs for strict
+// validation by the dispatch contract.
+export function planProductionDispatch(action = {}) {
+  const suppliedPlan = action?.strategy_plan ?? action?.strategy;
+  if (suppliedPlan !== undefined) return { ...action, status: suppliedPlan?.status || action.status, strategy_plan: suppliedPlan };
+  const hasInputs = ['workflow', 'closure', 'tasks', 'candidates', 'bounds'].some(key => Object.hasOwn(action, key));
+  const workflowId = validId(action.workflow_id) ? action.workflow_id : 'native-dispatch';
+  const transitionId = validId(action.transition_id) ? action.transition_id : 'native-dispatch';
+  const workId = validId(action.work_id) ? action.work_id : 'native-work';
+  const workflow = hasInputs ? action.workflow : {
+    status: 'selected', dispatch_eligible: true,
+    selection: { transition_id: transitionId, workflow_id: workflowId, family: 'native', from: 'route', to: 'dispatch' },
+  };
+  const closure = hasInputs ? action.closure : {
+    status: 'resolved', dispatch_eligible: true, workflow_id: workflowId, transition_id: transitionId,
+  };
+  const tasks = hasInputs ? action.tasks : [{
+    id: workId, depends_on: [], size: 1, verification_need: 0, specialist_value: 0,
+    quality_required: 1, coordination_cost: 0, risk: 0, available: true, in_scope: true,
+    safe: true, correct: true, fit: true,
+    resources: { expected_time_ms: 1000, expected_tokens: 100, calls: 1, retries: 0, failures: 0, coordination_cost: 0 },
+  }];
+  const plan = planStrategy({ workflow, closure, tasks, candidates: action.candidates, bounds: action.bounds, evidence: action.evidence });
+  return {
+    ...action,
+    status: plan.status,
+    strategy_plan: plan,
+    ...(plan.status === 'planned' ? { strategy_id: plan.strategy_id, workflow_id: plan.workflow_id, transition_id: plan.transition_id } : {}),
+  };
+}

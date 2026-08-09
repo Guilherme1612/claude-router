@@ -19,12 +19,12 @@
 
 import { createHash } from 'node:crypto';
 import {
-  appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync,
-  renameSync, writeFileSync,
+  appendFileSync, chmodSync, closeSync, existsSync, fsyncSync, mkdirSync,
+  openSync, readFileSync, renameSync, writeFileSync,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
-import { RECEIPT_STATES } from './contract.mjs';
+import { dirname, join } from 'node:path';
+import { normalizeExecutionContract, RECEIPT_STATES } from './contract.mjs';
 
 // Secret/PII redaction BEFORE hashing (analog: router.mjs:1965-1977).
 // Same regex + case-insensitivity so the hash input never includes raw
@@ -65,6 +65,7 @@ export function receiptId({ adapter, runtime, pid, command, args, lease_id, idem
 const IDENTITY_FIELDS = [
   'project_id', 'goal_id', 'route_id', 'action_id', 'mapping_generation',
   'capability_fingerprint', 'authority', 'risk', 'idempotency_key',
+  'lease_id',
 ];
 const OMIT_KEYS = new Set([
   'prompt', 'raw_prompt', 'content', 'stdout', 'stderr', 'env', 'environment',
@@ -73,6 +74,7 @@ const OMIT_KEYS = new Set([
 const SAFE_ID_KEYS = new Set([
   'receipt_id', 'project_id', 'goal_id', 'route_id', 'action_id',
   'mapping_generation', 'capability_fingerprint', 'idempotency_key',
+  'lease_id',
   'invocation_id', 'verification_id', 'reference', 'actual_route_id',
 ]);
 const SAFE_TECHNICAL_KEYS = new Set([
@@ -110,12 +112,14 @@ function bounded(value, depth = 0) {
 }
 
 function normalizeIdentity(identity = {}) {
-  return Object.fromEntries(IDENTITY_FIELDS.map((field) => [
+  return Object.fromEntries(IDENTITY_FIELDS
+    .filter((field) => field !== 'lease_id' || identity?.lease_id)
+    .map((field) => [
     field,
     SAFE_ID_KEYS.has(field)
       ? String(identity?.[field] ?? '').slice(0, 256)
       : bounded(identity?.[field] ?? ''),
-  ]));
+    ]));
 }
 
 // Stable route identity deliberately excludes PID and process timing. It is
@@ -142,12 +146,13 @@ export function receiptIdentityFromAction(action = {}) {
     risk: action.risk ?? '',
     idempotency_key: action.idempotency_key ?? '',
     lease_id: action.lease_id ?? '',
+    execution_contract: action.execution_contract ?? action.executionContract ?? null,
   };
 }
 
 export function attributionFromAction(action = {}) {
   action = action || {};
-  return {
+  const result = {
     selected: action.selected ?? action.selected_route ?? null,
     actual: action.actual ?? action.actual_composition ?? action.composition ?? null,
     alternatives: action.alternatives ?? [],
@@ -156,6 +161,9 @@ export function attributionFromAction(action = {}) {
     substitution: action.substitution ?? action.substitution_evidence ?? null,
     postcondition_evidence: action.postcondition_evidence ?? null,
   };
+  if (action.strategy_plan !== undefined) result.strategy_plan = action.strategy_plan;
+  if (action.work_id !== undefined) result.work_id = action.work_id;
+  return result;
 }
 
 export function buildPendingReceipt({
@@ -168,10 +176,21 @@ export function buildPendingReceipt({
   alternatives = [],
   bounded_evidence = {},
   provenance = null,
+  execution_contract = undefined,
+  executionContract = undefined,
+  strategy_plan = undefined,
+  work_id = undefined,
 } = {}) {
   if (!adapter || !runtime) throw new TypeError('adapter and runtime are required');
   const normalized = normalizeIdentity(identity);
   const receipt_id = receiptIdentityId({ adapter, runtime, identity: normalized });
+  const contractInput = execution_contract ?? executionContract;
+  const contractResult = contractInput === undefined || contractInput === null
+    ? null
+    : normalizeExecutionContract({ execution_contract: contractInput });
+  if (contractResult && !contractResult.ok) {
+    throw new TypeError(contractResult.reason);
+  }
   return {
     schema_version,
     receipt_id,
@@ -197,7 +216,61 @@ export function buildPendingReceipt({
     alternatives: bounded(alternatives),
     bounded_evidence: bounded(bounded_evidence),
     provenance: bounded(provenance || { adapter: String(adapter) }),
+    ...(contractResult ? { execution_contract: contractResult.value } : {}),
+    ...(strategy_plan !== undefined ? { strategy_plan: bounded(strategy_plan), work_id: work_id ?? null } : {}),
   };
+}
+
+function claimIdentity({ runtime, stage, identity }) {
+  return {
+    runtime: String(runtime || ''),
+    stage: String(stage || ''),
+    work_identity: normalizeIdentity(identity || {}),
+  };
+}
+
+export function durableClaimId({ runtime, stage = 'initial', identity = {} } = {}) {
+  const canonical = claimIdentity({ runtime, stage, identity });
+  return createHash('sha256').update(JSON.stringify(canonical), 'utf8').digest('hex');
+}
+
+function fsyncDirectory(path) {
+  let fd;
+  try {
+    fd = openSync(path, 'r');
+    fsyncSync(fd);
+  } catch { /* directory fsync is best effort on unsupported filesystems */ }
+  finally { if (fd !== undefined) try { closeSync(fd); } catch { /* closed */ } }
+}
+
+// Permanent cross-process work claim. The exclusive create is the authority;
+// a successful claim is intentionally never removed or replaced.
+export function claimDurableWork({ runtime, stage = 'initial', identity = {}, dir } = {}) {
+  const claimId = durableClaimId({ runtime, stage, identity });
+  const root = dir || defaultReceiptRoot(runtime);
+  const claimsDir = join(root, 'claims');
+  const claimPath = join(claimsDir, `${claimId}.json`);
+  try {
+    mkdirSync(claimsDir, { recursive: true, mode: 0o700 });
+    chmodSync(claimsDir, 0o700);
+    const fd = openSync(claimPath, 'wx', 0o600);
+    try {
+      writeFileSync(fd, `${JSON.stringify({
+        claim_id: claimId,
+        runtime: String(runtime || ''),
+        stage: String(stage || ''),
+        work_identity: normalizeIdentity(identity || {}),
+      })}\n`);
+      fsyncSync(fd);
+    } finally { closeSync(fd); }
+    fsyncDirectory(claimsDir);
+    return { claimed: true, claim_id: claimId, path: claimPath };
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      return { claimed: false, claim_id: claimId, path: claimPath, reason: 'already_claimed' };
+    }
+    return { claimed: false, claim_id: claimId, path: claimPath, reason: 'claim_failed' };
+  }
 }
 
 function routeStateFor(state) {
@@ -294,11 +367,17 @@ export function defaultReceiptRoot(runtime) {
 // failure.
 export function publishAtomic(receipt, dir) {
   try {
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    chmodSync(dir, 0o700);
     const finalPath = join(dir, `${receipt.receipt_id}.json`);
     const tmp = `${finalPath}.tmp.${process.pid}`;
-    writeFileSync(tmp, JSON.stringify(receipt, null, 2) + '\n');
+    writeFileSync(tmp, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+    chmodSync(tmp, 0o600);
+    let fd;
+    try { fd = openSync(tmp, 'r'); fsyncSync(fd); } finally { if (fd !== undefined) closeSync(fd); }
     renameSync(tmp, finalPath);
+    chmodSync(finalPath, 0o600);
+    fsyncDirectory(dir);
     return finalPath;
   } catch {
     return null;
@@ -313,10 +392,12 @@ export function append(receipt, logPath) {
   try {
     const line = JSON.stringify(receipt) + '\n';
     const existedBefore = existsSync(logPath);
-    appendFileSync(logPath, line, { flag: 'a' });
+    mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
+    appendFileSync(logPath, line, { flag: 'a', mode: 0o600 });
     if (!existedBefore) {
       try { chmodSync(logPath, 0o600); } catch { /* perms best-effort */ }
     }
+    try { chmodSync(logPath, 0o600); } catch { /* perms best-effort */ }
   } catch {
     // Never block on a receipt log write failure (fail-open).
   }
@@ -326,6 +407,7 @@ export function append(receipt, logPath) {
 // corrupt (fail-open — observe() never throws).
 export function read(receiptId, dir) {
   try {
+    if (typeof receiptId !== 'string' || !/^[a-f0-9]{64}$/.test(receiptId)) return null;
     const path = join(dir, `${receiptId}.json`);
     if (!existsSync(path)) return null;
     const data = JSON.parse(readFileSync(path, 'utf8'));
@@ -352,5 +434,8 @@ export class ReceiptStore {
   }
   inspect(receiptId) {
     return inspectReceipt(this.observe(receiptId));
+  }
+  claim({ runtime, stage = 'initial', identity = {} } = {}) {
+    return claimDurableWork({ runtime, stage, identity, dir: this.dir });
   }
 }

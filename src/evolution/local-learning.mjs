@@ -101,6 +101,14 @@ function correctionForReceipt(correction, receipt) {
 
 export function collectLearningEvidence({ receipts = [], corrections = [] } = {}) {
   if (!Array.isArray(receipts) || !Array.isArray(corrections)) return { status: 'denied', reason_code: 'invalid_learning_input' };
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const receipt of receipts) {
+    const id = receipt?.receipt_id;
+    if (seen.has(id)) duplicates.add(id ?? '');
+    seen.add(id);
+  }
+  if (duplicates.size) return { status: 'denied', reason_code: 'duplicate_receipt_identity', duplicates: [...duplicates].sort() };
   const byId = new Map(receipts.map(receipt => [receipt?.receipt_id, receipt]));
   const correctionMap = new Map();
   for (const correction of corrections) {

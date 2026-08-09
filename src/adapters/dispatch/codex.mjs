@@ -33,13 +33,13 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, validateStrategyBounds, preDispatchGate } from './contract.mjs';
+import { createDispatchAdapter, RECEIPT_SCHEMA_VERSION, validateInvocation, validateStrategyBounds, preDispatchGate, runBoundedChild } from './contract.mjs';
 import {
   ReceiptStore, attributionFromAction, buildPendingReceipt, defaultReceiptRoot,
   hashBytes, outcomeCredit, receiptIdentityFromAction,
   transitionReceipt,
 } from './receipt.mjs';
-import { replanStrategy } from '../../orchestrator/strategy.mjs';
+import { planProductionDispatch, replanStrategy } from '../../orchestrator/strategy.mjs';
 import { createLeaseStore } from '../../lease/store.mjs';
 
 export const CODEX_DISPATCH_VERSION = 'codex-dispatch/1';
@@ -152,11 +152,13 @@ export function createCodexDispatchAdapter({
       bounded_evidence: action?.bounded_evidence,
       provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
     });
-    const route_state = state === 'blocked' ? 'blocked' : reason === 'empty_action' ? 'ignored' : 'rejected';
+    const route_state = state === 'blocked' ? 'blocked'
+      : ['empty_action', 'already_claimed'].includes(reason) ? 'ignored' : 'rejected';
     const receipt = transitionReceipt(pending, state, {
       route_state,
       completion_evidence: reason
-        ? (state === 'blocked' ? { reason_codes: [reason] } : { reason })
+        ? (state === 'blocked' || reason === 'already_claimed'
+          ? { reason_codes: [reason] } : { reason })
         : {},
       ...attributionFromAction(action),
     });
@@ -189,6 +191,16 @@ export function createCodexDispatchAdapter({
       return recommendationOnly(action, 'idempotency_already_claimed');
     }
 
+    const identity = receiptIdentityFromAction(action);
+    const claim = action.__dispatch_claimed
+      ? { claimed: true }
+      : store.claim({
+        runtime,
+        stage: action.__dispatch_stage || 'initial',
+        identity,
+      });
+    if (claim.claimed !== true) return recommendationOnly(action, 'already_claimed');
+
     const pendingReceipt = buildPendingReceipt({
       schema_version: RECEIPT_SCHEMA_VERSION,
       adapter: CODEX_DISPATCH_VERSION,
@@ -197,8 +209,53 @@ export function createCodexDispatchAdapter({
       intent: action.intent,
       ...attributionFromAction(action),
       provenance: { adapter: CODEX_DISPATCH_VERSION, source_fingerprint: null },
+      execution_contract: gate.value,
     });
     store.publish(pendingReceipt);
+
+    if (gate.value) {
+      const invokedAt = new Date().toISOString();
+      const invokedReceipt = transitionReceipt(pendingReceipt, 'invoked', {
+        invocation_identity: {
+          adapter: CODEX_DISPATCH_VERSION,
+          runtime,
+          pid: null,
+          command: process.execPath,
+          args: [fixturePath],
+          lease_id: String(action.lease_id || ''),
+          idempotency_key: idempotencyKey,
+          spawned_at: invokedAt,
+          native_identity: adapter.nativeIdentity || null,
+        },
+        ...attributionFromAction(action),
+      });
+      store.publish(invokedReceipt);
+      runBoundedChild({
+        command: process.execPath,
+        args: [fixturePath],
+        execution_contract: gate.value,
+        spawn_options: {
+          detached: true,
+          env: { ...process.env, ROUTER_RUNTIME: runtime },
+        },
+      }).then((result) => {
+        const terminal = transitionReceipt(pendingReceipt, result.state, {
+          invocation_identity: {
+            ...invokedReceipt.invocation_identity,
+            pid: result.pid ?? null,
+          },
+          completion_evidence: {
+            ...result,
+            state: result.state,
+          },
+          invocation_evidence: { receipt_id: pendingReceipt.receipt_id, observed: true },
+          ...attributionFromAction(action),
+        });
+        terminal.outcome_credit = outcomeCredit(terminal);
+        store.publish(terminal);
+      }).catch(() => {});
+      return invokedReceipt;
+    }
 
     const startNs = process.hrtime.bigint();
     const chunks = [];
@@ -333,7 +390,15 @@ export function createCodexDispatchAdapter({
       retry: existing.retry,
       output_bounds: existing.output_bounds,
       completion_contract: existing.completion_contract,
+      execution_contract: existing.execution_contract,
+      __dispatch_stage: 'resume',
     };
+    const resumeClaim = store.claim({
+      runtime,
+      stage: 'resume',
+      identity: receiptIdentityFromAction(action),
+    });
+    if (resumeClaim.claimed !== true) return existing;
     // Release the idempotency claim so resume can re-spawn with the same key
     // (a controlled continuation, not a duplicate invocation). invokeImpl
     // re-claims the key after spawning, so a subsequent direct invoke() with
@@ -346,7 +411,7 @@ export function createCodexDispatchAdapter({
       if (claim.claimed !== true) return existing;
     }
     releaseIdempotency(action.idempotency_key);
-    return invokeImpl(action, adapter);
+    return invokeImpl({ ...action, __dispatch_claimed: true }, adapter);
   }
 
   const adapter = createDispatchAdapter({
@@ -399,12 +464,15 @@ async function runAsWorker() {
     }
   } catch { lease = null; }
   if (!lease) return; // no lease → no dispatch (fail-open)
+  const planned = planProductionDispatch(lease);
   const action = {
     lease_id: String(lease.lease_id || 'phase-38-codex-fixture-lease'),
     idempotency_key: String(lease.idempotency_key || lease.lease_id || ''),
     intent: String(lease.intent || 'host-02-feasibility'),
     authority: String(lease.authority || 'operator-authorized'),
     risk: String(lease.risk || 'harmless-fixture'),
+    strategy_plan: planned.strategy_plan,
+    ...(planned.strategy_id ? { strategy_id: planned.strategy_id, workflow_id: planned.workflow_id, transition_id: planned.transition_id } : {}),
   };
   const workerAdapter = createCodexDispatchAdapter({
     fixture: lease.fixture || DEFAULT_FIXTURE,

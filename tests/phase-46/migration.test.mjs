@@ -18,7 +18,14 @@ const oldTuple = { version_id: 'v1-aaaaaaaaaaaaaaaa', contents: { hooks: 'v1.5',
 const newTuple = { version_id: 'v1-bbbbbbbbbbbbbbbb', contents: { hooks: 'v1.6', mapping: 'verified' } };
 
 function releaseEvidence() {
-  return Object.fromEntries(['claude', 'codex'].map(runtime => [runtime, Object.fromEntries(RELEASE_GATES.map(gate => [gate, true]))]));
+  return Object.fromEntries(['claude', 'codex'].map(runtime => [runtime, {
+    runtime,
+    source: 'installed-runtime',
+    version: `${runtime}-v1.7`,
+    version_bound: true,
+    generated_at_ms: 1000,
+    checks: Object.fromEntries(RELEASE_GATES.map(gate => [gate, true])),
+  }]));
 }
 
 test('MIG-01: every persisted record is classified and v1.5 history cannot become v1.6 authority', () => {
@@ -67,12 +74,12 @@ test('MIG-03/04: lifecycle actions are runtime-scoped and preserve unrelated sta
 });
 
 test('MIG-05: release is blocked unless both installed runtimes prove every gate', () => {
-  const passed = verifyDualRuntimeRelease(releaseEvidence());
+  const passed = verifyDualRuntimeRelease(releaseEvidence(), { expected_versions: { claude: 'claude-v1.7', codex: 'codex-v1.7' }, now: 1000 });
   assert.equal(passed.status, 'passed');
   assert.equal(passed.gates, RELEASE_GATES.length * 2);
   const incomplete = releaseEvidence();
-  delete incomplete.codex.migration;
-  const blocked = verifyDualRuntimeRelease(incomplete);
+  delete incomplete.codex.checks.migration;
+  const blocked = verifyDualRuntimeRelease(incomplete, { expected_versions: { claude: 'claude-v1.7', codex: 'codex-v1.7' }, now: 1000 });
   assert.equal(blocked.status, 'blocked');
   assert.deepEqual(blocked.missing, ['codex:migration']);
 });

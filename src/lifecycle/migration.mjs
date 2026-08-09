@@ -121,10 +121,12 @@ export function migrateAtomic({ root, plan, from_tuple, to_tuple, fail_at = null
 export function recoverMigration({ root } = {}) {
   const paths = migrationPaths(root);
   const journal = readJson(paths.journal);
-  if (!journal || journal.schema_version !== MIGRATION_SCHEMA_VERSION || !['prepared', 'committed'].includes(journal.state)) {
+  if (!journal || journal.schema_version !== MIGRATION_SCHEMA_VERSION || !['prepared', 'committed', 'recovered-old', 'recovered-new'].includes(journal.state)) {
     return { status: 'blocked', reason_code: 'migration_journal_missing_or_invalid' };
   }
   if (journal.state === 'committed') return { status: 'recovered-new', generation: journal.new_generation, fingerprint: journal.new_fingerprint };
+  if (journal.state === 'recovered-old') return { status: 'recovered-old', generation: journal.old_generation, fingerprint: journal.old_fingerprint };
+  if (journal.state === 'recovered-new') return { status: 'recovered-new', generation: journal.new_generation, fingerprint: journal.new_fingerprint };
   const pointer = readJson(paths.pointer);
   if (pointer?.generation === journal.new_generation && pointer.fingerprint === journal.new_fingerprint) {
     atomicJson(paths.journal, { ...journal, state: 'committed' });
@@ -135,11 +137,16 @@ export function recoverMigration({ root } = {}) {
   return { status: 'recovered-old', generation: journal.old_generation, fingerprint: journal.old_fingerprint };
 }
 
-export function verifyDualRuntimeRelease(evidence) {
+export function verifyDualRuntimeRelease(evidence, { expected_versions = {}, now = Date.now(), max_age_ms = 5 * 60 * 1000 } = {}) {
   const missing = [];
   for (const runtime of ['claude', 'codex']) {
     const runtimeEvidence = evidence?.[runtime];
-    for (const gate of RELEASE_GATES) if (runtimeEvidence?.[gate] !== true) missing.push(`${runtime}:${gate}`);
+    if (runtimeEvidence?.runtime !== runtime) missing.push(`${runtime}:runtime`);
+    if (runtimeEvidence?.source !== 'installed-runtime') missing.push(`${runtime}:source`);
+    if (runtimeEvidence?.version_bound !== true || typeof expected_versions[runtime] !== 'string' || runtimeEvidence?.version !== expected_versions[runtime]) missing.push(`${runtime}:version`);
+    const age = now - runtimeEvidence?.generated_at_ms;
+    if (!Number.isSafeInteger(runtimeEvidence?.generated_at_ms) || age < 0 || age > max_age_ms) missing.push(`${runtime}:freshness`);
+    for (const gate of RELEASE_GATES) if (runtimeEvidence?.checks?.[gate] !== true) missing.push(`${runtime}:${gate}`);
   }
   return missing.length
     ? { status: 'blocked', reason_code: 'release_gate_missing', missing }

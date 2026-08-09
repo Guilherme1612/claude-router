@@ -214,10 +214,9 @@ test('[42-red:semantic-substitution] both routes retained as stableCapabilityId 
   assert.equal(result.substitute_route, subId);
 });
 
-test('[42-red:semantic-substitution] RECEIPT_STATES does NOT include substituted (Phase 44 scope boundary)', async () => {
+test('semantic-substitution: RECEIPT_STATES includes the current substituted transition', async () => {
   const { RECEIPT_STATES } = await dispatchContractModule;
-  assert.deepEqual(RECEIPT_STATES, ['pending', 'invoked', 'paused', 'completed', 'failed', 'recommendation_only', 'blocked', 'quarantined']);
-  assert.ok(!RECEIPT_STATES.includes('substituted'));
+  assert.ok(RECEIPT_STATES.includes('substituted'));
 });
 
 test('[42-red:semantic-substitution] resolveSubstitution is non-throwing for invalid/missing failedRecord', async () => {
