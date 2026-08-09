@@ -142,6 +142,36 @@ test('watch creation failure cannot disable startup or five-minute repair', asyn
   await h.controller.close();
 });
 
+test('resource-exhausted watcher falls back to fingerprint polling', async () => {
+  let emitError;
+  let scans = 0;
+  let reconciles = 0;
+  const controller = createRegistryWatcher({
+    roots: [{ logicalRoot: 'claude_global', path: '/virtual/claude' }],
+    debounceMs: 0,
+    fallbackPollMs: 10,
+    repairMs: 300_000,
+    watchFactory(_path, _options, _callback) {
+      return {
+        on(event, callback) { if (event === 'error') emitError = callback; },
+        close() {},
+      };
+    },
+    readState: async () => ({ clean_scan_required: false, state: { hash: 'scan-1' }, diagnostics: [] }),
+    scan: async () => ({ hash: `scan-${++scans}`, roots: ['claude_global'] }),
+    diff: () => ({ events: [], diagnostics: [] }),
+    reconcile: async () => { reconciles += 1; },
+    writeState: async () => {},
+  });
+  await controller.ready;
+  assert.equal(scans, 1);
+  emitError(Object.assign(new Error('too many open files'), { code: 'EMFILE' }));
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.ok(scans >= 2);
+  assert.ok(reconciles >= 2);
+  await controller.close();
+});
+
 test('startup reconciliation failure rejects readiness instead of publishing a healthy baseline', async () => {
   const h = harness({ async scan() { throw new Error('initial scan denied'); } });
   await assert.rejects(h.controller.ready, /initial scan denied/);

@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.8
 milestone_name: Adaptive Semantic Routing and Continuity
-current_phase: 50
-current_phase_name: Portable Runtime-Local Contracts and Fixture Boundary
-status: executing
-stopped_at: v1.8 roadmap created; Phase 50 is ready for planning
-last_updated: "2026-08-09T13:29:15.976Z"
+current_phase: 55
+status: Awaiting next milestone
+stopped_at: Milestone v1.8 completed and archived
+last_updated: "2026-08-09T17:16:45.715Z"
 last_activity: 2026-08-09
-last_activity_desc: Phase 50 execution started
+last_activity_desc: Milestone v1.8 completed and archived
 progress:
   total_phases: 6
-  completed_phases: 0
-  total_plans: 2
-  completed_plans: 0
-  percent: 0
+  completed_phases: 6
+  total_plans: 12
+  completed_plans: 12
+  percent: 100
+current_phase_name: Planning next milestone
 ---
 
 # Project State
@@ -24,34 +24,32 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-09)
 
 **Core value:** The user can write the minimum useful prompt and still get the best available workflow automatically, with low token overhead, sub-100ms prompt routing, and no per-prompt external classifier.
-**Current focus:** Phase 50 — Portable Runtime-Local Contracts and Fixture Boundary
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Phase: 50 (Portable Runtime-Local Contracts and Fixture Boundary) — EXECUTING
-Plan: 1 of 2
-Status: Executing Phase 50
-Last activity: 2026-08-09 — Phase 50 execution started
-
-Progress: [░░░░░░░░░░] 0%
+Phase: Milestone v1.8 complete
+Plan: —
+Status: Awaiting next milestone
+Last activity: 2026-08-09 — Milestone v1.8 completed and archived
 
 ## Performance Metrics
 
 **Velocity:**
 
 - Previous milestone: v1.7 completed 9 plans across Phases 47-49
-- Current milestone: 0 plans completed across 6 planned phases
+- Current milestone: 12 plans completed across 6 phases
 
 **By Phase:**
 
 | Phase | Plans | Status |
 |-------|-------|--------|
-| 50. Portable Runtime-Local Contracts and Fixture Boundary | TBD | Not started |
-| 51. Structured Intent, Generic Workflows, and Semantic Retrieval | TBD | Not started |
-| 52. Least-Sufficient Composition and Single-Path Semantic Cutover | TBD | Not started |
-| 53. Scoped Preferences and Truthful Startup Continuity | TBD | Not started |
-| 54. Independent Evaluation and Hot-Path Budgets | TBD | Not started |
-| 55. Installer, Native Parity, and Release Truth | TBD | Not started |
+| 50. Portable Runtime-Local Contracts and Fixture Boundary | 2/2 | Complete |
+| 51. Structured Intent, Generic Workflows, and Semantic Retrieval | 2/2 | Complete |
+| 52. Least-Sufficient Composition and Single-Path Semantic Cutover | 2/2 | Complete |
+| 53. Scoped Preferences and Truthful Startup Continuity | 2/2 | Complete |
+| 54. Independent Evaluation and Hot-Path Budgets | 2/2 | Complete |
+| 55. Installer, Native Parity, and Release Truth | 2/2 | Complete |
 
 ## Accumulated Context
 
@@ -69,11 +67,9 @@ None yet.
 
 ### Blockers/Concerns
 
-- Phase 51 retrieval thresholds and held-out paraphrase families require calibration without maintainer-prompt leakage.
-- Phase 52 composition ceilings must be fixed and measured; use bounded enumeration unless evidence requires more.
-- Phase 53 must define exact project/worktree identity, staleness, acknowledgement, and host startup semantics.
-- Phase 54 numeric budgets must come from matched v1.7 production-path baselines, not roadmap estimates.
-- Phase 55 still requires actual installed Claude and Codex native smoke evidence after isolated lifecycle tests.
+- Live deployment follow-up: Claude's global install is stale and Codex has no current install manifest; deploy only through the owner-controlled installation workflow.
+- Observability follow-up: telemetry JSONL parses cleanly, but outcome fields are null and graph-missing records remain visible.
+- Performance follow-up: resource-exhaustion fallback rescans all roots; measure before considering per-root polling.
 
 ## Deferred Items
 
@@ -87,9 +83,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-08-09 Europe/Lisbon
-Stopped at: v1.8 roadmap created; Phase 50 is ready for planning
+Stopped at: Milestone v1.8 completed and archived
 Resume file: None
 
 ## Operator Next Steps
 
-- Plan Phase 50 with `$gsd-plan-phase 50`
+- Start the next milestone with /gsd-new-milestone

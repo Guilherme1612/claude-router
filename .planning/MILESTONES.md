@@ -1,5 +1,21 @@
 # Milestones
 
+## v1.8 Adaptive Semantic Routing and Continuity (Shipped: 2026-08-09)
+
+**Phases completed:** 6 phases, 12 plans, 5 tasks
+
+**Key accomplishments:**
+
+- Anonymous Claude/Codex inventory scenarios now materialize into validated temporary roots and prove explicit runtime-local discovery without live-home leakage or equal-count assumptions.
+- Declared-first portable capability contracts now fail closed on critical unknowns and classify every retained Claude/Codex record exactly once.
+- Structured semantic workflows, least-sufficient composition, scoped preferences, truthful continuity, and causal native receipts now run through one bounded production route.
+- Claude and Codex independent evaluators pass, the current-source isolated installer is byte-parity clean across both runtimes, and the native serial repository gate passes 1593/1593.
+- Resource-exhaustion watcher recovery now uses fingerprint polling for EMFILE/ENOSPC; release preflight reconciles native evidence without a composite score.
+
+**Known follow-up:** The live Claude installation is stale, the live Codex home has no current install manifest, telemetry outcomes are null, and graph-missing records remain observable. These are deployment/observability follow-ups, not hidden release claims.
+
+---
+
 ## v1.7 Runtime Safety and Release Truth (Shipped: 2026-08-09)
 
 **Phases completed:** 3 phases, 9 plans, 0 tasks

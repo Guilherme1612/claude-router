@@ -167,6 +167,7 @@ export function createRegistryWatcher(options) {
   const debounceMs = options.debounceMs ?? 250;
   const maxLatencyMs = options.maxLatencyMs ?? 1_500;
   const repairMs = options.repairMs ?? 300_000;
+  const fallbackPollMs = options.fallbackPollMs ?? 250;
   const watchFactory = options.watchFactory || ((path, watchOptions, callback) => watch(path, watchOptions, callback));
   const readState = options.readState || (() => loadFingerprintState(options.statePath, rootNames));
   const scan = options.scan || scanFingerprintTree;
@@ -178,8 +179,9 @@ export function createRegistryWatcher(options) {
   const onError = options.onError || (() => {});
   const watchers = [];
   const dirty = new Set();
-  let closed = false, timer = null, repairTimer = null, firstDirtyAt = null;
+  let closed = false, timer = null, repairTimer = null, pollTimer = null, firstDirtyAt = null;
   let inFlight = null, rerun = false, baseline = null;
+  let fallbackPolling = false;
   let pendingTrigger = 'filesystem-event';
   let generation = 0;
   let operational = {
@@ -189,6 +191,7 @@ export function createRegistryWatcher(options) {
     candidate_generation_id: 'generation-1',
     last_complete_reconciliation: null,
     trigger: 'startup',
+    watcher_mode: 'native',
     pending_changes: [...rootNames],
     stale_roots: [],
     unreadable_roots: [],
@@ -211,14 +214,40 @@ export function createRegistryWatcher(options) {
   }
 
   function clearTimer(name) {
-    const value = name === 'work' ? timer : repairTimer;
+    const value = name === 'work' ? timer : name === 'repair' ? repairTimer : pollTimer;
     if (value !== null) scheduler.clearTimeout(value);
     if (name === 'work') timer = null;
-    else repairTimer = null;
+    else if (name === 'repair') repairTimer = null;
+    else pollTimer = null;
   }
 
   function report(error) {
     if (!closed) onError(error instanceof Error ? error : new Error(String(error)));
+  }
+
+  function scheduleFallbackPoll() {
+    // ponytail: rescan all roots only while native watching is unavailable; move
+    // to per-root polling if resource-exhaustion recovery becomes measurable.
+    if (closed || !fallbackPolling || pollTimer !== null) return;
+    pollTimer = scheduler.setTimeout(async () => {
+      pollTimer = null;
+      if (closed) return;
+      try {
+        const current = await scan(roots);
+        if (baseline && current.hash !== baseline.hash) markDirty(rootNames, true, 'ambiguous-event');
+      } catch (error) {
+        report(error);
+      } finally {
+        scheduleFallbackPoll();
+      }
+    }, fallbackPollMs);
+  }
+
+  function startFallbackPolling(error) {
+    if (closed || fallbackPolling || !['EMFILE', 'ENOSPC'].includes(error?.code)) return;
+    fallbackPolling = true;
+    operational = { ...operational, watcher_mode: 'polling-fallback', reason_code: 'native_watcher_unavailable' };
+    scheduleFallbackPoll();
   }
 
   function scheduleRepair() {
@@ -361,9 +390,15 @@ export function createRegistryWatcher(options) {
           }).map(root => root.logicalRoot);
           if (matched.length) markDirty(matched, relative === null, relative === null ? 'ambiguous-event' : 'filesystem-event');
         });
-        handle.on?.('error', report);
+        handle.on?.('error', error => {
+          report(error);
+          startFallbackPolling(error);
+        });
         watchers.push(handle);
-      } catch (error) { report(error); }
+      } catch (error) {
+        report(error);
+        startFallbackPolling(error);
+      }
     }
     scheduleRepair();
     await reconcileDirty(rootNames, 'startup');
@@ -393,7 +428,7 @@ export function createRegistryWatcher(options) {
     async close() {
       if (closed) return;
       closed = true; dirty.clear(); rerun = false;
-      clearTimer('work'); clearTimer('repair');
+      clearTimer('work'); clearTimer('repair'); clearTimer('poll');
       for (const watcher of watchers.splice(0)) {
         try { watcher.close(); } catch { /* resource already closed */ }
       }
