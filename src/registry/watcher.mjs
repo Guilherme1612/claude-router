@@ -602,7 +602,17 @@ export async function runRegistryWatcher(options) {
   let controller;
   const publish = state => {
     const watcher = controller?.inspect();
-    const publishedState = state === 'ready' && watcher?.state !== 'current' ? watcher?.state || state : state;
+    // A configured project root may be created after install. Keep its missing
+    // root visible in nested watcher truth without making the controller
+    // itself fail readiness before that project exists.
+    const initialProjectBootstrap = watcher?.state === 'degraded'
+      && watcher?.trigger === 'startup'
+      && Array.isArray(watcher?.stale_roots)
+      && watcher.stale_roots.length > 0
+      && watcher.stale_roots.every(root => root.startsWith('project:'))
+      && (watcher.unreadable_roots || []).length === 0;
+    const publishedState = state === 'ready' && watcher?.state !== 'current' && !initialProjectBootstrap
+      ? watcher?.state || state : state;
     return atomicJson(config.status_path, {
     schema_version: 1, state: publishedState, instance_id: instanceId, pid: process.pid,
     heartbeat: Date.now(), configuration_fingerprint: configurationFingerprint,
