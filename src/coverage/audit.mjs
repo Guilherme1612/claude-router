@@ -5,15 +5,19 @@ const CAPABILITY_COLLECTIONS = [
   'agents_store_skills',
   'commands',
   'hooks',
+  'integrations',
+  'plugins',
   'plugin_skills',
   'project_scoped_skills',
   'skills',
+  'tools',
 ];
 const SKILL_COLLECTIONS = new Set([
   'agents_store_skills', 'plugin_skills', 'project_scoped_skills', 'skills',
 ]);
 const ALLOWED_BASELINE = new Set(['expected_bm25_only', 'expected_phase_internal']);
 const ROUTE_INVOKE_KINDS = new Set(['slash', 'skill', 'agent', 'warn']);
+const ROUTEABLE_COLLECTIONS = new Set(['agents', 'commands', 'skills', 'plugin_skills', 'agents_store_skills']);
 
 const cleanId = value => String(value || '').replace(/^\/+/, '').trim();
 const compareIdentity = (left, right) =>
@@ -42,15 +46,44 @@ function capabilities(manifest) {
     for (const entry of entries) {
       const id = cleanId(entry?.id || entry?.name);
       if (!id) continue;
+      const provenance = Array.isArray(entry?.provenance) ? entry.provenance : [];
+      const runtime = String(entry?.runtime || provenance[0]?.runtime || 'unknown');
+      const scope = typeof entry?.scope === 'object'
+        ? String(entry.scope.kind || 'global')
+        : (entry?.scope || (category === 'project_scoped_skills' ? 'project' : 'global'));
+      const modern = Boolean(entry?.runtime || provenance.length || Object.hasOwn(entry || {}, 'dispatchable'));
+      const availability = entry?.availability || entry?.invocation?.availability
+        || (entry?.dispatchable === false ? 'unavailable' : 'available');
+      const dispatchable = entry?.dispatchable === true && availability === 'available';
       rows.push({
         category,
         id,
-        scope: entry?.scope === 'project' || category === 'project_scoped_skills' ? 'project' : 'global',
+        scope,
         routeableSkill: category !== 'project_scoped_skills'
-          && (category !== 'agents_store_skills' || entry?.scope === 'global'),
+          && (category !== 'agents_store_skills' || scope === 'global'),
         missingMcp: category === 'agents' && Array.isArray(entry?.requires_mcp_not_in_manifest)
           ? entry.requires_mcp_not_in_manifest.map(cleanId).filter(Boolean).sort()
           : [],
+        ...(modern ? {
+          runtime,
+          availability,
+          dispatchable,
+          provenance,
+          native_locator: entry?.native_locator || entry?.native_identity
+            || entry?.invocation?.native_identity || null,
+          source_evidence: entry?.source_evidence || provenance,
+          stale: entry?.stale === true,
+          invalid: entry?.invalid === true || entry?.lifecycle === 'invalid',
+          excluded: entry?.excluded === true,
+          hookOwned: entry?.hook_owned === true || category === 'hooks',
+          missingMcp: [
+            ...(category === 'agents' && Array.isArray(entry?.requires_mcp_not_in_manifest)
+              ? entry.requires_mcp_not_in_manifest : []),
+            ...(Array.isArray(entry?.missing_mcp) ? entry.missing_mcp : []),
+          ].map(cleanId).filter(Boolean).sort(),
+          reasonCodes: Array.isArray(entry?.reason_codes) ? entry.reason_codes : [],
+          routeable: entry?.routeable === true || ROUTEABLE_COLLECTIONS.has(category),
+        } : {}),
       });
     }
   }
@@ -65,6 +98,8 @@ function targetIndexes(rows) {
     blockedAgent: new Set(),
   };
   for (const row of rows) {
+    if (row.runtime && (!row.dispatchable || row.availability !== 'available'
+      || row.scope !== 'global' || row.missingMcp.length || row.excluded || row.invalid)) continue;
     if (row.category === 'commands') indexes.command.add(row.id);
     if (SKILL_COLLECTIONS.has(row.category) && row.routeableSkill) indexes.skill.add(row.id);
     if (row.category === 'agents') {
@@ -245,6 +280,34 @@ function mapped(row, mappings) {
   return row.category === 'agents' && mappings.agent.has(row.id);
 }
 
+function modernAuditFields(row, isMapped) {
+  if (!row.runtime) return {};
+  const reasonCodes = new Set(row.reasonCodes || []);
+  if (row.stale) reasonCodes.add('stale_unavailable');
+  if (row.invalid) reasonCodes.add('invalid_metadata');
+  if (row.scope !== 'global') reasonCodes.add('project_scoped');
+  if (row.hookOwned) reasonCodes.add('hook_owned');
+  if (row.excluded) reasonCodes.add('explicitly_excluded');
+  if (row.missingMcp.length) reasonCodes.add('missing_mcp');
+  if (row.availability !== 'available' || !row.dispatchable) reasonCodes.add('unavailable');
+  const reasons = [...reasonCodes].filter(Boolean).sort();
+  const diagnostic = reasons.length > 0 || !row.dispatchable || !row.routeable;
+  const actionableGap = row.dispatchable && row.routeable && !isMapped && !diagnostic;
+  const disposition = isMapped ? 'mapped' : actionableGap ? 'actionable_gap' : 'diagnostic';
+  return {
+    runtime: row.runtime,
+    scope: row.scope,
+    availability: row.availability,
+    dispatchable: row.dispatchable,
+    provenance: row.provenance,
+    native_locator: row.native_locator,
+    source_evidence: row.source_evidence,
+    reason_codes: reasons,
+    actionable_gap: actionableGap,
+    disposition,
+  };
+}
+
 const REGISTRY_COVERAGE_CLASSES = new Set([
   'routable', 'composable', 'direct-only', 'hook-owned', 'project-scoped',
   'unavailable', 'invalid', 'excluded',
@@ -259,7 +322,26 @@ function auditRegistryCoverage(registry) {
     const classification = record?.coverage?.classification;
     const reasons = Array.isArray(record?.coverage?.reasons) ? record.coverage.reasons : [];
     const runtime = record?.invocation?.runtime || record?.provenance?.[0]?.runtime || 'unknown';
-    const entry = { id: record?.id || '', runtime, kind: record?.semantic_type || record?.type || 'unknown', classification, reasons };
+    const category = record?.type || record?.semantic_type || 'unknown';
+    const availability = record?.invocation?.availability || 'unavailable';
+    const dispatchable = record?.dispatchable === true && availability === 'available';
+    const reasonCodes = [...new Set([
+      ...reasons,
+      ...(record?.eligibility?.reason_codes || []),
+      ...(record?.eligibility?.quarantine_reasons || []),
+    ])].filter(reason => reason !== 'eligibility_all_gates_passed').sort();
+    const provenance = Array.isArray(record?.provenance) ? record.provenance : [];
+    const nativeLocator = record?.runtime_variants?.[0]?.native_invocation
+      || record?.runtime_variants?.[0]?.native_identity || null;
+    const entry = {
+      id: record?.id || '', runtime, kind: record?.semantic_type || record?.type || 'unknown',
+      category, scope: record?.scope?.kind || 'unknown', availability, dispatchable,
+      provenance, native_locator: nativeLocator, source_evidence: provenance,
+      reason_codes: reasonCodes,
+      actionable_gap: dispatchable && ['routable', 'composable', 'direct-only'].includes(classification),
+      disposition: dispatchable ? 'selectable' : 'diagnostic',
+      classification, reasons,
+    };
     if (!entry.id) unclassified.push({ id: '', reason: 'missing_id' });
     else if (ids.get(entry.id) !== 1) unclassified.push({ id: entry.id, reason: 'duplicate_id' });
     if (!REGISTRY_COVERAGE_CLASSES.has(classification)) {
@@ -320,21 +402,33 @@ export function auditCoverage({ registry, manifest, modeMap, baseline, routeDiag
   const policy = baselinePolicy(baseline, rows, eligibleGaps);
 
   const records = rows.map(row => {
+    const isMapped = mapped(row, routes.mapped);
+    const modern = modernAuditFields(row, isMapped);
     if (row.category === 'hooks') return {
       category: row.category, id: row.id, coverage_status: 'unmapped',
-      classification: 'expected_hook', reason: 'hooks are event-bound, not route targets',
+      classification: 'expected_hook', reason: 'hooks are event-bound, not route targets', ...modern,
     };
     if (row.category === 'agents' && row.missingMcp.length) return {
       category: row.category, id: row.id, coverage_status: 'unmapped',
-      classification: 'expected_warn_mcp', reason: `requires unavailable MCP: ${row.missingMcp.join(', ')}`,
+      classification: 'expected_warn_mcp', reason: `requires unavailable MCP: ${row.missingMcp.join(', ')}`, ...modern,
     };
     if (row.scope === 'project') return {
       category: row.category, id: row.id, coverage_status: 'unmapped',
-      classification: 'expected_scope_project', reason: 'project-scoped capability is not globally routeable',
+      classification: 'expected_scope_project', reason: 'project-scoped capability is not globally routeable', ...modern,
     };
-    if (mapped(row, routes.mapped)) return {
-      category: row.category, id: row.id, coverage_status: 'mapped', classification: null,
+    if (isMapped) return {
+      category: row.category, id: row.id, coverage_status: 'mapped', classification: null, ...modern,
     };
+    if (row.runtime) {
+      const classification = row.excluded ? 'excluded'
+        : row.invalid ? 'invalid'
+          : row.availability !== 'available' || !row.dispatchable ? 'unavailable'
+            : row.routeable ? 'gap' : 'diagnostic';
+      return {
+        category: row.category, id: row.id, coverage_status: 'unmapped', classification,
+        reason: modern.reason_codes.join(', ') || 'no typed mode-map target', ...modern,
+      };
+    }
     const acknowledgement = policy.accepted.get(identityKey(row.category, row.id));
     if (acknowledgement) return {
       category: row.category, id: row.id, coverage_status: 'unmapped', ...acknowledgement,
