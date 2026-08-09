@@ -96,13 +96,49 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| CVRG-01..06 | Phase 50 | Pending |
-| SEMR-01..06 | Phase 51 | Pending |
-| COMP-01..07 | Phase 52 | Pending |
-| PREF-01..04 | Phase 53 | Pending |
-| STRT-01..06 | Phase 53 | Pending |
-| EVAL-01..07 | Phase 54 | Pending |
-| LIFE-01..07 | Phase 55 | Pending |
+| CVRG-01 | Phase 50 | Pending |
+| CVRG-02 | Phase 50 | Pending |
+| CVRG-03 | Phase 50 | Pending |
+| CVRG-04 | Phase 50 | Pending |
+| CVRG-05 | Phase 50 | Pending |
+| CVRG-06 | Phase 50 | Pending |
+| SEMR-01 | Phase 51 | Pending |
+| SEMR-02 | Phase 51 | Pending |
+| SEMR-03 | Phase 51 | Pending |
+| SEMR-04 | Phase 51 | Pending |
+| SEMR-05 | Phase 51 | Pending |
+| SEMR-06 | Phase 51 | Pending |
+| COMP-01 | Phase 52 | Pending |
+| COMP-02 | Phase 52 | Pending |
+| COMP-03 | Phase 52 | Pending |
+| COMP-04 | Phase 52 | Pending |
+| COMP-05 | Phase 52 | Pending |
+| COMP-06 | Phase 52 | Pending |
+| COMP-07 | Phase 52 | Pending |
+| PREF-01 | Phase 53 | Pending |
+| PREF-02 | Phase 53 | Pending |
+| PREF-03 | Phase 53 | Pending |
+| PREF-04 | Phase 53 | Pending |
+| STRT-01 | Phase 53 | Pending |
+| STRT-02 | Phase 53 | Pending |
+| STRT-03 | Phase 53 | Pending |
+| STRT-04 | Phase 53 | Pending |
+| STRT-05 | Phase 53 | Pending |
+| STRT-06 | Phase 53 | Pending |
+| EVAL-01 | Phase 54 | Pending |
+| EVAL-02 | Phase 54 | Pending |
+| EVAL-03 | Phase 54 | Pending |
+| EVAL-04 | Phase 54 | Pending |
+| EVAL-05 | Phase 54 | Pending |
+| EVAL-06 | Phase 54 | Pending |
+| EVAL-07 | Phase 54 | Pending |
+| LIFE-01 | Phase 55 | Pending |
+| LIFE-02 | Phase 55 | Pending |
+| LIFE-03 | Phase 55 | Pending |
+| LIFE-04 | Phase 55 | Pending |
+| LIFE-05 | Phase 55 | Pending |
+| LIFE-06 | Phase 55 | Pending |
+| LIFE-07 | Phase 55 | Pending |
 
 **Coverage:**
 - v1.8 requirements: 43 total
