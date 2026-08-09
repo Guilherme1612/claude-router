@@ -13,6 +13,7 @@ export const CONTRACT_FIELDS = Object.freeze([
   'side_effects',
   'reversibility',
   'risk',
+  'authority',
   'invocation_kind',
   'lifecycle_role',
   'scope',
@@ -26,7 +27,7 @@ export const CONTRACT_FIELDS = Object.freeze([
 const EVIDENCE_CLASSES = new Set(['explicit', 'inferred', 'conflicting', 'unknown']);
 
 export const CONTRACT_POLICY = Object.freeze({
-  policy_version: 'contract-policy-v1',
+  policy_version: 'contract-policy-v2',
   inferred_minimum_basis_points: 8500,
   structural_minimum_basis_points: 10000,
   max_evidence_per_field: 64,
@@ -40,6 +41,7 @@ const DISPATCH_FIELDS = new Set([
   'side_effects',
   'reversibility',
   'risk',
+  'authority',
   'invocation_kind',
   'scope',
   'workflow_transitions',
@@ -67,6 +69,7 @@ const STRING_LIST_FIELDS = new Set([
 const ENUM_FIELDS = Object.freeze({
   reversibility: new Set(['unknown', 'reversible', 'irreversible']),
   risk: new Set(['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable']),
+  authority: new Set(['advice', 'inspect', 'one-turn', 'persistent']),
   action: new Set(['unknown', 'invoke', 'query', 'observe', 'none']),
   cost: new Set(['unknown', 'low', 'medium', 'high', 'critical']),
 });
@@ -197,31 +200,36 @@ function envelope(field, candidates) {
 function authoritativeEvidence(record) {
   const values = {
     purpose: record.name,
-    triggers: [record.name],
-    inputs: [],
-    outputs: [],
+    triggers: [...new Set([...(record.semantic?.intents || []), ...(record.semantic?.aliases || [])])].sort(),
+    inputs: (record.inputs || []).map(input => `${input.name}:${input.type}:${input.required ? 'required' : 'optional'}`),
+    outputs: record.semantic?.outputs || [],
     preconditions: [],
-    dependencies: record.dependencies.items.map(item => item.id),
+    dependencies: record.dependencies.state === 'declared'
+      ? [...new Set([...record.dependencies.items.map(item => item.id), ...(record.composition?.requires || [])])].sort()
+      : undefined,
     permissions: [],
-    side_effects: [],
+    side_effects: record.effects?.length ? record.effects : undefined,
     reversibility: 'unknown',
-    risk: 'unknown',
+    risk: record.risk && record.risk.source !== 'inferred' && record.risk.level !== 'unknown'
+      ? record.risk.level : undefined,
+    authority: record.authority && record.authority.source !== 'inferred'
+      ? record.authority.ceiling : undefined,
     invocation_kind: record.invocation.availability === 'available' ? record.semantic_type : 'none',
     lifecycle_role: record.lifecycle_role,
     scope: record.scope,
     workflow_transitions: [],
     action: record.invocation.availability === 'available' ? 'invoke' : 'none',
-    cost: 'unknown',
+    cost: record.cost && record.cost.latency !== 'unknown' ? record.cost.latency : 'unknown',
     completion: { evidence_type: 'exit_code' },
     native_invocation: { runtime: record.invocation.runtime || 'unknown' },
   };
-  return Object.fromEntries(Object.entries(values).map(([field, value]) => [field, [{
-    value,
-    provenance: 'adapter',
-    confidence_basis_points: 10000,
-    freshness: 'fresh',
-    rule: `adapter-${field}-v1`,
-  }]]));
+  return Object.fromEntries(Object.entries(values).map(([field, value]) => [field, value === undefined ? [] : [{
+      value,
+      provenance: 'adapter',
+      confidence_basis_points: 10000,
+      freshness: 'fresh',
+      rule: `adapter-${field}-v1`,
+    }]]));
 }
 
 export function buildCapabilityContract(record, fieldEvidence = {}) {

@@ -243,6 +243,14 @@ function invocation(data, name, type) {
   return { command: data.command || name, args: Array.isArray(data.args) ? data.args : [] };
 }
 
+function declaredMetadata(data) {
+  return Object.fromEntries(
+    ['semantic', 'inputs', 'effects', 'risk', 'authority', 'composition', 'cost']
+      .filter(field => Object.hasOwn(data, field))
+      .map(field => [field, data[field]]),
+  );
+}
+
 function portableTarget(value, rootPath) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const normalized = value.trim().replaceAll('\\', '/');
@@ -455,6 +463,7 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
       conflicts: [], precedence: scope.kind === 'global' ? ['global-fallback'] : ['project-preferred', 'global-fallback'],
       ...(typeof nativeRecord.data.canonical_identity === 'string' ? { canonical_identity: nativeRecord.data.canonical_identity } : {}),
       ...(nativeRecord.data.mapping && typeof nativeRecord.data.mapping === 'object' ? { mapping: nativeRecord.data.mapping } : {}),
+      ...declaredMetadata(nativeRecord.data),
       ...(nativeRecord.data.shared_origin?.authority && nativeRecord.data.shared_origin?.identity
         ? { shared_origin: { authority: String(nativeRecord.data.shared_origin.authority), identity: String(nativeRecord.data.shared_origin.identity) } } : {}) };
     validateCapability(record); return record;

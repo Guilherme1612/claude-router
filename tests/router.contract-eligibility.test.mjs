@@ -52,7 +52,7 @@ test('[phase22-red:eligibility] all passed gates are eligible through one evalua
   const result = await evaluate(safeRecord());
   assert.equal(result.eligible, true);
   assert.equal(result.recommendation_only, false);
-  assert.deepEqual(Object.values(result.gates), Array(10).fill('passed'));
+  assert.deepEqual(Object.values(result.gates), Array(11).fill('passed'));
   assert.deepEqual(result.reason_codes, ['eligibility_all_gates_passed']);
 });
 
@@ -245,7 +245,7 @@ test('[phase22-red:eligibility] assembly replaces authored eligibility and dispa
       recommendation_only: true,
       gates: Object.fromEntries([
         'target_existence', 'invocation_shape', 'adapter', 'dependency_closure',
-        'permission', 'scope', 'side_effects', 'reversibility', 'risk', 'field_confidence',
+        'authority', 'permission', 'scope', 'side_effects', 'reversibility', 'risk', 'field_confidence',
       ].map(gate => [gate, gate === 'risk' ? 'failed' : 'passed'])),
       reason_codes: ['risk_failed'],
     },

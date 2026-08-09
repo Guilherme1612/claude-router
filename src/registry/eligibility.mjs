@@ -7,6 +7,7 @@ export const ELIGIBILITY_GATES = Object.freeze([
   'invocation_shape',
   'adapter',
   'dependency_closure',
+  'authority',
   'permission',
   'scope',
   'side_effects',
@@ -19,6 +20,7 @@ const DISPATCH_FIELDS = Object.freeze([
   'inputs',
   'preconditions',
   'dependencies',
+  'authority',
   'permissions',
   'side_effects',
   'reversibility',
@@ -80,6 +82,7 @@ function adapterState(record) {
 }
 
 function dependencyState(record, recordsById, relationships) {
+  if (record?.contract && field(record, 'dependencies')?.state !== 'known') return 'unknown';
   if (record?.dependencies?.state !== 'declared') {
     return 'unknown';
   }
@@ -209,6 +212,7 @@ export function evaluateEligibility({ record, records = [], relationships = {} }
     invocation_shape: invocationState(record),
     adapter: adapterState(record),
     dependency_closure: dependencyState(record, recordsById, relationships),
+    authority: fieldState(record, 'authority', () => 'passed'),
     permission: fieldState(record, 'permissions', value => (
       unsafeValue(value, ['denied', 'forbidden', 'unauthorized']) ? 'failed' : 'passed'
     )),

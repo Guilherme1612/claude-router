@@ -5,6 +5,15 @@ const LIFECYCLES = ['ready', 'partial', 'invalid'];
 const SCOPES = ['global', 'user', 'project', 'worktree'];
 const SEVERITIES = ['informational', 'dispatch-blocking', 'build-blocking'];
 const DEPENDENCY_STATES = ['unknown', 'declared'];
+const COVERAGE_CLASSES = [
+  'routable', 'composable', 'direct-only', 'hook-owned', 'project-scoped',
+  'unavailable', 'invalid', 'excluded',
+];
+const METADATA_SOURCES = ['declared', 'structural', 'inferred'];
+const RISK_LEVELS = ['unknown', 'low', 'medium', 'high', 'critical'];
+const AUTHORITY_CEILINGS = ['advice', 'inspect', 'one-turn', 'persistent'];
+const LATENCY_CLASSES = ['unknown', 'low', 'medium', 'high'];
+const INPUT_TYPES = ['text', 'path', 'json', 'boolean', 'number'];
 const SEMANTIC_TYPES = [
   'command',
   'skill',
@@ -35,6 +44,18 @@ const SET_LIKE_FIELDS = new Set([
   'provenance',
   'runtime_variants',
   'contract.reason_codes',
+  'composition.conflicts',
+  'composition.requires',
+  'composition.roles',
+  'coverage.reasons',
+  'effects',
+  'inputs',
+  'semantic.aliases',
+  'semantic.evidence',
+  'semantic.intents',
+  'semantic.operations',
+  'semantic.outputs',
+  'semantic.subjects',
 ]);
 const OPERATIONAL_FIELDS = new Set([
   'event_order',
@@ -51,6 +72,7 @@ const ELIGIBILITY_GATES = [
   'invocation_shape',
   'adapter',
   'dependency_closure',
+  'authority',
   'permission',
   'scope',
   'side_effects',
@@ -138,6 +160,35 @@ function normalizeAdapterEvidence(record, nativeType) {
   }));
 }
 
+function metadata(record) {
+  const semantic = record.semantic && typeof record.semantic === 'object' && !Array.isArray(record.semantic)
+    ? record.semantic : {};
+  const freshness = record.source_freshness && typeof record.source_freshness === 'object'
+    ? record.source_freshness : {};
+  return {
+    semantic: {
+      intents: semantic.intents ?? [],
+      subjects: semantic.subjects ?? [],
+      operations: semantic.operations ?? [],
+      outputs: semantic.outputs ?? [],
+      evidence: semantic.evidence ?? [],
+      aliases: semantic.aliases ?? [record.name],
+    },
+    inputs: record.inputs ?? [],
+    effects: record.effects ?? [],
+    risk: record.risk ?? { level: 'unknown', source: 'inferred' },
+    authority: record.authority ?? { ceiling: 'advice', source: 'inferred' },
+    composition: record.composition ?? { roles: [], requires: [], conflicts: [], exclusive: false },
+    cost: record.cost ?? { latency: 'unknown', context_bytes: null, tool_calls: null },
+    coverage: record.coverage ?? { classification: 'invalid', reasons: [] },
+    source_freshness: {
+      fingerprint: freshness.fingerprint
+        ?? record.provenance.map(source => source.source_fingerprint).sort().join('+'),
+      observed_at: freshness.observed_at ?? '',
+    },
+  };
+}
+
 function normalizeRecord(record) {
   const runtime = runtimeOf(record);
   const nativeType = record.native_type || `${runtime}:${record.type}`;
@@ -151,7 +202,65 @@ function normalizeRecord(record) {
     invocation: normalizeInvocation(record),
     adapter_evidence: normalizeAdapterEvidence(record, nativeType),
     diagnostics: record.diagnostics || [],
+    ...metadata(record),
   };
+}
+
+function stringArray(value, path, maximum = 128) {
+  if (!Array.isArray(value) || value.length > maximum) fail(`${path} must be a bounded array`);
+  for (const [index, item] of value.entries()) nonempty(item, `${path}[${index}]`);
+}
+
+function nullableCount(value, path) {
+  if (value !== null && (!Number.isSafeInteger(value) || value < 0)) {
+    fail(`${path} must be a non-negative integer or null`);
+  }
+}
+
+function validateMetadata(record) {
+  const normalized = metadata(record);
+  object(normalized.semantic, 'capability.semantic');
+  for (const field of ['intents', 'subjects', 'operations', 'outputs', 'evidence', 'aliases']) {
+    stringArray(normalized.semantic[field], `capability.semantic.${field}`);
+    for (const value of normalized.semantic[field]) {
+      if (isAbsolutePortablePath(value)) fail(`capability.semantic.${field} must not contain absolute paths`);
+    }
+  }
+  if (!Array.isArray(normalized.inputs) || normalized.inputs.length > 128) {
+    fail('capability.inputs must be a bounded array');
+  }
+  for (const [index, input] of normalized.inputs.entries()) {
+    object(input, `capability.inputs[${index}]`);
+    nonempty(input.name, `capability.inputs[${index}].name`);
+    oneOf(input.type, INPUT_TYPES, `capability.inputs[${index}].type`);
+    if (typeof input.required !== 'boolean') fail(`capability.inputs[${index}].required must be a boolean`);
+  }
+  stringArray(normalized.effects, 'capability.effects');
+  object(normalized.risk, 'capability.risk');
+  oneOf(normalized.risk.level, RISK_LEVELS, 'capability.risk.level');
+  oneOf(normalized.risk.source, METADATA_SOURCES, 'capability.risk.source');
+  object(normalized.authority, 'capability.authority');
+  oneOf(normalized.authority.ceiling, AUTHORITY_CEILINGS, 'capability.authority.ceiling');
+  oneOf(normalized.authority.source, METADATA_SOURCES, 'capability.authority.source');
+  object(normalized.composition, 'capability.composition');
+  for (const field of ['roles', 'requires', 'conflicts']) {
+    stringArray(normalized.composition[field], `capability.composition.${field}`);
+  }
+  if (typeof normalized.composition.exclusive !== 'boolean') {
+    fail('capability.composition.exclusive must be a boolean');
+  }
+  object(normalized.cost, 'capability.cost');
+  oneOf(normalized.cost.latency, LATENCY_CLASSES, 'capability.cost.latency');
+  nullableCount(normalized.cost.context_bytes, 'capability.cost.context_bytes');
+  nullableCount(normalized.cost.tool_calls, 'capability.cost.tool_calls');
+  object(normalized.coverage, 'capability.coverage');
+  oneOf(normalized.coverage.classification, COVERAGE_CLASSES, 'capability.coverage.classification');
+  stringArray(normalized.coverage.reasons, 'capability.coverage.reasons', 64);
+  object(normalized.source_freshness, 'capability.source_freshness');
+  nonempty(normalized.source_freshness.fingerprint, 'capability.source_freshness.fingerprint');
+  if (typeof normalized.source_freshness.observed_at !== 'string') {
+    fail('capability.source_freshness.observed_at must be a string');
+  }
 }
 
 function validateDependencies(record) {
@@ -279,6 +388,7 @@ export function validateCapability(record) {
   }
   validateDependencies(record);
   validateProvenance(record.provenance);
+  validateMetadata(record);
   if (!Array.isArray(normalized.adapter_evidence) || normalized.adapter_evidence.length === 0
     || normalized.adapter_evidence.length > 64) {
     fail('capability.adapter_evidence must be a non-empty bounded array');
@@ -362,7 +472,8 @@ export function stableStringify(value) {
 }
 
 function sortSet(array) {
-  return [...array].sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  return [...new Map(array.map(value => [stableStringify(value), value])).values()]
+    .sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
 }
 
 function canonicalize(value, path = '') {

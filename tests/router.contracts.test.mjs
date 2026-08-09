@@ -30,11 +30,17 @@ test('assembleRegistry constructs and overlays every authoritative contract [pha
   assert.equal(plain.registry.records.length, observations.length);
   for (const record of plain.registry.records) {
     assert.equal(validateCapabilityContract(record.contract), true);
-    for (const envelope of Object.values(record.contract.fields)) {
-      assert.equal(envelope.policy_version, 'contract-policy-v1');
-      assert.equal(envelope.freshness, 'fresh');
-      assert.equal(envelope.confidence_basis_points, 10000);
-      assert.ok(envelope.evidence.every(item => item.rule_version.startsWith('adapter-')));
+    for (const [field, envelope] of Object.entries(record.contract.fields)) {
+      assert.equal(envelope.policy_version, 'contract-policy-v2');
+      if (['authority', 'dependencies', 'risk', 'side_effects'].includes(field)) {
+        assert.equal(envelope.state, 'unknown');
+        assert.equal(envelope.freshness, 'unknown');
+        assert.equal(envelope.confidence_basis_points, 0);
+      } else {
+        assert.equal(envelope.freshness, 'fresh');
+        assert.equal(envelope.confidence_basis_points, 10000);
+        assert.ok(envelope.evidence.every(item => item.rule_version.startsWith('adapter-')));
+      }
       assert.ok(envelope.reason_codes.length);
     }
   }
@@ -75,7 +81,7 @@ test('[phase22-red:contracts] every profile receives complete field envelopes', 
       assert.ok(['known', 'unknown'].includes(envelope.state));
       assert.ok(Array.isArray(envelope.evidence));
       assert.ok(Array.isArray(envelope.rejected_evidence));
-      assert.equal(envelope.policy_version, 'contract-policy-v1');
+      assert.equal(envelope.policy_version, 'contract-policy-v2');
       assert.ok(['fresh', 'stale', 'unknown'].includes(envelope.freshness));
       assert.ok(Number.isInteger(envelope.confidence_basis_points));
       assert.ok(Array.isArray(envelope.reason_codes));
