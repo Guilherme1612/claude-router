@@ -688,7 +688,11 @@ export async function installRouter(options) {
         { path: p.codexRouterPath, fingerprint: sourceFingerprint },
         ...(deployEvolve ? [{ path: p.codexEvolvePath, fingerprint: evolveFingerprint }] : []),
         { path: p.codexMarkerPath, fingerprint: markerFingerprint },
-        ...ownedValues.map(([file, value]) => ({ path: file, fingerprint: fingerprint(value) })),
+        ...ownedValues.map(([file, value]) => ({
+          path: file,
+          fingerprint: fingerprint(value),
+          ...([p.candidatePath, p.reportPath].includes(file) ? { mutable: true } : {}),
+        })),
         { path: p.controllerStatusPath, fingerprint: 'mutable', mutable: true },
         { path: p.controllerControlPath, fingerprint: 'mutable', mutable: true },
         { path: p.scanStatePath, fingerprint: 'mutable', mutable: true },
@@ -929,10 +933,13 @@ export async function uninstallRouter(options) {
 
   const removed = [];
   const retained = [];
+  const mutableRuntimePaths = new Set([
+    p.candidatePath, p.reportPath, join(p.ownedRoot, 'active.json'), join(p.ownedRoot, 'audit.jsonl'),
+    p.controllerStatusPath, p.controllerControlPath, p.scanStatePath,
+  ]);
   for (const file of manifest.files) {
     if (!existsSync(file.path)) continue;
-    const mutableOwned = file.mutable === true
-      && (file.path === p.controllerStatusPath || file.path === p.controllerControlPath || file.path === p.scanStatePath)
+    const mutableOwned = mutableRuntimePaths.has(file.path)
       && (file.path === p.ownedRoot || file.path.startsWith(`${p.ownedRoot}/`));
     if (!mutableOwned && !isPointerFile(file.path) && !fileMatches(file.path, file.fingerprint)) {
       retained.push(file.path);
@@ -951,7 +958,7 @@ export async function uninstallRouter(options) {
   // owned root completely; prune the lifecycle-owned install-state and versions trees here so
   // they do not keep the owned root on disk after uninstall. Both are inside the owned root
   // and are exclusively written by this installer's lifecycle verbs.
-  for (const lifecycleRoot of [join(p.ownedRoot, 'install-state'), join(p.ownedRoot, 'versions')]) {
+  for (const lifecycleRoot of [join(p.ownedRoot, 'install-state'), join(p.ownedRoot, 'release-tuples'), join(p.ownedRoot, 'versions')]) {
     if (existsSync(lifecycleRoot)) rmSync(lifecycleRoot, { recursive: true, force: true });
   }
   // Fresh-account onboarding: the inventory manifest builder writes a runtime asset

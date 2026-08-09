@@ -331,6 +331,29 @@ test('uninstall verb: owned root removed and settings.json byte-identical to pre
   }
 });
 
+test('uninstall removes controller-mutated candidate and report state as owned mutable files', async () => {
+  const f = fixture({ variant: 'together' });
+  const holder = {};
+  const releaseTuplesPath = join(f.ownedRoot, 'release-tuples');
+  try {
+    await installRouter(installOptions(f, holder));
+    mkdirSync(releaseTuplesPath, { recursive: true });
+    writeFileSync(join(releaseTuplesPath, 'active.json'), '{"tuple_version_id":"owned"}\n');
+    assert.equal(existsSync(releaseTuplesPath), true);
+    writeFileSync(join(f.ownedRoot, 'candidate', 'registry.json'), '{"mutated":"registry"}\n');
+    writeFileSync(join(f.ownedRoot, 'candidate', 'report.json'), '{"mutated":"report"}\n');
+    await safeStopController(f, holder);
+    const result = await uninstallRouter(f);
+    assert.deepEqual(result.retained, []);
+    assert.equal(existsSync(f.ownedRoot), false);
+    assert.equal(existsSync(f.codexOwnedRoot), false);
+    assert.equal(existsSync(releaseTuplesPath), false);
+  } finally {
+    await safeStopController(f, holder);
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 // --- Together-mode isolation test -----------------------------------------------------------
 
 test('together-mode isolation: Claude and Codex installations remain independent across all five verbs', async () => {

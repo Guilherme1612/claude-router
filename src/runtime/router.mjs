@@ -1909,7 +1909,7 @@ export function normalize(scored) {
 // top ≥ T_high but margin < M = decisive-but-moderate).
 // Phase 39 AUTH-04/05: evaluate the authority policy on the hot path and
 // return a sentinel-wrapped suggestion hint for pause/ask decisions. The
-// router NEVER emits decision:'block' (fail-open) — a block policy is
+// router NEVER emits a blocking decision (fail-open) — a block policy is
 // silently dropped (no hint). Pure function over already-loaded state:
 // no readFileSync/spawn inside this helper (Pitfall 4). Any throw returns
 // null (fail-open: the existing outer try/catch in inspectDecision is the
@@ -2039,7 +2039,7 @@ function evaluateAuthorityHint({ prompt, tier, route, manifestFingerprint, cwd }
 }
 
 // Format a pause/ask policy hint as a sentinel-wrapped suggestion block.
-// Never returns decision:'block' — block policies produce no hint (the
+// Never returns a blocking decision — block policies produce no hint (the
 // existing route block already conveys the suggestion; a block policy
 // would be redundant). pause → "paused: confirm X"; ask → "ask: clarify X".
 function formatAuthorityHint(authorityHint, sigHash = '') {
@@ -2643,7 +2643,7 @@ export function bumpEvolveTrigger({ triggerPath = TRIGGER, workerPath = WORKER_P
 //
 // Guarded by DISPATCH_LEASE_MARKER: no marker → no spawn → no-op. Fail-open:
 // any throw is swallowed so the prompt always proceeds (never exit 2, never
-// decision:'block'). The command is the fixed DISPATCH_WORKER_PATH — never
+// a blocking decision). The command is the fixed DISPATCH_WORKER_PATH — never
 // derived from prompt text (T-38-01).
 export function triggerNativeDispatch({ leasePath = DISPATCH_LEASE_MARKER, workerPath = DISPATCH_WORKER_PATH } = {}) {
   try {
@@ -3887,7 +3887,7 @@ export function inspectDecision(prompt, options = {}) {
       // Phase 39 AUTH-04/05: re-evaluate the policy with the finalRoute so
       // the pause/ask hint reflects the actual guarded surface. The hint
       // is sentinel-wrapped and appended to the injection (never
-      // decision:'block' — block policies produce no hint). Fail-open:
+      // a blocking decision — block policies produce no hint). Fail-open:
       // any throw returns '' (no hint).
       const finalAuthorityHint = evaluateAuthorityHint({ prompt, tier: state.tier, route: capped, manifestFingerprint, cwd: opts.cwd });
       const authorityBlock = finalAuthorityHint ? formatAuthorityHint(finalAuthorityHint, sig.slice(0, 8)) : '';
