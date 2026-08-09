@@ -53,5 +53,37 @@
       "requirements": [],
       "compatible": []
     }
+  ],
+  "semantic_workflows": [
+    {
+      "workflow_id": "relationship-inspection",
+      "goal": "inspect",
+      "subjects": ["database", "relationship"],
+      "operations": ["inspect", "trace", "map"],
+      "roles": ["relationship-analysis"],
+      "aliases": ["data model inspection", "schema relationship analysis", "dependency mapping"],
+      "evidence_needs": ["relationships", "report"],
+      "max_capabilities": 1
+    },
+    {
+      "workflow_id": "substantial-ui-redesign",
+      "goal": "redesign",
+      "subjects": ["ui"],
+      "operations": ["redesign", "implement", "review"],
+      "roles": ["design-direction", "ux-system", "implementation", "review"],
+      "aliases": ["substantial interface redesign", "frontend overhaul", "visual system improvement"],
+      "evidence_needs": ["design", "tests", "review"],
+      "max_capabilities": 4
+    },
+    {
+      "workflow_id": "generic-inspection",
+      "goal": "inspect",
+      "subjects": ["codebase"],
+      "operations": ["inspect", "review", "verify"],
+      "roles": ["inspection"],
+      "aliases": ["codebase inspection", "repository analysis"],
+      "evidence_needs": ["report"],
+      "max_capabilities": 1
+    }
   ]
 }
