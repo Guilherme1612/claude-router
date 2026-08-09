@@ -250,6 +250,7 @@ export function contractEvidence(record, variant = 'accepted') {
     cost: 'unknown',
     completion: { evidence_type: 'exit_code' },
     native_invocation: { runtime: record.invocation.runtime || 'unknown' },
+    authority: 'advice',
   };
   const evidence = Object.fromEntries(Object.entries(structural).map(([field, value]) => [field, [{
     value,
@@ -278,7 +279,20 @@ export function contractEvidence(record, variant = 'accepted') {
   if (variant === 'workflow-transitions') {
     evidence.workflow_transitions[0].value = ['gsd.execute'];
   }
-  if (!['accepted', 'missing', 'conflicting', 'stale', 'below-threshold', 'rejected', 'workflow-transitions'].includes(variant)) {
+  if (variant === 'declared-safe') {
+    evidence.side_effects[0].value = ['none'];
+    evidence.reversibility[0].value = 'reversible';
+    evidence.risk[0].value = 'low';
+  }
+  if (variant === 'unknown-effects') evidence.side_effects = [];
+  if (variant === 'unknown-authority') evidence.authority = [];
+  if (variant === 'unknown-dependencies') evidence.dependencies = [];
+  if (variant === 'unknown-risk') evidence.risk = [];
+  if (![
+    'accepted', 'missing', 'conflicting', 'stale', 'below-threshold', 'rejected',
+    'workflow-transitions', 'declared-safe', 'unknown-effects', 'unknown-authority',
+    'unknown-dependencies', 'unknown-risk',
+  ].includes(variant)) {
     throw new TypeError(`unknown contract evidence variant: ${variant}`);
   }
   return evidence;
