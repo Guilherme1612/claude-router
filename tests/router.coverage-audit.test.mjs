@@ -109,6 +109,85 @@ function modeMap() {
 const record = (report, category, id) =>
   report.records.find(entry => entry.category === category && entry.id === id);
 
+function runtimeManifest() {
+  const source = (runtime, category, id, overrides = {}) => ({
+    id,
+    name: id,
+    runtime,
+    scope: overrides.scope || 'global',
+    availability: overrides.availability || 'available',
+    dispatchable: overrides.dispatchable ?? true,
+    native_locator: `${runtime}://${category}/${id}`,
+    provenance: [{
+      runtime,
+      logical_root: `${runtime}_home`,
+      relative_path: `${category}/${id}`,
+      source_fingerprint: `sha:${runtime}:${category}:${id}`,
+    }],
+    ...overrides,
+  });
+  return {
+    skills: [source('claude', 'skills', 'shared-name'), source('codex', 'skills', 'shared-name')],
+    agents: [source('claude', 'agents', 'agent', { requires_mcp_not_in_manifest: ['missing-mcp'] })],
+    commands: [source('codex', 'commands', 'command')],
+    plugins: [source('claude', 'plugins', 'plugin', { dispatchable: false, excluded: true })],
+    tools: [source('codex', 'tools', 'tool')],
+    hooks: [source('claude', 'hooks', 'hook', { dispatchable: false })],
+    integrations: [source('codex', 'integrations', 'integration', { availability: 'unavailable', dispatchable: false })],
+  };
+}
+
+test('runtime-aware audit preserves every CAP-01 collection and native identity', () => {
+  const report = auditCoverage({
+    manifest: runtimeManifest(),
+    modeMap: { schema_version: 2, entries: [] },
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  assert.equal(report.records.length, 8);
+  assert.deepEqual([...new Set(report.records.map(entry => entry.category))].sort(), [
+    'agents', 'commands', 'hooks', 'integrations', 'plugins', 'skills', 'tools',
+  ]);
+  const names = report.records.filter(entry => entry.id === 'shared-name');
+  assert.deepEqual(names.map(entry => ({
+    runtime: entry.runtime,
+    locator: entry.native_locator,
+    source: entry.provenance[0].logical_root,
+  })), [
+    { runtime: 'claude', locator: 'claude://skills/shared-name', source: 'claude_home' },
+    { runtime: 'codex', locator: 'codex://skills/shared-name', source: 'codex_home' },
+  ]);
+  assert.ok(report.records.every(entry => (
+    entry.runtime && entry.scope && entry.availability && typeof entry.dispatchable === 'boolean'
+      && Array.isArray(entry.provenance) && Array.isArray(entry.reason_codes)
+      && entry.disposition
+  )));
+});
+
+test('runtime-aware audit keeps non-selectable records visible without actionable gaps', () => {
+  const report = auditCoverage({
+    manifest: {
+      ...runtimeManifest(),
+      skills: [
+        { ...runtimeManifest().skills[0], availability: 'unavailable', dispatchable: false, stale: true },
+        { ...runtimeManifest().skills[1], scope: 'project', dispatchable: false },
+      ],
+      hooks: [{ ...runtimeManifest().hooks[0], hook_owned: true }],
+      integrations: [{ ...runtimeManifest().integrations[0], missing_mcp: ['context7'] }],
+    },
+    modeMap: { schema_version: 2, entries: [] },
+    baseline: { schema_version: 1, entries: [] },
+  });
+
+  for (const entry of report.records) {
+    if (entry.dispatchable === false) assert.equal(entry.actionable_gap, false);
+  }
+  assert.ok(report.records.some(entry => entry.reason_codes.includes('stale_unavailable')));
+  assert.ok(report.records.some(entry => entry.reason_codes.includes('project_scoped')));
+  assert.ok(report.records.some(entry => entry.reason_codes.includes('hook_owned')));
+  assert.ok(report.records.some(entry => entry.reason_codes.includes('missing_mcp')));
+});
+
 test('classifies mapped and manifest-derived expected capabilities with typed identities', () => {
   const report = auditCoverage({ manifest: manifest(), modeMap: modeMap(), baseline: { schema_version: 1, entries: [] } });
 
