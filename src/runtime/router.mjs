@@ -27,8 +27,6 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { parseSemanticIntent } from '../intent/semantic.mjs';
-import { resolveSemanticRoute } from '../orchestrator/compose.mjs';
 let correlateOutcomes;
 let aggregatePerEntry;
 let proposeAdditions;
@@ -109,6 +107,18 @@ const TELEMETRY = join(ROUTER_DIR, 'telemetry.jsonl');
 const SHADOW_LOG = join(ROUTER_DIR, 'shadow-log.jsonl');
 const SHADOW_STATE = join(ROUTER_DIR, 'shadow-state.json');
 const MODE_MAP = join(ROUTER_DIR, 'mode-map.json');
+// v1.8 semantic modules are deployed under the runtime-owned modules closure.
+// The source-relative fallback keeps the development hook importable.
+function resolveSemanticModule(relativePath) {
+  const deployed = join(ROUTER_DIR, 'modules', relativePath);
+  if (existsSync(deployed)) return deployed;
+  try { return join(dirname(fileURLToPath(import.meta.url)), '..', relativePath); }
+  catch { return deployed; }
+}
+let _semanticMod = null;
+let _composeMod = null;
+try { _semanticMod = await import(pathToFileURL(resolveSemanticModule('intent/semantic.mjs')).href); } catch { _semanticMod = null; }
+try { _composeMod = await import(pathToFileURL(resolveSemanticModule('orchestrator/compose.mjs')).href); } catch { _composeMod = null; }
 const WEIGHTS = join(ROUTER_DIR, 'weights.json');
 // INVC-03: per-install calibration FILE (created by Phase 34). The hook only
 // ever reads it epoch-gated — a matching manifest_fingerprint wins, and any
@@ -3587,8 +3597,10 @@ export function inspectDecision(prompt, options = {}) {
       ? opts.semanticRecords
       : (Array.isArray(manifest.semantic_records) ? manifest.semantic_records : null);
     if (semanticRecords) {
-      const semanticIntent = parseSemanticIntent(prompt);
-      const semanticResult = resolveSemanticRoute({
+      const semanticIntent = _semanticMod?.parseSemanticIntent
+        ? _semanticMod.parseSemanticIntent(prompt)
+        : { dispatch_eligible: false, reason_codes: ['semantic_modules_unavailable'], policy_version: 'semantic-intent-unavailable' };
+      const semanticResult = _composeMod?.resolveSemanticRoute ? _composeMod.resolveSemanticRoute({
         intent: semanticIntent,
         records: semanticRecords,
         workflows: opts.semanticWorkflows,
@@ -3597,7 +3609,7 @@ export function inspectDecision(prompt, options = {}) {
           ? opts.semanticPreferences
           : (Array.isArray(manifest.semantic_preferences) ? manifest.semantic_preferences : []),
         preferenceScope: { runtime: RUNTIME, ...(opts.preferenceScope || {}) },
-      });
+      }) : { status: 'unresolved', dispatch_eligible: false, reason_code: 'semantic_modules_unavailable' };
       state.semantic = { intent: semanticIntent, result: semanticResult };
       state.candidates = semanticResult.retrieval?.candidates || [];
       state.decision_trace.push('semantic:single_owner');

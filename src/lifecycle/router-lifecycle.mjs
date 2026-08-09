@@ -390,6 +390,10 @@ export async function installRouter(options) {
     // Phase 41 TRUST-02: untrusted-evidence policy deployed to BOTH ownedRoot
     // and codexOwnedRoot via the moduleValues flatMap below (Pitfall 6 backstop).
     'registry/trust.mjs',
+    // v1.8 semantic routing and continuity closure, deployed to both runtimes.
+    'intent/classify.mjs', 'intent/semantic.mjs',
+    'orchestrator/compose.mjs', 'orchestrator/preferences.mjs',
+    'steward/continuity.mjs',
     // Phase 42 SEM-01/03: semantic resolver + compilation gate deployed to
     // BOTH ownedRoot and codexOwnedRoot via the moduleValues flatMap below
     // (HOST-03 parity; single-runtime deploy would ENOENT in Codex).
