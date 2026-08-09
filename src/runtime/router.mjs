@@ -27,6 +27,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { parseSemanticIntent } from '../intent/semantic.mjs';
+import { resolveSemanticRoute } from '../orchestrator/compose.mjs';
 let correlateOutcomes;
 let aggregatePerEntry;
 let proposeAdditions;
@@ -3334,6 +3336,7 @@ function routeToInspectShape(state) {
     // SAF-01: derived mtime fingerprint (mode_map:manifest:weights) for this
     // decision — observable in inspectDecision output and telemetry.
     routing_version: state.routing_version || null,
+    semantic: state.semantic || null,
   };
 }
 
@@ -3489,6 +3492,7 @@ export function inspectDecision(prompt, options = {}) {
     surface_disabled_count: 0,
     cwd: opts.cwd,
     modeMap: null,
+    semantic: null,
   };
 
   const finish = () => {
@@ -3574,6 +3578,51 @@ export function inspectDecision(prompt, options = {}) {
       state.tier = 'manifest_missing';
       state.passThroughReason = 'manifest_missing';
       state.decision_trace.push('pass_through:manifest_missing');
+      return finish();
+    }
+    // v1.8 semantic cutover seam. An activated typed projection is the sole
+    // route owner; legacy BM25 is retained only when no semantic projection
+    // exists, preserving fail-open compatibility for older installs.
+    const semanticRecords = Array.isArray(opts.semanticRecords)
+      ? opts.semanticRecords
+      : (Array.isArray(manifest.semantic_records) ? manifest.semantic_records : null);
+    if (semanticRecords) {
+      const semanticIntent = parseSemanticIntent(prompt);
+      const semanticResult = resolveSemanticRoute({
+        intent: semanticIntent,
+        records: semanticRecords,
+        workflows: opts.semanticWorkflows,
+        runtime: RUNTIME,
+      });
+      state.semantic = { intent: semanticIntent, result: semanticResult };
+      state.candidates = semanticResult.retrieval?.candidates || [];
+      state.decision_trace.push('semantic:single_owner');
+      if (semanticResult.status !== 'resolved') {
+        state.tier = 'low';
+        state.passThroughReason = semanticResult.reason_code || 'semantic_route_unresolved';
+        return finish();
+      }
+      if (semanticIntent.dispatch_eligible !== true) {
+        state.tier = 'low';
+        state.passThroughReason = 'semantic_intent_not_authorized';
+        return finish();
+      }
+      const composition = semanticResult.composition;
+      state.tier = semanticIntent.dispatch_eligible ? 'high' : 'low';
+      state.passThroughReason = semanticIntent.dispatch_eligible ? null : 'recommendation_only';
+      state.route = {
+        id: `semantic:${composition.workflow_id}`,
+        mode: composition.workflow_id,
+        invoke_kind: 'semantic',
+        recommended_skills: composition.selected,
+        recommended_agents: [],
+        tier: state.tier,
+        semantic_workflow: composition.workflow_id,
+        selected_capabilities: composition.selected,
+        native_invocations: composition.native_invocations,
+        causal_proof_required: true,
+      };
+      state.invoke_kind = 'semantic';
       return finish();
     }
     // INVC-03: epoch-guarded threshold consult. Runs AFTER manifest is loaded

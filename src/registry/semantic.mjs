@@ -225,7 +225,7 @@ function candidateDiagnostics(record, intent, workflow, eligibility) {
     required_roles: requiredRoles.sort(),
     complete: requiredRoles.length === 0 || coveredRoles.length === requiredRoles.length,
   };
-  const eligible = availability && eligibility.eligible === true && workflowCoverage.complete;
+  const eligible = availability && eligibility.eligible === true;
   return {
     stable_id: stableCapabilityId(record),
     workflow_id: workflow.workflow_id,
@@ -266,7 +266,7 @@ export function retrieveSemanticCandidates({ intent, records = [], relationships
   }
   diagnostics.sort((left, right) => right.score - left.score || left.stable_id.localeCompare(right.stable_id));
   const candidates = diagnostics.slice(0, RETRIEVAL_LIMITS.max_candidates);
-  const eligible = candidates.filter(candidate => candidate.eligibility.eligible);
+  const eligible = candidates.filter(candidate => candidate.eligibility.eligible && candidate.workflow_coverage.complete);
   if (!eligible.length) {
     return {
       schema_version: 1,
