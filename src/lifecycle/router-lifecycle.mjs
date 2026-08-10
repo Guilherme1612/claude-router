@@ -437,6 +437,7 @@ export async function installRouter(options) {
     'health/outcome-schema.mjs', 'health/score.mjs', 'health/store.mjs',
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
     'orchestrator/workflow-plan.mjs',
+    'orchestrator/workflow-execution.mjs',
     'orchestrator/approval.mjs',
     'orchestrator/workflow-declarations.json',
     // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)
