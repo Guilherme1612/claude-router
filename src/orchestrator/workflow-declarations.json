@@ -84,6 +84,76 @@
       "aliases": ["codebase inspection", "repository analysis"],
       "evidence_needs": ["report"],
       "max_capabilities": 1
+    },
+    {
+      "workflow_id": "quality-audit",
+      "goal": "audit",
+      "subjects": ["codebase"],
+      "operations": ["inspect", "audit", "review", "verify"],
+      "roles": ["audit", "inspection"],
+      "aliases": ["repository quality audit", "codebase quality review"],
+      "evidence_needs": ["audit", "report", "tests"],
+      "max_capabilities": 3
+    },
+    {
+      "workflow_id": "feature-build",
+      "goal": "build",
+      "subjects": ["codebase", "feature"],
+      "operations": ["build", "implement", "test"],
+      "roles": ["planning", "implementation", "testing"],
+      "aliases": ["build a feature", "implement repository change"],
+      "evidence_needs": ["tests", "report"],
+      "max_capabilities": 3
+    },
+    {
+      "workflow_id": "bug-diagnosis-fix",
+      "goal": "diagnose-fix",
+      "subjects": ["codebase", "bug"],
+      "operations": ["diagnose", "fix", "verify"],
+      "roles": ["diagnosis", "implementation", "testing"],
+      "aliases": ["diagnose and fix a bug", "repair repository defect"],
+      "evidence_needs": ["diagnosis", "tests", "report"],
+      "max_capabilities": 3
+    },
+    {
+      "workflow_id": "refactor-optimization",
+      "goal": "refactor-optimize",
+      "subjects": ["codebase", "module", "performance"],
+      "operations": ["refactor", "optimize", "benchmark", "verify"],
+      "roles": ["refactor", "optimization", "testing"],
+      "aliases": ["refactor and optimize", "improve code structure"],
+      "evidence_needs": ["benchmark", "tests", "report"],
+      "max_capabilities": 3
+    },
+    {
+      "workflow_id": "design-review",
+      "goal": "design-review",
+      "subjects": ["ui", "interface"],
+      "operations": ["review", "audit", "verify"],
+      "roles": ["design-review", "usability"],
+      "aliases": ["review interface design", "audit user experience"],
+      "evidence_needs": ["design", "review", "report"],
+      "max_capabilities": 2
+    },
+    {
+      "workflow_id": "browser-interaction-verification",
+      "goal": "browser-verify",
+      "subjects": ["browser", "interface", "web"],
+      "operations": ["interact", "verify", "test"],
+      "roles": ["browser-verification"],
+      "aliases": ["verify a browser flow", "test website interaction"],
+      "evidence_needs": ["browser", "screenshots", "report"],
+      "max_capabilities": 2
+    },
+    {
+      "workflow_id": "coordinator-workflow",
+      "goal": "coordinate",
+      "subjects": ["codebase", "feature", "interface", "browser"],
+      "operations": ["audit", "build", "diagnose", "fix", "refactor", "review", "verify"],
+      "roles": ["coordination"],
+      "aliases": ["coordinate repository work", "manage multiple task outcomes"],
+      "evidence_needs": ["report"],
+      "max_capabilities": 8
     }
   ]
 }
