@@ -1,5 +1,10 @@
-import { classifyAuthority } from './authority.mjs';
+import { classifyAuthority, PROTECTED_EFFECT_TOKENS } from './authority.mjs';
 import { classifyIntent } from './classify.mjs';
+import {
+  TASK_FAMILY_CORPUS,
+  TASK_FAMILY_CORPUS_VERSION,
+  matchTaskFamilies,
+} from './task-family-corpus.mjs';
 
 export const SEMANTIC_INTENT_POLICY_VERSION = 'semantic-intent-v1';
 
@@ -7,7 +12,8 @@ export const SEMANTIC_INTENT_LIMITS = Object.freeze({
   input_chars: 4096,
   tokens: 96,
   values: 8,
-  workflow_hints: 4,
+  workflow_hints: 8,
+  task_family_candidates: 6,
 });
 
 const VOCABULARY = Object.freeze({
@@ -99,11 +105,56 @@ function confidence({ matchesCount, subjectCount, operationCount, disposition })
 }
 
 function safeExecutionSignal({ disposition, authorityClass, policyDiscussion, exampleFraming }) {
+  if (['quoted', 'hypothetical', 'negated', 'prohibited', 'preview', 'explain'].includes(disposition)) return 'none';
   if (policyDiscussion || exampleFraming) return 'none';
   if (authorityClass === 'persistent_goal_action') return 'persistent';
   if (authorityClass === 'one_turn_action') return 'one-turn';
   if (authorityClass === 'inspection') return 'inspect';
   return 'none';
+}
+
+function scopeFor(source, familyIds) {
+  const scopes = [
+    ['repository', /\b(repository|repo|codebase|project|application|whole|everything)\b/i],
+    ['browser', /\b(browser|web|website|user flow|click through)\b/i],
+    ['interface', /\b(interface|ui|ux|frontend|screen|design)\b/i],
+    ['module', /\b(module|component|file|function)\b/i],
+  ];
+  return scopes.find(([, pattern]) => pattern.test(source))?.[0]
+    || 'unknown';
+}
+
+function evidenceFor(source, familyIds) {
+  const values = new Set(familyIds.flatMap(id => TASK_FAMILY_CORPUS.find(family => family.id === id)?.evidence_needs || []));
+  if (/\b(test|tests|testing|proof|verify|verified|verification)\b/i.test(source)) values.add('verify');
+  if (/\b(report|reporting|findings|summary)\b/i.test(source)) values.add('report');
+  if (/\b(browser|web|website|user flow)\b/i.test(source)) values.add('browser');
+  return [...values].sort().slice(0, SEMANTIC_INTENT_LIMITS.values);
+}
+
+function constraintsFor(inputTokens, source) {
+  const values = new Set(findMatches(inputTokens, 'safe'));
+  const constraints = [
+    ['minimal', /\b(minimal|smallest|least|only what is needed)\b/i],
+    ['preserve', /\b(preserve|keep|existing)\b/i],
+    ['local', /\b(local|offline|without network)\b/i],
+    ['no-install', /\b(no|without)\s+(?:automatic\s+)?install(?:ation)?\b/i],
+    ['no-publish', /\b(no|without)\s+(?:external\s+)?publish(?:ing)?\b/i],
+  ];
+  for (const [value, pattern] of constraints) if (pattern.test(source)) values.add(value);
+  return [...values].sort().slice(0, SEMANTIC_INTENT_LIMITS.values);
+}
+
+function requestedAutonomy(authorityClass) {
+  if (authorityClass === 'inspection') return 'inspect';
+  if (authorityClass === 'one_turn_action') return 'one-turn';
+  if (authorityClass === 'persistent_goal_action') return 'persistent';
+  return 'none';
+}
+
+function ownerAuthorityRequested(source) {
+  const protectedToken = PROTECTED_EFFECT_TOKENS.some(token => new RegExp(`\\b${token.replaceAll('-', '\\\\-')}\\b`, 'i').test(source));
+  return protectedToken || /\b(production|delete|drop|publish|external|billing|credential)\b/i.test(source);
 }
 
 /**
@@ -122,6 +173,10 @@ export function parseSemanticIntent(prompt, { policyVersion } = {}) {
       reason_codes: ['policy_version_mismatch'],
       goal: 'unknown', subjects: [], operations: [], constraints: [], evidence_needs: [],
       workflow_hints: [], confidence: { tier: 'low', basis_points: 0 },
+      task_family_corpus_version: TASK_FAMILY_CORPUS_VERSION,
+      requested_autonomy: 'none', outcome: 'unknown', scope: 'unknown',
+      task_family: 'unknown', task_family_candidates: [], workflow_kind: 'unknown',
+      clarification: { needed: true, reason_codes: ['policy_version_mismatch'] },
     };
   }
 
@@ -134,9 +189,16 @@ export function parseSemanticIntent(prompt, { policyVersion } = {}) {
   const subjects = bounded(subjectFamilies.filter(family => findMatches(inputTokens, family).length > 0), SEMANTIC_INTENT_LIMITS.values);
   const operations = bounded(operationFamilies.filter(family => findMatches(inputTokens, family).length > 0), SEMANTIC_INTENT_LIMITS.values);
   const constraints = bounded(findMatches(inputTokens, 'safe'), SEMANTIC_INTENT_LIMITS.values);
-  const evidenceNeeds = findMatches(inputTokens, 'verify').length ? ['verify'] : [];
+  const taskFamilyCandidates = matchTaskFamilies(source).slice(0, SEMANTIC_INTENT_LIMITS.task_family_candidates);
+  const evidenceNeeds = evidenceFor(source, taskFamilyCandidates);
+  const constraintsWithCategories = constraintsFor(inputTokens, source);
   const workflow = inferWorkflow(subjects, operations);
-  const workflowHints = workflow ? [workflow] : [];
+  const broadRequest = taskFamilyCandidates.length > 1;
+  const workflowHints = bounded([
+    ...taskFamilyCandidates,
+    ...(broadRequest ? ['coordinator-workflow'] : []),
+    ...(workflow ? [workflow] : []),
+  ], SEMANTIC_INTENT_LIMITS.workflow_hints);
   const goal = operations.includes('redesign') ? 'redesign'
     : operations.includes('implement') ? 'implement'
       : operations.includes('inspect') ? 'inspect'
@@ -151,25 +213,45 @@ export function parseSemanticIntent(prompt, { policyVersion } = {}) {
     policyDiscussion,
     exampleFraming,
   });
+  const scope = scopeFor(source, taskFamilyCandidates);
+  const clarificationReasons = [];
+  if (taskFamilyCandidates.length > 0 && scope === 'unknown') clarificationReasons.push('missing_factual_scope');
+  if (ownerAuthorityRequested(source)) clarificationReasons.push('owner_authority_required');
+  if (taskFamilyCandidates.length === 0 && !workflow) clarificationReasons.push('missing_outcome');
+  const clarification = {
+    needed: clarificationReasons.length > 0,
+    reason_codes: [...new Set(clarificationReasons)].sort(),
+  };
   const dispatchEligible = base.dispatch_eligible === true
     && ['one-turn', 'persistent'].includes(executionSignal)
-    && !policyDiscussion && !exampleFraming;
+    && !policyDiscussion && !exampleFraming && !clarification.needed;
   const reasonCodes = [];
   if (workflow) reasonCodes.push('workflow_inferred');
   if (matchedTerms.length === 0) reasonCodes.push('no_semantic_signal');
   if (base.disposition !== 'execute') reasonCodes.push(`disposition_${base.disposition}`);
   if (policyDiscussion || exampleFraming) reasonCodes.push('non_authorizing_framing');
+  for (const reason of clarification.reason_codes) reasonCodes.push(`clarification_${reason}`);
+  const taskFamily = broadRequest ? 'coordinator-workflow' : (taskFamilyCandidates[0] || 'unknown');
+  const workflowKind = broadRequest ? 'coordinator' : taskFamilyCandidates.length > 0 ? 'single' : 'unknown';
   return {
     schema_version: 1,
     policy_version: SEMANTIC_INTENT_POLICY_VERSION,
+    task_family_corpus_version: TASK_FAMILY_CORPUS_VERSION,
     disposition: base.disposition,
     authority_class: authority.authority_class,
     dispatch_eligible: dispatchEligible,
     execution_signal: executionSignal,
+    requested_autonomy: requestedAutonomy(authority.authority_class),
+    outcome: broadRequest ? 'coordinate' : (TASK_FAMILY_CORPUS.find(family => family.id === taskFamily)?.outcome || goal),
+    scope,
+    task_family: taskFamily,
+    task_family_candidates: taskFamilyCandidates,
+    workflow_kind: workflowKind,
+    clarification,
     goal,
     subjects,
     operations,
-    constraints,
+    constraints: constraintsWithCategories,
     evidence_needs: evidenceNeeds,
     workflow_hints: workflowHints,
     confidence: confidence({
