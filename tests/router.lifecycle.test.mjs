@@ -161,8 +161,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
     //   (Phase 48 PROD-02: strategy, learning, migration)
     // + 20 = 5 v1.8 semantic/continuity modules × 2 roots × 2 deploy paths
     // + 8 = 2 gate runtime modules deployed to modules/ and src/ × 2 roots
-    // = 331
-    assert.equal(manifest.files.length, 331);
+    // + 4 = 1 task-family corpus module × 2 roots × 2 deploy paths
+    // = 335
+    assert.equal(manifest.files.length, 335);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

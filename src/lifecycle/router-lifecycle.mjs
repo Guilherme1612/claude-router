@@ -394,7 +394,7 @@ export async function installRouter(options) {
     // and codexOwnedRoot via the moduleValues flatMap below (Pitfall 6 backstop).
     'registry/trust.mjs',
     // v1.8 semantic routing and continuity closure, deployed to both runtimes.
-    'intent/classify.mjs', 'intent/semantic.mjs',
+    'intent/classify.mjs', 'intent/semantic.mjs', 'intent/task-family-corpus.mjs',
     'orchestrator/compose.mjs', 'orchestrator/preferences.mjs',
     'steward/continuity.mjs',
     // Phase 42 SEM-01/03: semantic resolver + compilation gate deployed to
