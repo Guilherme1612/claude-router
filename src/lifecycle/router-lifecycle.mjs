@@ -438,6 +438,7 @@ export async function installRouter(options) {
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
     'orchestrator/workflow-plan.mjs',
     'orchestrator/workflow-execution.mjs',
+    'evaluation/v20.mjs',
     'orchestrator/approval.mjs',
     'orchestrator/workflow-declarations.json',
     // Phase 20: evolution/* added to the deployed bundle so the watcher (Wave 2)

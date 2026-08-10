@@ -4,7 +4,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
-import { RELEASE_POLICY_VERSION, reconcileReleaseEvidence } from '../src/release/preflight.mjs';
+import {
+  RELEASE_POLICY_VERSION,
+  reconcileReleaseEvidence,
+  reconcileV20ReleaseEvidence,
+} from '../src/release/preflight.mjs';
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -102,4 +106,55 @@ test('LIFE-02/05: installed module closure includes the activated semantic and c
   const router = readFileSync(join(REPO_ROOT, 'src/runtime/router.mjs'), 'utf8');
   assert.doesNotMatch(router, /from ['"]\.\.\/intent\/semantic\.mjs/);
   assert.doesNotMatch(router, /from ['"]\.\.\/orchestrator\/compose\.mjs/);
+});
+
+function v20Evidence(overrides = {}) {
+  return {
+    coverage_fresh: true,
+    expected_roles_available: true,
+    browser_required: true,
+    browser_runtime_evidence: true,
+    prompt_privacy: true,
+    safety: true,
+    prompt_latency_pass: true,
+    prompt_latency_ms: 12,
+    ...overrides,
+  };
+}
+
+test('EVAL-02: complete v2.0 workflow evidence is independently release-ready', () => {
+  const result = reconcileV20ReleaseEvidence(v20Evidence());
+  assert.equal(result.status, 'ready');
+  assert.equal(result.no_composite_score, true);
+  assert.deepEqual(result.blockers, []);
+});
+
+test('EVAL-02: every stale, unavailable, evidence, privacy, safety, and latency gate remains visible', () => {
+  const result = reconcileV20ReleaseEvidence(v20Evidence({
+    coverage_fresh: false,
+    expected_roles_available: false,
+    browser_runtime_evidence: false,
+    prompt_privacy: false,
+    safety: false,
+    prompt_latency_ms: 101,
+  }));
+  assert.equal(result.status, 'blocked');
+  for (const blocker of [
+    'stale_coverage',
+    'expected_roles_unavailable',
+    'browser_runtime_evidence_missing',
+    'prompt_privacy_regression',
+    'safety_regression',
+    'prompt_latency_regression',
+  ]) assert.ok(result.blockers.includes(blocker), blocker);
+  assert.equal(Object.hasOwn(result, 'score'), false);
+});
+
+test('EVAL-02: browser evidence is required only when the workflow requires browser/runtime verification', () => {
+  const result = reconcileV20ReleaseEvidence(v20Evidence({
+    browser_required: false,
+    browser_runtime_evidence: false,
+  }));
+  assert.equal(result.status, 'ready');
+  assert.deepEqual(result.blockers, []);
 });

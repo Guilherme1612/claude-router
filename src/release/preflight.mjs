@@ -55,3 +55,37 @@ export function reconcileReleaseEvidence(evidence = {}) {
     no_composite_score: true,
   };
 }
+
+export const V20_RELEASE_EVIDENCE_POLICY_VERSION = 'v2.0-release-evidence-v1';
+
+/**
+ * Reconcile workflow-specific release truth independently from the broader
+ * installed-runtime/archive gate. No dimension can be hidden by a score.
+ */
+export function reconcileV20ReleaseEvidence(evidence = {}) {
+  const blockers = [];
+  const dimensions = {
+    coverage: evidence.coverage_fresh === true,
+    availability: evidence.expected_roles_available === true,
+    browser_runtime: evidence.browser_required !== true || evidence.browser_runtime_evidence === true,
+    prompt_privacy: evidence.prompt_privacy === true,
+    safety: evidence.safety === true,
+    latency: evidence.prompt_latency_pass === true
+      && Number.isFinite(evidence.prompt_latency_ms)
+      && evidence.prompt_latency_ms <= 100,
+  };
+  if (!dimensions.coverage) blockers.push('stale_coverage');
+  if (!dimensions.availability) blockers.push('expected_roles_unavailable');
+  if (!dimensions.browser_runtime) blockers.push('browser_runtime_evidence_missing');
+  if (!dimensions.prompt_privacy) blockers.push('prompt_privacy_regression');
+  if (!dimensions.safety) blockers.push('safety_regression');
+  if (!dimensions.latency) blockers.push('prompt_latency_regression');
+  return {
+    schema_version: 1,
+    policy_version: V20_RELEASE_EVIDENCE_POLICY_VERSION,
+    status: blockers.length ? 'blocked' : 'ready',
+    dimensions,
+    blockers: [...new Set(blockers)].sort(),
+    no_composite_score: true,
+  };
+}

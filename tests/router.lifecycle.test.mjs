@@ -164,8 +164,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 4 = 1 task-family corpus module × 2 roots × 2 deploy paths
     // + 4 = 1 bounded workflow coordinator module × 2 roots × 2 deploy paths
     // + 4 = 1 safe workflow execution module × 2 roots × 2 deploy paths
-    // = 343
-    assert.equal(manifest.files.length, 343);
+    // + 4 = 1 v2.0 evaluator module × 2 roots × 2 deploy paths
+    // = 347
+    assert.equal(manifest.files.length, 347);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
