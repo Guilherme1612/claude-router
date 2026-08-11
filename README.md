@@ -102,6 +102,8 @@ The public tree keeps only what is needed to install, operate, and verify the ro
 
 Do not copy individual files out of `src/`; the modules import one another. Clone the repository and run the entry point from its root.
 
+The public branch intentionally excludes .planning/, .claude/, .cline/, and .agents/ (including Excalidraw skills), generated graph or inventory output, release history, and unused evaluation or release modules.
+
 ## Development check
 
 Run the retained verification fixtures serially:
