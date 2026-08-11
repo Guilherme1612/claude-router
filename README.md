@@ -1,57 +1,67 @@
 # Claude Router
 
-Claude Router is a zero-dependency local prompt router for AI coding harnesses such as Claude Code and Codex.
+Claude Router is a local decision layer for AI coding harnesses such as Claude Code and Codex.
+
+Its main goal is simple: for each task, help the harness choose the best available way to do the work.
+
+That can be a command, skill, agent, workflow, or no route at all. The router checks what is really installed, chooses the best fit, and keeps the suggestion small and safe.
 
 ## Why it exists
 
-An AI coding harness can only use the capabilities that are installed and available in its current environment. Skills, commands, agents, hooks, and project configuration change over time. Static routing quickly becomes stale, and guessing a route can be worse than leaving a prompt untouched.
+An AI coding harness often has many commands, skills, and agents to choose from. If it chooses badly, it can:
 
-Claude Router keeps a current local inventory, suggests only routes that resolve to real capabilities, and repairs its routing state when the environment changes.
+- spend tokens looking for the right tool;
+- use a broad agent when a small command would be enough;
+- repeat work or load unnecessary context;
+- use a stale route that no longer exists;
+- waste time before the real task starts.
 
-## What it does
+Claude Router makes that choice earlier and closer to the prompt. It uses the current local environment instead of guessing from an old list.
 
-- Discovers capabilities available to the current harness environment.
-- Keeps Claude Code and Codex routing artifacts separate and runtime-local.
-- Matches prompt intent against the current inventory instead of a hard-coded list.
-- Adds a bounded suggestion through the harness prompt hook when a safe target exists.
-- Watches capability and configuration changes and rebuilds routing state after a debounce.
-- Ties calibration and cached decisions to the current inventory fingerprint.
-- Leaves unsafe, incomplete, stale, or ambiguous candidates inactive.
+## What it helps with
 
-The harness remains in control. Claude Router suggests a route; it does not replace the harness approval flow or silently run the task.
+- **Better choices:** find the command, skill, or agent that best matches the task.
+- **Lower token use:** avoid unnecessary exploration, duplicate routes, and oversized suggestions.
+- **Faster work:** keep the prompt-time decision small and use the narrowest useful route.
+- **Less maintenance:** notice when capabilities change and refresh routing automatically.
+- **Safer behavior:** never suggest a target that is missing, unsafe, stale, or ambiguous.
+- **Graceful fallback:** when there is no good match, let the harness handle the prompt normally.
+
+The router is designed to improve the path to the answer, not to do the answer itself.
 
 ## How it works
 
-The complete flow is:
-
 ```mermaid
 flowchart LR
-    H["AI coding harness<br/>Claude Code / Codex"] --> P["Prompt hook"]
-    P --> I["Current local inventory<br/>skills, commands, agents, tools"]
-    I --> Q{"Safe target exists?"}
-    Q -->|Yes| S["Bounded route suggestion"]
-    Q -->|No| N["Pass through unchanged"]
-    S --> H
-    C["Capability or config change"] --> W["Debounced watcher"]
-    W --> I
+    A["Task prompt"] --> B["Read current capabilities"]
+    B --> C["Compare commands, skills, and agents"]
+    C --> D{"Best fit available?"}
+    D -->|Yes| E["Choose the smallest useful route"]
+    E --> F["Add a bounded suggestion"]
+    F --> G["Harness continues normally"]
+    D -->|No| H["Pass through safely"]
+    I["Environment changes"] --> B
 ```
 
-1. A harness sends a prompt to its normal prompt hook.
-2. The router reads the inventory for that runtime and the relevant project.
-3. The registry resolves possible targets and applies safety and availability checks.
-4. If a valid target exists, the router adds a small, bounded suggestion.
-5. If no valid target exists, the prompt passes through without a fabricated route.
-6. In the background, the watcher notices capability changes, rebuilds the inventory, and reconciles candidates before they become active.
+1. The harness receives a normal prompt.
+2. Claude Router reads the current local inventory for that runtime and project.
+3. It compares the task with available commands, skills, agents, and workflows.
+4. It selects the best useful option, while avoiding unnecessary composition.
+5. It adds a bounded suggestion when the route is safe and real.
+6. If no good route exists, it does nothing and the prompt passes through.
+7. A background watcher refreshes the inventory when the environment changes.
 
-This is local-first software. It uses Node's standard library and needs no package manager, hosted service, database, container, or external control plane.
+Claude Router is local-first. It uses Node's standard library and needs no hosted service, database, container, or external control plane.
 
 ## What it does not do
 
 - It does not install plugins, MCP servers, tools, models, skills, commands, or agents.
-- It does not invent missing capabilities.
-- It does not silently dispatch work.
+- It does not invent capabilities that are not installed.
+- It does not silently run the task.
+- It does not replace the harness approval flow.
 - It does not overwrite unrelated user configuration.
-- It does not activate malformed or untrusted routing candidates.
+
+The harness remains in control. Claude Router improves the choice of approach; the harness still performs the work.
 
 ## Requirements
 
@@ -86,7 +96,7 @@ node install-router.mjs --dry-run
 
 ## Use and lifecycle commands
 
-After installation, use your harness normally. The router hook runs automatically and only adds a suggestion when it can resolve a safe target.
+After installation, use your harness normally. The router runs through the prompt hook.
 
 ```bash
 node install-router.mjs --help
@@ -104,7 +114,7 @@ The default runtime roots are `~/.claude` and `~/.codex`. Advanced path override
 
 - Prompt-time routing is bounded and read-only.
 - Each harness keeps its own runtime-local artifacts.
-- Route targets are existence-checked before they can be suggested.
+- Route targets are checked before they can be suggested.
 - File changes are debounced and reconciled before activation.
 - Invalid, stale, or untrusted candidates remain inactive.
 - Uninstall is ownership-aware and refuses to delete ambiguous state.
