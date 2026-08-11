@@ -1,57 +1,68 @@
 # Claude Router
 
-Claude Router is a zero-dependency local prompt router for Claude Code and Codex.
+Claude Router is a zero-dependency local prompt router for AI coding harnesses such as Claude Code and Codex.
 
-It exists because local skills, commands, agents, and runtime integrations change over time. A stale or guessed route is worse than no route. Claude Router keeps an inventory of what is actually available, resolves prompts against that inventory, and repairs its local routing state when the workspace changes.
+## Why it exists
+
+An AI coding harness can only use the capabilities that are installed and available in its current environment. Skills, commands, agents, hooks, and project configuration change over time. Static routing quickly becomes stale, and guessing a route can be worse than leaving a prompt untouched.
+
+Claude Router keeps a current local inventory, suggests only routes that resolve to real capabilities, and repairs its routing state when the environment changes.
 
 ## What it does
 
-- Discovers local Claude Code and Codex capabilities.
-- Resolves prompts only to targets that exist in the active runtime.
-- Adds bounded route suggestions through the runtime prompt hook.
-- Watches relevant capability and configuration paths.
-- Rebuilds manifests and coverage when those paths change.
-- Keeps calibration tied to the current inventory fingerprint.
-- Quarantines unsafe or incomplete candidates instead of activating them.
+- Discovers capabilities available to the current harness environment.
+- Keeps Claude Code and Codex routing artifacts separate and runtime-local.
+- Matches prompt intent against the current inventory instead of a hard-coded list.
+- Adds a bounded suggestion through the harness prompt hook when a safe target exists.
+- Watches capability and configuration changes and rebuilds routing state after a debounce.
+- Ties calibration and cached decisions to the current inventory fingerprint.
+- Leaves unsafe, incomplete, stale, or ambiguous candidates inactive.
 
-It does not install plugins, MCP servers, tools, or models. It does not silently dispatch work; the runtime keeps its normal approval flow.
+The harness remains in control. Claude Router suggests a route; it does not replace the harness approval flow or silently run the task.
 
 ## How it works
 
-```text
-local Claude/Codex capabilities
-            |
-            v
-inventory manifest + fingerprint
-            |
-            v
-debounced watcher and reconciliation
-            |
-            v
-runtime-local prompt hook
-            |
-            v
-resolve-first route suggestion
+The complete flow is:
+
+```mermaid
+flowchart LR
+    H["AI coding harness<br/>Claude Code / Codex"] --> P["Prompt hook"]
+    P --> I["Current local inventory<br/>skills, commands, agents, tools"]
+    I --> Q{"Safe target exists?"}
+    Q -->|Yes| S["Bounded route suggestion"]
+    Q -->|No| N["Pass through unchanged"]
+    S --> H
+    C["Capability or config change"] --> W["Debounced watcher"]
+    W --> I
 ```
 
-1. The manifest builder scans the configured local capability roots.
-2. The registry builds candidate routes from the current inventory.
-3. The watcher debounces changes and reconciles candidates before activation.
-4. The prompt hook reads runtime-local artifacts and suggests only resolvable targets.
-5. Missing, stale, malformed, or unsafe state fails open or remains inactive.
+1. A harness sends a prompt to its normal prompt hook.
+2. The router reads the inventory for that runtime and the relevant project.
+3. The registry resolves possible targets and applies safety and availability checks.
+4. If a valid target exists, the router adds a small, bounded suggestion.
+5. If no valid target exists, the prompt passes through without a fabricated route.
+6. In the background, the watcher notices capability changes, rebuilds the inventory, and reconciles candidates before they become active.
 
-Everything runs locally with Node's standard library. There is no package manager, hosted service, database, container, or external control plane.
+This is local-first software. It uses Node's standard library and needs no package manager, hosted service, database, container, or external control plane.
+
+## What it does not do
+
+- It does not install plugins, MCP servers, tools, models, skills, commands, or agents.
+- It does not invent missing capabilities.
+- It does not silently dispatch work.
+- It does not overwrite unrelated user configuration.
+- It does not activate malformed or untrusted routing candidates.
 
 ## Requirements
 
 - Node.js with ES module support; a current LTS release is recommended.
-- Claude Code and/or Codex installed locally for live routing.
+- At least one supported AI coding harness installed locally: Claude Code or Codex.
 
 There is no `npm install` step.
 
 ## Install
 
-Clone the repository and run the bundled lifecycle entry point:
+Clone the repository and run the lifecycle entry point:
 
 ```bash
 git clone https://github.com/Guilherme1612/claude-router.git
@@ -59,7 +70,7 @@ cd claude-router
 node install-router.mjs
 ```
 
-The installer is idempotent. It installs or repairs only Claude Router-owned state, hooks, manifests, controller files, and runtime modules. Existing unrelated user configuration is preserved.
+The installer is idempotent. It installs or repairs only Claude Router-owned hooks, runtime modules, manifests, controller state, and related files. Existing unrelated user configuration is preserved.
 
 For a project-specific capability root:
 
@@ -67,7 +78,7 @@ For a project-specific capability root:
 node install-router.mjs --project-root /path/to/project
 ```
 
-Preview changes without writing:
+Preview candidate changes without writing:
 
 ```bash
 node install-router.mjs --dry-run
@@ -75,7 +86,7 @@ node install-router.mjs --dry-run
 
 ## Use and lifecycle commands
 
-After installation, use Claude Code or Codex normally. The prompt hook runs automatically.
+After installation, use your harness normally. The router hook runs automatically and only adds a suggestion when it can resolve a safe target.
 
 ```bash
 node install-router.mjs --help
@@ -87,38 +98,13 @@ node install-router.mjs --uninstall
 - `--restart-controller` restarts the owned watcher after a recoverable controller issue.
 - `--uninstall` removes only files and hook entries proven to be owned by Claude Router. Modified or ambiguous state is retained and reported.
 
-The default install roots are `~/.claude` and `~/.codex`. Advanced path overrides are available through `--claude-root`, `--codex-root`, `--source-router`, `--settings`, `--router`, `--manifest`, and `--node-binary`.
-
-## Repository contents
-
-The public tree keeps only what is needed to install, operate, and verify the router:
-
-- `install-router.mjs`: the install, restart, dry-run, help, and uninstall entry point.
-- `src/`: the lifecycle, watcher, registry, prompt-routing, safety, and runtime modules.
-- `build-manifest.mjs`, `router.calibrate.mjs`, and the calibration/coverage inputs: runtime build and verification support.
-- `mode-map.json`: the bundled cold-start route seed; user-owned runtime maps are not overwritten.
-- `tests/`: the small verification fixtures embedded by the installer for production checks.
-- `README.md`: this operating guide.
-
-Do not copy individual files out of `src/`; the modules import one another. Clone the repository and run the entry point from its root.
-
-The public branch intentionally excludes .planning/, .claude/, .cline/, and .agents/ (including Excalidraw skills), generated graph or inventory output, release history, and unused evaluation or release modules.
-
-## Development check
-
-Run the retained verification fixtures serially:
-
-```bash
-node --test --test-concurrency=1 tests/*.test.mjs
-```
-
-Serial execution avoids controller and temporary-runtime races.
+The default runtime roots are `~/.claude` and `~/.codex`. Advanced path overrides are available through `--claude-root`, `--codex-root`, `--source-router`, `--settings`, `--router`, `--manifest`, and `--node-binary`.
 
 ## Safety model
 
 - Prompt-time routing is bounded and read-only.
-- Claude and Codex artifacts are kept runtime-local.
-- Routes are resolve-first and existence-checked.
+- Each harness keeps its own runtime-local artifacts.
+- Route targets are existence-checked before they can be suggested.
 - File changes are debounced and reconciled before activation.
-- Invalid or untrusted candidates remain quarantined.
+- Invalid, stale, or untrusted candidates remain inactive.
 - Uninstall is ownership-aware and refuses to delete ambiguous state.
