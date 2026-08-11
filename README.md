@@ -94,21 +94,11 @@ Preview candidate changes without writing:
 node install-router.mjs --dry-run
 ```
 
-## Use and lifecycle commands
-
-After installation, use your harness normally. The router runs through the prompt hook.
+To uninstall Claude Router-owned state:
 
 ```bash
-node install-router.mjs --help
-node install-router.mjs --restart-controller
 node install-router.mjs --uninstall
 ```
-
-- `--help` prints all supported options.
-- `--restart-controller` restarts the owned watcher after a recoverable controller issue.
-- `--uninstall` removes only files and hook entries proven to be owned by Claude Router. Modified or ambiguous state is retained and reported.
-
-The default runtime roots are `~/.claude` and `~/.codex`. Advanced path overrides are available through `--claude-root`, `--codex-root`, `--source-router`, `--settings`, `--router`, `--manifest`, and `--node-binary`.
 
 ## Safety model
 
