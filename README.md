@@ -94,11 +94,15 @@ Preview candidate changes without writing:
 node install-router.mjs --dry-run
 ```
 
-To uninstall Claude Router-owned state:
+## Uninstall
+
+From the repository root, run:
 
 ```bash
 node install-router.mjs --uninstall
 ```
+
+The installer removes only files, hooks, and state that Claude Router can prove it owns. Modified or ambiguous files are kept and reported. Claude Code, Codex, and your installed capabilities are not removed.
 
 ## Safety model
 
