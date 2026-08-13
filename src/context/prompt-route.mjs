@@ -3,6 +3,7 @@ import { normalizeContextInstruction, resolveContextAction } from './resolve.mjs
 import { assembleRefreshEvidence, collectAuthoritativeSnapshot } from './sources.mjs';
 import { loadCompiledIndex } from '../prompt/compile-index.mjs';
 import { loadStartupPointer } from '../steward/startup-pointer.mjs';
+import { buildContinuityBriefing } from './continuity.mjs';
 
 const MAX_CONTEXT_BYTES = 2048;
 const SUGGESTION_NOTICE = 'Router suggestion available — inspect with /router suggestion';
@@ -98,9 +99,30 @@ export function appendStartupNotice(result, pointer) {
     : { ...result, startup_notice_emitted: false };
 }
 
+function appendContinuity(result, { event, capsule, projectRoot, route, budget, explicitOverride, authoritative } = {}) {
+  if (!['SessionStart', 'Stop', 'UserPromptSubmit'].includes(event)) return result;
+  const trusted = !authoritative && ['SessionStart', 'Stop'].includes(event) && capsule && typeof projectRoot === 'string'
+    ? authoritativeEvidence(capsule, projectRoot)
+    : authoritative;
+  const evidence = trusted || (capsule ? {
+    status: capsule.freshness?.generation ? 'fresh' : 'unresolved',
+    value: capsule.freshness?.generation ? {
+      workflow: capsule.position?.workflow,
+      phase: capsule.position?.phase,
+      plan: capsule.position?.plan,
+      task: capsule.position?.task,
+      status: capsule.status,
+      blockers: capsule.blockers,
+    } : {},
+  } : { status: 'unresolved' });
+  const briefing = buildContinuityBriefing({ event, evidence, route, budget, explicitOverride });
+  const additional_context = result.additional_context ? `${result.additional_context}\n${briefing}` : briefing;
+  return { ...result, additional_context };
+}
+
 export function routeContextPrompt({
   prompt, ownedRoot, projectRoot, forceStale = false, authoritative,
-  now = Date.now(), compiledFs,
+  now = Date.now(), compiledFs, hookEventName = null, routingMode,
 } = {}) {
   const instruction = parseInstruction(prompt);
   if (instruction.kind === 'none') {
@@ -111,7 +133,19 @@ export function routeContextPrompt({
     const suggestion = tuple.prompt_projection === true
       ? tuple.suggestionReference
       : loadStartupPointer({ ownedRoot, now });
-    return appendStartupNotice({ handled: false, reason_code: 'instruction_not_contextual' }, suggestion);
+    const loaded = (hookEventName === 'SessionStart' || hookEventName === 'Stop' || suggestion?.available)
+      ? loadCapsule({ ownedRoot }).capsule
+      : null;
+    const base = appendStartupNotice({ handled: false, reason_code: 'instruction_not_contextual' }, suggestion);
+    return appendContinuity(base, {
+      event: hookEventName,
+      capsule: loaded,
+      projectRoot,
+      route: routingMode || 'adaptive',
+      budget: tuple.budget,
+      explicitOverride: ['direct', 'pass_through'].includes(routingMode) ? 'honored' : 'available',
+      authoritative,
+    });
   }
   if (typeof ownedRoot !== 'string' || typeof projectRoot !== 'string') return { handled: false, reason_code: 'context_roots_missing' };
   const loaded = loadCapsule({ ownedRoot });

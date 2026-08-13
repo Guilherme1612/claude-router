@@ -21,6 +21,115 @@ function canonicalIds(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter(validId))].sort();
 }
 
+function list(value) {
+  return typeof value === 'string' ? [value] : Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
+}
+
+function scopeKey(value) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'object') return String(value);
+  return Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => `${key}=${scopeKey(item)}`).join('&');
+}
+
+function scopeMatches(candidate, requested) {
+  if (requested === undefined || requested === null || requested === '') return true;
+  return scopeKey(candidate?.scope) === scopeKey(requested);
+}
+
+function latencyValue(candidate) {
+  const value = candidate?.cost?.latency_ms ?? candidate?.latency_ms;
+  if (Number.isFinite(value)) return value;
+  return ({ low: 1, medium: 2, high: 3, unknown: 4 })[candidate?.cost?.value] ?? 4;
+}
+
+function verifiedEvidence(candidate) {
+  return candidate?.evidence?.verified === true
+    || candidate?.evidence?.strength === 'verified'
+    || Number(candidate?.evidence?.verified_count) > 0;
+}
+
+function candidateId(candidate) {
+  return String(candidate?.stable_id || candidate?.canonical_id || '');
+}
+
+function compareSelection(left, right, { runtime, scope, roles } = {}) {
+  const leftRoles = new Set(list(left?.roles).concat(list(left?.workflow_coverage?.covered_roles)));
+  const rightRoles = new Set(list(right?.roles).concat(list(right?.workflow_coverage?.covered_roles)));
+  const leftTuple = [
+    runtime ? left?.runtime === runtime : true,
+    scopeMatches(left, scope),
+    left?.availability?.available === true,
+    left?.eligibility?.eligible === true,
+    left?.dispatchable === true,
+    roles.filter(role => leftRoles.has(role)).length,
+    verifiedEvidence(left),
+    -latencyValue(left),
+  ];
+  const rightTuple = [
+    runtime ? right?.runtime === runtime : true,
+    scopeMatches(right, scope),
+    right?.availability?.available === true,
+    right?.eligibility?.eligible === true,
+    right?.dispatchable === true,
+    roles.filter(role => rightRoles.has(role)).length,
+    verifiedEvidence(right),
+    -latencyValue(right),
+  ];
+  for (let index = 0; index < leftTuple.length; index += 1) {
+    if (leftTuple[index] === rightTuple[index]) continue;
+    if (typeof leftTuple[index] === 'boolean') return leftTuple[index] ? -1 : 1;
+    return rightTuple[index] - leftTuple[index];
+  }
+  return candidateId(left).localeCompare(candidateId(right));
+}
+
+/** Rank bounded candidates by independent gates; never collapse them into an authority score. */
+export function rankSelectionCandidates({
+  candidates = [], explicitCapability, runtime, scope, requiredRoles = [],
+  mode, maxCandidates = 16, maxContextBytes = 12_288,
+} = {}) {
+  const source = Array.isArray(candidates) ? candidates : [];
+  const bounded = source.slice(0, Number.isSafeInteger(maxCandidates) && maxCandidates > 0 ? maxCandidates : 16);
+  const omitted_candidate_count = Math.max(0, source.length - bounded.length);
+  const base = {
+    schema_version: 1,
+    status: 'unresolved',
+    dispatch_eligible: false,
+    selected: null,
+    candidates: bounded,
+    omitted_candidate_count,
+    selection_order: ['explicit', 'runtime', 'scope', 'availability', 'eligibility', 'dispatchability', 'role_fit', 'verified_evidence', 'latency', 'stable_identity'],
+    budget: { max_candidates: bounded.length, max_context_bytes: maxContextBytes },
+  };
+  if (mode === 'direct' || mode === 'pass_through') {
+    return { ...base, status: 'bypassed', reason_codes: [`${mode}_mode_bypass`], candidates: [] };
+  }
+  const roles = list(requiredRoles);
+  if (explicitCapability !== undefined) {
+    const explicit = bounded.find(candidate => candidateId(candidate) === String(explicitCapability));
+    if (!explicit) return { ...base, reason_codes: ['explicit_capability_unknown'] };
+    if (explicit?.availability?.available !== true) return { ...base, reason_codes: ['explicit_capability_unavailable'] };
+    if (explicit?.eligibility?.eligible !== true) return { ...base, reason_codes: ['explicit_capability_ineligible'] };
+    if (explicit?.dispatchable !== true) return { ...base, reason_codes: ['explicit_capability_not_dispatchable'] };
+    return { ...base, status: 'resolved', dispatch_eligible: true, selected: explicit, reason_codes: ['explicit_capability_selected'] };
+  }
+  const ranked = [...bounded].sort((left, right) => compareSelection(left, right, { runtime, scope, roles }));
+  const selected = ranked.find(candidate => (
+    candidate?.availability?.available === true
+    && candidate?.eligibility?.eligible === true
+    && candidate?.dispatchable === true
+  )) || null;
+  return {
+    ...base,
+    status: selected ? 'resolved' : 'unresolved',
+    dispatch_eligible: !!selected,
+    selected,
+    candidates: ranked,
+    reason_codes: selected ? ['adaptive_candidate_selected'] : ['no_dispatchable_candidate'],
+  };
+}
+
 function recordId(record) {
   if (validId(record?.id)) return record.id;
   if (validId(record?.canonical_identity)) return record.canonical_identity;

@@ -1,5 +1,6 @@
 import { stableCapabilityId } from '../registry/identity.mjs';
 import { retrieveSemanticCandidates } from '../registry/semantic.mjs';
+import { rankSelectionCandidates } from './select.mjs';
 import { applyPreferences } from './preferences.mjs';
 
 export const COMPOSITION_POLICY_VERSION = 'composition-policy-v1';
@@ -119,7 +120,7 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
   };
 }
 
-export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, now } = {}) {
+export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, explicitCapability, now } = {}) {
   let retrieval = retrieveSemanticCandidates({ intent, records, workflows });
   const preferenceList = Array.isArray(preferences) ? preferences : [];
   if (retrieval.status === 'ambiguous' && preferenceList.length) {
@@ -150,14 +151,23 @@ export function resolveSemanticRoute({ intent, records = [], workflows, runtime,
   if (retrieval.status !== 'resolved') return { status: retrieval.status, dispatch_eligible: false, reason_code: retrieval.reason_codes?.[0] || 'semantic_retrieval_blocked', retrieval };
   const workflow = (workflows || []).find(item => item.workflow_id === retrieval.workflow_id)
     || { workflow_id: retrieval.workflow_id, roles: retrieval.selected.workflow_coverage.required_roles };
+  const selection = rankSelectionCandidates({
+    candidates: retrieval.candidates.filter(candidate => candidate.workflow_id === retrieval.workflow_id),
+    explicitCapability,
+    runtime,
+    scope: preferenceScope,
+    requiredRoles: workflow.roles,
+    maxCandidates: limits?.max_candidates,
+    maxContextBytes: limits?.max_context_bytes,
+  });
   const composition = composeCapabilities({
     workflow,
-    candidates: retrieval.candidates.filter(candidate => candidate.workflow_id === retrieval.workflow_id),
+    candidates: selection.candidates,
     records,
     runtime,
     limits,
   });
-  return { status: composition.status, dispatch_eligible: composition.dispatch_eligible, reason_code: composition.reason_code, retrieval, composition };
+  return { status: composition.status, dispatch_eligible: composition.dispatch_eligible, reason_code: composition.reason_code, retrieval, selection, composition };
 }
 
 /**

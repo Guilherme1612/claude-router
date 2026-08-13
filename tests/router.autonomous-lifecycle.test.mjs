@@ -19,14 +19,14 @@ function artifact(name, command = name, dependencies = []) {
   return `${JSON.stringify({ schema_version: 1, name, canonical_identity: `router/${name}`, command, mapping: { explicit_subjects: [name] }, dependencies })}\n`;
 }
 
-async function waitUntil(predicate, timeoutMs = 5_000) {
+async function waitUntil(predicate, timeoutMs = 5_000, diagnostic = () => '') {
   const deadline = Date.now() + timeoutMs;
   do {
     const value = predicate();
     if (value) return value;
     await new Promise(resolve => setTimeout(resolve, 25));
   } while (Date.now() <= deadline);
-  assert.fail(`controller did not publish within ${timeoutMs}ms`);
+  assert.fail(`controller did not publish within ${timeoutMs}ms${diagnostic()}`);
 }
 
 function tupleId(root) {
@@ -74,6 +74,11 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
     options.contractOverlays = contractOverlays;
 
     const installed = await installRouter(options);
+    // The active tuple can be visible just before the in-process launcher settles
+    // its startup promise. Wait for the real watcher seam before sending the next
+    // filesystem event, otherwise the first mutation can be lost during startup.
+    await holder.ready;
+    await new Promise(resolve => setTimeout(resolve, 50));
     // Wait for the installed controller to publish the initial tuple (alpha seeded above).
     const initialTuple = await waitUntil(() => tupleId(ownedRoot));
     // Save a capsule so routeContextPrompt('continue') resolves to workflow 'alpha' and reads
@@ -91,6 +96,11 @@ for (const runtime of ['claude', 'codex']) test(`${runtime} installed controller
       const candidateBytes = await waitUntil(() => {
         const value = readFileSync(installed.candidatePath, 'utf8');
         return value !== previousCandidate ? value : null;
+      }, 5_000, () => {
+        try {
+          const status = JSON.parse(readFileSync(installed.controllerStatusPath, 'utf8'));
+          return `: ${JSON.stringify({ state: status.state, watcher: status.watcher, reconciliation: status.reconciliation, error: status.error })}`;
+        } catch { return ''; }
       });
       const candidate = JSON.parse(candidateBytes);
 

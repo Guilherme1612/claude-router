@@ -49,6 +49,8 @@ export function safeFixtureContractOverlays({
         runtime: record.invocation.runtime || record.runtime_variants[0].runtime,
       },
       fields: {
+        authority: { value: 'one-turn' },
+        side_effects: { value: ['none'] },
         reversibility: { value: 'reversible' },
         risk: { value: 'low' },
       },

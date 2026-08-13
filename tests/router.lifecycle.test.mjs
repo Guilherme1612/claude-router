@@ -19,6 +19,7 @@ function fixture({ withSettings = true, trackControllers = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'router-lifecycle-'));
   const claudeRoot = join(root, '.claude');
   const codexRoot = join(root, '.codex');
+  const stateRoot = join(root, 'neutral-state');
   const sourceRouter = join(root, 'source-router.mjs');
   const settingsPath = join(claudeRoot, 'settings.json');
   const routerPath = join(claudeRoot, 'hooks', 'router.mjs');
@@ -42,7 +43,7 @@ function fixture({ withSettings = true, trackControllers = false } = {}) {
     };
   }
   return {
-    root, settingsPath, routerPath, manifestPath, controllerChildren, options,
+    root, settingsPath, routerPath, manifestPath, stateRoot, controllerChildren, options,
   };
 }
 
@@ -164,9 +165,12 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 4 = 1 task-family corpus module × 2 roots × 2 deploy paths
     // + 4 = 1 bounded workflow coordinator module × 2 roots × 2 deploy paths
     // + 4 = 1 safe workflow execution module × 2 roots × 2 deploy paths
+    // + 4 = 1 bounded autonomy gate/explainability module × 2 roots × 2 deploy paths
     // + 4 = 1 v2.0 evaluator module × 2 roots × 2 deploy paths
-    // = 347
-    assert.equal(manifest.files.length, 347);
+    // + 4 = 1 private local observer module × 2 roots × 2 deploy paths
+    // + 8 = 2 new v2.2 modules (local mapping + continuity) × 2 roots × 2 deploy paths
+    // = 363
+    assert.equal(manifest.files.length, 363);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));
@@ -428,10 +432,7 @@ function runCli(f, ...extra) {
     INSTALLER,
     '--claude-root', f.options.claudeRoot,
     '--codex-root', f.options.codexRoot,
-    '--source-router', f.options.sourceRouter,
-    '--settings', f.settingsPath,
-    '--router', f.routerPath,
-    '--manifest', f.manifestPath,
+    '--state-root', f.stateRoot,
     '--node-binary', process.execPath,
     ...extra,
   ], { encoding: 'utf8' });
@@ -445,7 +446,7 @@ test('CLI provides symmetric install and uninstall lifecycle', async () => {
     assert.match(install.stdout, /INSTALL OK/);
     const reinstall = runCli(f);
     assert.equal(reinstall.status, 0, reinstall.stderr);
-    assert.match(reinstall.stdout, /ALREADY INSTALLED/);
+    assert.match(reinstall.stdout, /INSTALL OK/);
     const uninstall = runCli(f, '--uninstall');
     assert.equal(uninstall.status, 0, uninstall.stderr);
     assert.match(uninstall.stdout, /UNINSTALL OK/);
@@ -595,7 +596,7 @@ test('prompt hook source has no watcher, scan, or registry build work', async ()
 test('CLI help leads with one-command install and uninstall', async () => {
   const result = spawnSync(process.execPath, [INSTALLER, '--help'], { encoding: 'utf8' });
   assert.equal(result.status, 0);
-  assert.match(result.stdout, /node install-router\.mjs\s+# install/);
+  assert.match(result.stdout, /node install-router\.mjs\s+--state-root/);
   assert.match(result.stdout, /node install-router\.mjs --uninstall/);
 });
 

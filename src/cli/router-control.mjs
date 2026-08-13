@@ -20,6 +20,7 @@ import { loadStewardObservations, refreshSuggestionPointer } from '../steward/re
 import { createLeaseStore } from '../lease/store.mjs';
 import { buildLeaseRecord } from '../lease/policy.mjs';
 import { computeLeaseFingerprint } from '../lease/identity.mjs';
+import { explainAutonomy, prepareAutonomousExecution } from '../orchestrator/autonomy.mjs';
 
 const VERSION_ID = /^v1-[a-f0-9]{16}$/;
 const MAX_VALUE = 256;
@@ -36,7 +37,7 @@ const INVENTORY_SUMMARY_FIELDS = [
 const INVENTORY_RECORD_FIELDS = [
   'stable_id', 'logical_root', 'relative_path', 'runtime', 'scope', 'native_type',
   'semantic_type', 'enabled', 'dispatchable', 'lifecycle_role', 'invocation',
-  'fingerprint', 'adapter_version', 'parser_version', 'required_dependencies',
+  'availability', 'eligible', 'quarantine', 'fingerprint', 'adapter_version', 'parser_version', 'required_dependencies',
   'container_id', 'member_ids', 'identity_continuity', 'diagnostics',
 ];
 const CONTRACT_DETAIL_FIELDS = [
@@ -263,6 +264,13 @@ export function inventoryRecordProjection(record) {
   const memberIds = Array.isArray(record.member_ids)
     ? record.member_ids.map(value => safeToken(value)).sort()
     : [];
+  const availability = record?.invocation?.availability === 'available' && dispatchable ? 'available' : 'unavailable';
+  const quarantine = [
+    ...(Array.isArray(record.eligibility?.quarantine_reasons) ? record.eligibility.quarantine_reasons : []),
+    ...(Array.isArray(record.eligibility?.reason_codes)
+      ? record.eligibility.reason_codes.filter(reason => reason !== 'eligibility_all_gates_passed') : []),
+    ...(dispatchable ? [] : ['target_not_dispatchable']),
+  ];
   return {
     stable_id: safeToken(record.stable_id || record.id || record.name),
     logical_root: safeToken(provenance?.logical_root || record.logical_root),
@@ -273,6 +281,9 @@ export function inventoryRecordProjection(record) {
     semantic_type: semanticType,
     enabled,
     dispatchable,
+    availability,
+    eligible: record?.eligibility ? record.eligibility.eligible === true : dispatchable,
+    quarantine: [...new Set(quarantine)].map(value => safeToken(value)).sort(),
     lifecycle_role: safeToken(record.lifecycle_role || record.lifecycle, 'opaque'),
     invocation: invocationOf(record, dispatchable),
     fingerprint: safeFingerprint(provenance?.source_fingerprint || record.fingerprint),
@@ -284,6 +295,35 @@ export function inventoryRecordProjection(record) {
     identity_continuity: identityContinuityOf(record),
     diagnostics: safeDiagnostics(record.diagnostics),
   };
+}
+
+export function semanticActivationProjection({
+  semanticRecords, semanticRecordsByRuntime, activation, runtimes = ['claude', 'codex'],
+} = {}) {
+  const result = {};
+  for (const runtime of runtimes) {
+    if (activation?.[runtime]) {
+      result[runtime] = {
+        status: safeToken(activation[runtime].status, 'inactive'),
+        reason_code: safeToken(activation[runtime].reason_code, null),
+        record_count: Number.isSafeInteger(activation[runtime].record_count)
+          ? activation[runtime].record_count : 0,
+      };
+      continue;
+    }
+    const supplied = semanticRecordsByRuntime && Object.hasOwn(semanticRecordsByRuntime, runtime)
+      ? semanticRecordsByRuntime[runtime]
+      : Array.isArray(semanticRecords)
+        ? semanticRecords.filter(record => (record?.runtime || record?.provenance?.[0]?.runtime) === runtime)
+        : null;
+    const records = Array.isArray(supplied) ? supplied : null;
+    result[runtime] = {
+      status: records === null ? 'inactive' : records.length ? 'active' : 'safe_empty',
+      reason_code: records === null ? 'semantic_records_missing' : records.length ? null : 'semantic_records_empty',
+      record_count: records?.length || 0,
+    };
+  }
+  return result;
 }
 
 function inventorySort(left, right) {
@@ -316,7 +356,10 @@ function operationalProjection(state, recordCount, diagnostics = []) {
   };
 }
 
-export function inventorySummaryProjection({ records = [], state, diagnostics = [], limit = MAX_DIFF, offset = 0 } = {}) {
+export function inventorySummaryProjection({
+  records = [], state, diagnostics = [], semanticRecords, semanticRecordsByRuntime, semanticActivation,
+  limit = MAX_DIFF, offset = 0,
+} = {}) {
   const projected = records.map(inventoryRecordProjection).sort(inventorySort);
   const bounded = boundedResult(projected, { limit, offset });
   return {
@@ -328,11 +371,15 @@ export function inventorySummaryProjection({ records = [], state, diagnostics = 
     offset: bounded.meta.offset,
     next_offset: bounded.meta.next_offset,
     records: bounded.values,
+    semantic_activation: semanticActivationProjection({
+      semanticRecords, semanticRecordsByRuntime, activation: semanticActivation,
+    }),
   };
 }
 
 export function inventoryAvailabilityProjection({
-  records = [], semanticType = null, runtime = null, scope = null, limit = MAX_DIFF, offset = 0,
+  records = [], semanticType = null, runtime = null, scope = null,
+  semanticRecords, semanticRecordsByRuntime, semanticActivation, limit = MAX_DIFF, offset = 0,
 } = {}) {
   const projected = records.map(inventoryRecordProjection).sort(inventorySort).filter(record => (
     (!semanticType || record.semantic_type === semanticType)
@@ -362,6 +409,9 @@ export function inventoryAvailabilityProjection({
     limit: bounded.meta.limit,
     offset: bounded.meta.offset,
     next_offset: bounded.meta.next_offset,
+    semantic_activation: semanticActivationProjection({
+      semanticRecords, semanticRecordsByRuntime, activation: semanticActivation,
+    }),
   };
 }
 
@@ -598,7 +648,7 @@ function parse(argv) {
   for (let index = 0; index < args.length; index += 1) {
     const value = args[index];
     if (value.length > 4096) throw new TypeError('argument_too_long');
-    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope' || value === '--until' || value === '--proposal-json' || value === '--approval' || value === '--goal' || value === '--project-fingerprint' || value === '--repo' || value === '--worktree' || value === '--expiry-ms') {
+    if (value === '--format' || value === '--owned-root' || value === '--confirm' || value === '--project-root' || value === '--instruction-json' || value === '--refresh-json' || value === '--decision-json' || value === '--limit' || value === '--offset' || value === '--id' || value === '--semantic-type' || value === '--runtime' || value === '--scope' || value === '--until' || value === '--proposal-json' || value === '--approval' || value === '--goal' || value === '--project-fingerprint' || value === '--repo' || value === '--worktree' || value === '--expiry-ms') {
       const next = args[++index];
       if (!next || next.length > 4096) throw new TypeError('missing_option_value');
       options[value.slice(2).replace('-', '_')] = next;
@@ -706,7 +756,7 @@ export function renderSuggestionText(result) {
 }
 
 function usage() {
-  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover|leases inspect|show <id>|revoke <id>|create --goal <label> --project-fingerprint <fp>> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
+  return 'Usage: router-control <status|diff|explain|inventory|contract [relationships]|autonomy explain --decision-json json|suggestion [dismiss|snooze|correct|draft]|registry verify|recover|rollback|context status|refresh|resolve|why-next|canary status|promote|rollback|health inspect|reset|dispose|recover|leases inspect|show <id>|revoke <id>|create --goal <label> --project-fingerprint <fp>> [--format text|json] [--owned-root path] [--execute --confirm version]\nNote: router doctor reports router plumbing health; router health reports capability health.\n';
 }
 
 function parseJsonOption(value, fallback) {
@@ -976,6 +1026,10 @@ function inventoryCommand({ root, active, options, dependencies, authorityVersio
         semanticType: options.semantic_type,
         runtime: options.runtime,
         scope: options.scope,
+        semanticRecords: version.manifest?.semantic_records,
+        semanticRecordsByRuntime: version.manifest?.semantic_records_by_runtime
+          || version.registry?.semantic_records_by_runtime,
+        semanticActivation: version.registry?.semantic_activation,
         limit,
         offset,
       });
@@ -989,7 +1043,17 @@ function inventoryCommand({ root, active, options, dependencies, authorityVersio
       };
     }
 
-    const summary = inventorySummaryProjection({ records, state, diagnostics, limit, offset });
+    const summary = inventorySummaryProjection({
+      records,
+      state,
+      diagnostics,
+      semanticRecords: version.manifest?.semantic_records,
+      semanticRecordsByRuntime: version.manifest?.semantic_records_by_runtime
+        || version.registry?.semantic_records_by_runtime,
+      semanticActivation: version.registry?.semantic_activation,
+      limit,
+      offset,
+    });
     return {
       result: canonical(
         'inventory',
@@ -1289,6 +1353,16 @@ export function runRouterControl({ argv = [], stdin = '', defaultOwnedRoot, depe
   if (command === 'context') {
     if (positional.length !== 2) return { result: canonical('context', false, 'invalid_arguments'), exitCode: EXIT.usage };
     return runContextCommand({ subcommand: positional[1], root, options });
+  }
+  if (command === 'autonomy') {
+    if (positional.length !== 2 || positional[1] !== 'explain') {
+      return { result: canonical('autonomy explain', false, 'invalid_arguments', { usage: usage().trim() }), exitCode: EXIT.usage };
+    }
+    const decision = parseJsonOption(options.decision_json, null);
+    if (!decision) return { result: canonical('autonomy explain', false, 'invalid_decision_json'), exitCode: EXIT.usage };
+    const prepared = Array.isArray(decision.gates) && typeof decision.status === 'string'
+      ? decision : prepareAutonomousExecution(decision);
+    return { result: canonical('autonomy explain', true, 'explanation_ready', explainAutonomy({ decision: prepared, input: decision })), exitCode: EXIT.success };
   }
   if (command === 'leases') {
     return leasesCommand({ root, positional, options });

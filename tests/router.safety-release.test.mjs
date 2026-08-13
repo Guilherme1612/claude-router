@@ -172,25 +172,15 @@ test('SAF-01/SAF-07: live hook source has no blocking exit or block decision', (
   assert.equal(/decision["']?\s*:\s*["']block["']/.test(src), false, 'hot path must never emit decision:block');
 });
 
-test('SAF-05/SAF-07: live settings and authoritative routes preserve coexistence surfaces', () => {
-  const settings = JSON.parse(readFileSync(LIVE_SETTINGS, 'utf8'));
-  const groups = settings?.hooks?.UserPromptSubmit;
-  assert.ok(Array.isArray(groups), 'live UserPromptSubmit groups must remain registered');
-  const commands = groups.flatMap((group) => group?.hooks || []).map((hook) => hook?.command || '');
-  assert.ok(commands.some((command) => command.includes(HOOK)), 'router command must point at the live router hook');
-
-  const allHookCommands = Object.values(settings?.hooks || {})
-    .flatMap((eventGroups) => Array.isArray(eventGroups) ? eventGroups : [])
-    .flatMap((group) => group?.hooks || [])
-    .map((hook) => hook?.command || '');
-  assert.ok(allHookCommands.some((command) => /gsd-/.test(command)), 'GSD hook entries must remain present');
-  assert.equal(settings?.enabledPlugins?.['context-mode@context-mode'], true, 'context-mode must remain enabled');
-  assert.equal(settings?.enabledPlugins?.['caveman@caveman'], true, 'caveman must remain enabled');
-  const routesRun = spawnSync(NODE, [HOOK, 'routes', '--json'], { encoding: 'utf8' });
-  assert.equal(routesRun.status, 0, routesRun.stderr || routesRun.stdout);
-  const ralph = JSON.parse(routesRun.stdout).routes?.find(route => route.id === 'ralph-loop');
-  assert.equal(ralph?.invoke_kind, 'slash', 'ralph-loop must remain an authoritative slash capability');
-  assert.equal(ralph?.target_health?.status, 'ok', 'ralph-loop capability must remain routeable');
+test('SAF-05/SAF-07: public lifecycle is neutral and has no personal-runtime fallback', () => {
+  const installer = readFileSync(fileURLToPath(new URL('../install-router.mjs', import.meta.url)), 'utf8');
+  const neutralHook = readFileSync(fileURLToPath(new URL('../src/runtime/neutral-router.mjs', import.meta.url)), 'utf8');
+  const neutralLifecycle = readFileSync(fileURLToPath(new URL('../src/lifecycle/neutral-lifecycle.mjs', import.meta.url)), 'utf8');
+  assert.doesNotMatch(installer, /homedir\(|~\/\.claude|~\/\.codex/);
+  assert.doesNotMatch(neutralHook, /GSD|Superpowers|graphify|homedir\(|~\/\.claude|~\/\.codex/);
+  assert.doesNotMatch(neutralLifecycle, /GSD|Superpowers|graphify|homedir\(|~\/\.claude|~\/\.codex/);
+  assert.match(installer, /--state-root/);
+  assert.match(neutralLifecycle, /explicit neutral state root/);
 });
 
 test('SAF-05/SAF-07: doctor recognizes the live registered router hook', () => {

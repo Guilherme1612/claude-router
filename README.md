@@ -1,112 +1,95 @@
 # Claude Router
 
-Claude Router is a zero-dependency, dual-runtime prompt router for Claude Code and Codex. It keeps local capabilities discoverable, routes prompts to capabilities that actually exist, and continuously repairs its local routing state as the workspace changes.
+Claude Router is a zero-dependency, autonomous local routing layer for Claude Code and Codex. It discovers and maps available local capabilities—hooks, commands, agents, skills, tools, and integrations—and only resolves targets that are valid in the active runtime.
+
+The focus is practical autonomy: less prompt overhead, lower token use, fast routing, better workflow selection, and reliable continuity across session start, stop, compaction, and restart. It is intended for anyone using Claude Code or Codex, from users who describe an outcome in plain language to experts who want to inspect or override a route.
 
 ## What it does
 
-- Builds an inventory of locally available skills, commands, agents, and runtime integrations.
-- Resolves intent to current Claude Code or Codex targets instead of guessing at missing capabilities.
-- Injects bounded route suggestions through the runtime hook at prompt time.
-- Watches relevant configuration and capability directories, then refreshes manifests and coverage after changes.
-- Keeps caches and adaptive calibration tied to the current inventory fingerprint.
-- Exposes lifecycle and diagnostic commands for status, coverage, health, and reconciliation.
+- Keeps Claude and Codex runtime capabilities separate and locally grounded.
+- Maps available capabilities instead of assuming a particular framework or plugin set.
+- Resolves only current, enabled, locally valid targets.
+- Preserves continuity with compact lifecycle status and bounded evidence.
+- Supports bounded autonomous work with explicit authority, target, receipt, verification, and release gates.
+- Keeps prompt-time behavior deterministic, fast, privacy-safe, and fail-open.
 
-Claude Router does not install missing plugins, MCP servers, tools, or models, and it does not silently dispatch work without the runtime's normal approval flow.
-
-## How it works
-
-```text
-Claude Code / Codex configuration and skills
-                    |
-                    v
-        inventory manifest + fingerprint
-                    |
-                    v
-       debounced watcher and reconciliation
-                    |
-                    v
-          runtime-local prompt-time hook
-                    |
-                    v
-          bounded, resolve-first suggestion
-```
-
-1. The manifest builder scans the configured local capability roots and writes a deterministic inventory plus a coverage report.
-2. The prompt hook reads the active runtime's local artifacts and resolves only targets present in that runtime.
-3. The watcher debounces file changes, rebuilds the relevant artifacts, and reconciles candidate state before it becomes active.
-4. Calibration is epoch-gated by the inventory fingerprint, so stale routing data falls back to safe defaults.
-5. Unsafe, malformed, or incomplete candidates remain quarantined or inactive; prompt-time routing can fail open.
-
-The design is local-first: it needs no package manager, hosted service, database, container, or external control plane to run.
-
-## Requirements
-
-- Node.js with ES module support (a current LTS release is recommended).
-- Claude Code and/or Codex installed locally for live routing.
-
-There is no `npm install` step. The project uses Node's standard library and the bundled lifecycle command.
+It does not silently install missing plugins, MCP servers, tools, models, or frameworks. It does not execute a guessed target. Missing, malformed, or unavailable capabilities remain inactive, quarantined, or recommendation-only until the owner supplies valid local state.
 
 ## Install
 
-Clone the repository and run the installer:
+Requirements: Node.js 20+ and at least one installed Claude Code or Codex runtime. There is no `npm install` step; the project uses Node's standard library.
+
+Clone the repository and provide the runtime roots plus an external neutral state root:
 
 ```bash
 git clone https://github.com/Guilherme1612/claude-router.git
 cd claude-router
-node install-router.mjs
+
+node install-router.mjs \
+  --claude-root /path/to/claude-runtime \
+  --codex-root /path/to/codex-runtime \
+  --state-root /path/to/router-state
 ```
 
-The installer is idempotent. It installs or safely repairs the owned Claude and Codex router state, hooks, manifests, and controller. Unrelated user configuration is left alone.
+Use only the runtime root that exists. The state root must be explicit, outside this repository and the runtime roots, and must not be named `.router`.
 
-For a project-specific capability root:
+Equivalent environment variables are `CLAUDE_CONFIG_ROOT`, `CODEX_CONFIG_ROOT`, and `ROUTER_STATE_ROOT`.
+
+Preview without writing:
 
 ```bash
-node install-router.mjs --project-root /path/to/project
+node install-router.mjs --dry-run \
+  --claude-root /path/to/claude-runtime \
+  --state-root /path/to/router-state
 ```
 
-Preview candidate changes without writing anything:
+Remove only Router-owned bindings and files:
 
 ```bash
-node install-router.mjs --dry-run
+node install-router.mjs --uninstall \
+  --claude-root /path/to/claude-runtime \
+  --codex-root /path/to/codex-runtime \
+  --state-root /path/to/router-state
 ```
 
-## Use
+## Runtime behavior
 
-After installation, use Claude Code or Codex normally. The hook runs at prompt time and can suggest the locally available capability that best matches the request. For example:
+The default route is safe pass-through. `UserPromptSubmit` remains untouched unless the owner has supplied an explicit neutral capability manifest. `SessionStart`, `Stop`, and `PreCompact` can receive a short status containing what is done, current, blocked, next, route, and owner action.
 
-```text
-Continue with the current task.
-/gsd-plan-phase 37.1
-Finish the implementation and verify it.
+For explicit neutral selection, create `capabilities.json` under the state root:
+
+```json
+{
+  "capabilities": [
+    {
+      "id": "data-inspector",
+      "keywords": ["data", "relationship"],
+      "runtimes": ["claude"],
+      "enabled": true
+    }
+  ]
+}
 ```
 
-Short prompts can still carry intent because routing is based on the current local inventory and runtime context. If a capability is not installed or no safe route exists, Claude Router leaves it unresolved instead of fabricating a target.
+Selection is deterministic and owner-controlled; it provides a route signal and does not execute a command. The event log stores lifecycle type, runtime, hashes, timestamps, route state, and bounded counts. It does not store raw prompts, working-directory paths, or downstream output.
 
-Useful lifecycle commands:
+## Safety and portability
 
-```bash
-node install-router.mjs --help
-node install-router.mjs --restart-controller
-node install-router.mjs --uninstall
-```
+- No home-directory discovery or personal framework assumptions.
+- No dependency on GSD, Superpowers, GStack, Graphify, or any other plugin collection.
+- Claude and Codex keep separate runtime-local hook bindings.
+- Existing unrelated hooks and settings are preserved.
+- Installation records ownership and fingerprints so uninstall removes only Router-owned state.
+- Prompt-time work is read-only; mutations fail closed and preserve last-known-good state.
 
-`--uninstall` removes only state proven to be owned by Claude Router. The installer prints the active ownership and diagnostic paths when it runs.
-
-## Safety model
-
-- Prompt-time routing is fast and read-only.
-- Claude and Codex maintain separate runtime-local artifacts.
-- Routes are resolve-first: only current, enabled targets can be suggested.
-- File changes are debounced and reconciled before activation.
-- Missing optional state and malformed candidates fail open or remain quarantined.
-- The router never automatically installs external capabilities.
+The adaptive registry, continuity, health, orchestration, and bounded-autonomy implementation lives under `src/`. The public installer deliberately keeps the installed bridge neutral and explicit so it can run on arbitrary Claude/Codex layouts.
 
 ## Development
 
-The test suite uses Node's built-in test runner:
+Run the tests with Node's built-in runner:
 
 ```bash
 node --test --test-concurrency=1 tests/*.test.mjs
 ```
 
-The main implementation areas are under `src/`, while `install-router.mjs` is the zero-dependency lifecycle entry point.
+The public entry point is `install-router.mjs`. No package manager or hosted control plane is required.

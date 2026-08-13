@@ -285,6 +285,9 @@ function candidateDiagnostics(record, intent, workflow, eligibility) {
   return {
     stable_id: stableCapabilityId(record),
     canonical_id: record?.canonical_identity || null,
+    runtime: record?.runtime || record?.invocation?.runtime || 'unknown',
+    scope: record?.scope || record?.invocation?.scope || null,
+    dispatchable: record?.dispatchable === true,
     aliases: textValues(semantic.aliases).slice(0, RETRIEVAL_LIMITS.max_terms).sort(),
     roles: roles.slice(0, RETRIEVAL_LIMITS.max_roles).sort(),
     source_fingerprint: record?.source_freshness?.fingerprint || record?.source_fingerprint || null,

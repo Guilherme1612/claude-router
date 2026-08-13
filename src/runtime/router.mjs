@@ -27,6 +27,45 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+let _routingPreferences = null;
+try {
+  _routingPreferences = await import(pathToFileURL(join(dirname(fileURLToPath(import.meta.url)), '..', 'orchestrator', 'preferences.mjs')).href);
+} catch { /* bundled/copied hook has no source-only preference module */ }
+
+const BUNDLED_ROUTING_MODES = new Set(['direct', 'adaptive', 'semantic', 'pass_through']);
+function resolveRoutingMode(options = {}) {
+  if (_routingPreferences?.resolveRoutingMode) return _routingPreferences.resolveRoutingMode(options);
+  const { mode, routingMode, preferences, routingPreferences, scope = {} } = options;
+  const raw = routingMode ?? mode;
+  const normalize = value => {
+    if (typeof value !== 'string') return null;
+    const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+    const alias = {
+      observation: 'pass_through',
+      'observation/pass_through': 'pass_through',
+      observation_pass_through: 'pass_through',
+    }[normalized] || normalized;
+    return BUNDLED_ROUTING_MODES.has(alias) ? alias : null;
+  };
+  if (raw !== undefined) {
+    const resolved = normalize(raw);
+    return resolved ? { mode: resolved, source: 'call', reason_code: null }
+      : { mode: 'adaptive', source: 'fallback', reason_code: 'invalid_routing_mode' };
+  }
+  const rank = { 'global-user': 0, runtime: 1, project: 2, workflow: 3 };
+  const applicable = (Array.isArray(routingPreferences) ? routingPreferences : (Array.isArray(preferences) ? preferences : []))
+    .filter(item => item?.scope === 'global-user' || item?.scope === 'runtime' && item.runtime === scope.runtime
+      || item?.scope === 'project' && item.project_id === scope.project_id
+      || item?.scope === 'workflow' && item.workflow_id === scope.workflow_id)
+    .filter(item => item.expires_at_ms === undefined || item.expires_at_ms >= (options.now ?? Date.now()))
+    .sort((left, right) => (rank[right.scope] ?? -1) - (rank[left.scope] ?? -1)
+      || String(left.preference_id || '').localeCompare(String(right.preference_id || '')));
+  for (const item of applicable) {
+    const resolved = normalize(item.routing_mode ?? item.routingMode ?? item.mode);
+    if (resolved) return { mode: resolved, source: item.scope, preference_id: item.preference_id || null, reason_code: null };
+  }
+  return { mode: 'adaptive', source: 'default', reason_code: null };
+}
 let correlateOutcomes;
 let aggregatePerEntry;
 let proposeAdditions;
@@ -117,8 +156,10 @@ function resolveSemanticModule(relativePath) {
 }
 let _semanticMod = null;
 let _composeMod = null;
+let _observerMod = null;
 try { _semanticMod = await import(pathToFileURL(resolveSemanticModule('intent/semantic.mjs')).href); } catch { _semanticMod = null; }
 try { _composeMod = await import(pathToFileURL(resolveSemanticModule('orchestrator/compose.mjs')).href); } catch { _composeMod = null; }
+try { _observerMod = await import(pathToFileURL(resolveSemanticModule('observer/local.mjs')).href); } catch { _observerMod = null; }
 const WEIGHTS = join(ROUTER_DIR, 'weights.json');
 // INVC-03: per-install calibration FILE (created by Phase 34). The hook only
 // ever reads it epoch-gated — a matching manifest_fingerprint wins, and any
@@ -3347,7 +3388,17 @@ function routeToInspectShape(state) {
     // decision — observable in inspectDecision output and telemetry.
     routing_version: state.routing_version || null,
     semantic: state.semantic || null,
+    routing_mode: state.routing_mode || 'adaptive',
+    routing_mode_source: state.routing_mode_source || 'default',
+    semantic_activation: state.semantic_activation || { status: 'unknown', reason_code: null },
   };
+}
+
+// ponytail: bounded token/keyword heuristic keeps adaptive semantic fallback cheap;
+// replace with measured routing calibration only if this produces false routes.
+function adaptiveNeedsSemantic(prompt) {
+  const tokens = String(prompt || '').trim().split(/\s+/).filter(Boolean);
+  return tokens.length >= 6 || /\b(uncertain|ambiguous|workflow|architecture|relationship|multi[- ]step)\b/i.test(prompt);
 }
 
 function candidateRows(scored, boosted, blended, modeMap) {
@@ -3507,6 +3558,9 @@ export function inspectDecision(prompt, options = {}) {
     cwd: opts.cwd,
     modeMap: null,
     semantic: null,
+    routing_mode: 'adaptive',
+    routing_mode_source: 'default',
+    semantic_activation: { status: 'unknown', reason_code: null },
   };
 
   const finish = () => {
@@ -3535,6 +3589,23 @@ export function inspectDecision(prompt, options = {}) {
   try {
     if (typeof prompt !== 'string') {
       state.passThroughReason = 'invalid_prompt';
+      return finish();
+    }
+    const routingSelection = resolveRoutingMode({
+      mode: opts.routingMode ?? opts.routing_mode,
+      preferences: opts.routingPreferences ?? opts.routing_preferences,
+      scope: opts.routingScope ?? opts.preferenceScope ?? {},
+      now: opts.now ?? Date.now(),
+    });
+    state.routing_mode = routingSelection.mode;
+    state.routing_mode_source = routingSelection.source;
+    if (routingSelection.mode === 'direct' || routingSelection.mode === 'pass_through') {
+      state.tier = routingSelection.mode;
+      state.passThroughReason = routingSelection.mode === 'direct'
+        ? 'routing_mode_direct'
+        : 'routing_mode_pass_through';
+      state.semantic_activation = { status: 'skipped', reason_code: state.passThroughReason };
+      state.decision_trace.push(`mode:${routingSelection.mode}`);
       return finish();
     }
     if (process.env.ROUTER_TEST_THROW === '1') {
@@ -3600,7 +3671,20 @@ export function inspectDecision(prompt, options = {}) {
     const semanticRecords = Array.isArray(opts.semanticRecords)
       ? opts.semanticRecords
       : (Array.isArray(manifest.semantic_records) ? manifest.semantic_records : null);
-    if (semanticRecords) {
+    state.semantic_activation = semanticRecords
+      ? {
+        status: semanticRecords.length ? 'active' : 'safe_empty',
+        reason_code: semanticRecords.length ? null : 'semantic_records_empty',
+        record_count: semanticRecords.length,
+      }
+      : { status: 'inactive', reason_code: 'semantic_records_missing', record_count: 0 };
+    if (routingSelection.mode === 'semantic' && !semanticRecords) {
+      state.tier = 'low';
+      state.passThroughReason = 'semantic_inactive';
+      state.decision_trace.push('semantic:inactive');
+      return finish();
+    }
+    if (semanticRecords && (routingSelection.mode === 'semantic' || adaptiveNeedsSemantic(prompt))) {
       const semanticIntent = _semanticMod?.parseSemanticIntent
         ? _semanticMod.parseSemanticIntent(prompt)
         : { dispatch_eligible: false, reason_codes: ['semantic_modules_unavailable'], policy_version: 'semantic-intent-unavailable' };
@@ -3933,6 +4017,7 @@ function main(payload, { additionalContext = '', skipRouting = false } = {}) {
   const prompt = payload?.prompt ?? payload?.message;
   if (payload?.hook_event_name && payload.hook_event_name !== 'UserPromptSubmit') {
     try {
+      _observerMod?.recordHook(payload, { runtime: RUNTIME });
       const observerManifest = loadManifest();
       const observerModeMap = loadModeMap();
       observeShadowEvent(payload, {
@@ -3940,7 +4025,8 @@ function main(payload, { additionalContext = '', skipRouting = false } = {}) {
         modeMapVersion: observerModeMap?.schema_version ?? observerModeMap?.version ?? 'unknown',
       });
     } catch { /* observer is strictly fail-open */ }
-    return;
+    if (['SessionStart', 'Stop'].includes(payload.hook_event_name) && additionalContext) emit(additionalContext, payload.hook_event_name);
+    return { additionalContext };
   }
   if (!payload || typeof prompt !== 'string') return;
   const decision = skipRouting ? { final_injected_context: '', pass_through_reason: 'context_handled' } : inspectDecision(prompt, {
@@ -3950,6 +4036,17 @@ function main(payload, { additionalContext = '', skipRouting = false } = {}) {
     emitInjection: false,
     includePrompt: false,
   });
+  try {
+    _observerMod?.recordDecision(prompt, decision, {
+      runtime: RUNTIME,
+      startNs,
+      source: {
+        session_id: payload?.session_id || null,
+        cwd: payload?.cwd || process.cwd(),
+        transcript_path: payload?.transcript_path || null,
+      },
+    });
+  } catch { /* observer is strictly fail-open */ }
   const coverageFreshness = process.env.ROUTER_TEST_COVERAGE_FRESHNESS
     ? { status: process.env.ROUTER_TEST_COVERAGE_FRESHNESS, reminder: COVERAGE_REMINDER }
     : checkCoverageFreshness();
@@ -4136,10 +4233,10 @@ function runCli(argv) {
   return false;
 }
 
-function emit(additionalContext) {
+function emit(additionalContext, hookEventName = 'UserPromptSubmit') {
   writeSync(1,JSON.stringify({
     hookSpecificOutput: {
-      hookEventName: 'UserPromptSubmit',
+      hookEventName,
       additionalContext,
     },
   }));
@@ -4170,7 +4267,10 @@ if (isMain()) {
       const modulePath = process.env.ROUTER_CONTEXT_MODULE_PATH
         || join(ROUTER_DIR, 'modules', 'context', 'prompt-route.mjs');
       const { routeContextPrompt } = await import(modulePath);
-      const routed = routeContextPrompt({ prompt, ownedRoot, projectRoot });
+      const routed = routeContextPrompt({
+        prompt, ownedRoot, projectRoot, hookEventName: payload?.hook_event_name,
+        routingMode: payload?.routing_mode ?? payload?.routingMode,
+      });
       const emitted = main(payload, { additionalContext: routed.additional_context || '', skipRouting: routed.handled === true });
       if (routed.startup_notice_emitted && emitted.additionalContext) {
         try {
@@ -4203,6 +4303,9 @@ if (isMain()) {
       const ms = Number(process.hrtime.bigint() - globalThis.__routerStartNs) / 1e6;
       process.stderr.write(`__router_latency_ms=${ms}\n`);
     }
-    process.exit(0);
+    // Allow the private observer's already-queued async append to finish. With
+    // the marker absent there are no observer handles, so this remains the
+    // same immediate natural exit path.
+    process.exitCode = 0;
   });
 }

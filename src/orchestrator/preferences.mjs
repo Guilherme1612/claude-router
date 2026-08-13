@@ -1,5 +1,13 @@
 export const PREFERENCE_POLICY_VERSION = 'preference-policy-v1';
 export const PREFERENCE_SCOPES = Object.freeze(['global-user', 'runtime', 'project', 'workflow']);
+export const ROUTING_MODES = Object.freeze(['direct', 'adaptive', 'semantic', 'pass_through']);
+
+const ROUTING_MODE_ALIASES = new Map([
+  ['observation', 'pass_through'],
+  ['observation/pass-through', 'pass_through'],
+  ['observation/pass_through', 'pass_through'],
+  ['observation_pass_through', 'pass_through'],
+]);
 
 const PRECEDENCE = new Map(PREFERENCE_SCOPES.map((scope, index) => [scope, index]));
 
@@ -21,6 +29,37 @@ function applies(preference, scope = {}) {
   if (preference.scope === 'project') return preference.project_id === scope.project_id;
   if (preference.scope === 'workflow') return preference.workflow_id === scope.workflow_id;
   return true;
+}
+
+function normalizeRoutingMode(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, '_');
+  const mode = ROUTING_MODE_ALIASES.get(normalized) || normalized;
+  return ROUTING_MODES.includes(mode) ? mode : null;
+}
+
+/** Resolve the user-controlled routing mode without changing capability preferences. */
+export function resolveRoutingMode({ mode, routingMode, preferences, routingPreferences, scope = {}, now = Date.now() } = {}) {
+  const explicit = routingMode ?? mode;
+  if (explicit !== undefined) {
+    const resolved = normalizeRoutingMode(explicit);
+    return resolved
+      ? { mode: resolved, source: 'call', reason_code: null }
+      : { mode: 'adaptive', source: 'fallback', reason_code: 'invalid_routing_mode' };
+  }
+
+  const applicable = (Array.isArray(routingPreferences) ? routingPreferences : (Array.isArray(preferences) ? preferences : []))
+    .filter(preference => applies(preference, scope))
+    .filter(preference => preference.expires_at_ms === undefined || preference.expires_at_ms >= now)
+    .map(preference => ({ ...preference, rank: PRECEDENCE.get(preference.scope) ?? -1 }))
+    .sort((left, right) => right.rank - left.rank || String(left.preference_id || '').localeCompare(String(right.preference_id || '')));
+
+  for (const preference of applicable) {
+    const candidate = preference.routing_mode ?? preference.routingMode ?? preference.mode;
+    const resolved = normalizeRoutingMode(candidate);
+    if (resolved) return { mode: resolved, source: preference.scope, preference_id: preference.preference_id || null, reason_code: null };
+  }
+  return { mode: 'adaptive', source: 'default', reason_code: null };
 }
 
 function preferenceTarget(preference) {

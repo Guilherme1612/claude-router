@@ -307,9 +307,10 @@ export function ingestTelemetryEvidence({
   // (CR-01: an off-by-one between lines.length and allRecords.length silently
   // dropped every newly-appended record after the first ingest).
   const allRecords = [];
+  let malformed = 0;
   for (const line of lines) {
     if (line.length === 0) continue;
-    try { allRecords.push(JSON.parse(line)); } catch { allRecords.push(null); }
+    try { allRecords.push(JSON.parse(line)); } catch { malformed += 1; allRecords.push(null); }
   }
 
   let startLine = 0;
@@ -336,13 +337,19 @@ export function ingestTelemetryEvidence({
   const kind_counts = {};
   let ingested = 0;
   let denied = 0;
+  const diagnostics = { duplicate: 0, late: 0, malformed, old_schema: 0, privacy_denied: 0 };
 
   function appendDerived(telemetryRecord, capabilityId, outcome_kind, reason_code) {
     const built = buildOutcomeRecord({
       telemetryRecord, capabilityId, outcome_kind, reason_code, evidenceWindowMs,
     });
-    if (built.status !== 'accepted') { denied += 1; return false; }
+    if (built.status !== 'accepted') {
+      denied += 1;
+      if (built.reason_code === 'privacy_signature_forbidden') diagnostics.privacy_denied += 1;
+      return false;
+    }
     const appended = store.append(built.signal);
+    if (appended.status === 'duplicate') { diagnostics.duplicate += 1; return false; }
     if (appended.status !== 'stored') { denied += 1; return false; }
     if (typeof ownedRoot === 'string' && typeof refreshSuggestionPointerFn === 'function') {
       try { refreshSuggestionPointerFn({ ownedRoot, now }); } catch { /* durable evidence remains authoritative */ }
@@ -382,6 +389,13 @@ export function ingestTelemetryEvidence({
   for (let i = startLine; i < allRecords.length; i += 1) {
     const record = allRecords[i];
     if (!record || typeof record !== 'object') { denied += 1; continue; }
+    if (record.schema_version !== undefined && record.schema_version !== 1) {
+      diagnostics.old_schema += 1;
+      denied += 1;
+      continue;
+    }
+    if (Number.isSafeInteger(cursor?.lastTimestamp) && Number.isSafeInteger(record.ts)
+        && record.ts < cursor.lastTimestamp) diagnostics.late += 1;
     // Only records carrying a route_id are outcome-eligible.
     if (typeof record.route_id !== 'string' || record.route_id.length === 0) continue;
 
@@ -423,6 +437,7 @@ export function ingestTelemetryEvidence({
     writeFileSync(cursorPath, JSON.stringify({
       size, mtimeMs, recordCount: allRecords.length,
       workflowStateMtimeMs,
+      lastTimestamp: allRecords.reduce((max, row) => Number.isSafeInteger(row?.ts) ? Math.max(max, row.ts) : max, Number.isSafeInteger(cursor?.lastTimestamp) ? cursor.lastTimestamp : 0),
       priorWorkflowState: workflowState,
       pendingSelections,
     }), { mode: 0o600 });
@@ -431,5 +446,7 @@ export function ingestTelemetryEvidence({
     // duplicates next call (bounded by the 7d retention window filter).
   }
 
-  return { ingested, skipped: startLine > 0 ? 'incremental' : 'full', denied, kind_counts };
+  return {
+    ingested, skipped: startLine > 0 ? 'incremental' : 'full', denied, kind_counts, diagnostics,
+  };
 }

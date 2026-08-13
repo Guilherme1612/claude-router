@@ -122,6 +122,9 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
 
   const sample_count = outcomes.length;
   const outcome_kind_counts = countKinds(outcomes);
+  const verifiedKinds = new Set(['actually_used', 'completed', 'helpful_reuse']);
+  const verified_sample_count = outcomes.filter((o) => verifiedKinds.has(o?.outcome_kind)).length;
+  const unverified_sample_count = Math.max(0, sample_count - verified_sample_count);
 
   // HLTH-07 (D-1): below the sample floor → 'unjudged'. Never attach
   // 'long_unused' or 'ineffective' — the conservative baseline defers deeper
@@ -133,7 +136,7 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
       usefulness_basis_points: null,
       tier: 'unjudged',
       sample_count,
-      signal_breakdown: { outcome_kind_counts },
+      signal_breakdown: { outcome_kind_counts, verified_sample_count, unverified_sample_count },
       reason_codes: ['insufficient_samples'],
     };
   }
@@ -145,7 +148,7 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
   const weighted_samples = computeWeightedSamples(observations, { now, halfLifeMs: HALF_LIFE_MS });
   const recency_weight = weighted_samples / sample_count;
 
-  const completion_rate = (outcome_kind_counts.completed || 0) / sample_count;
+  const completion_rate = verified_sample_count === 0 ? 0 : (outcome_kind_counts.completed || 0) / verified_sample_count;
 
   // Opportunity exposure — what fraction of opportunities this capability
   // actually addressed (vs. abandoned or overridden). actually_used and
@@ -153,7 +156,7 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
   // dispatched), so they do not appear in the denominator's "missed" bucket.
   const abandoned_count = outcome_kind_counts.abandoned || 0;
   const overridden_count = outcome_kind_counts.overridden || 0;
-  const addressed = sample_count - abandoned_count - overridden_count;
+  const addressed = verified_sample_count;
   const opportunity_exposure = sample_count === 0 ? 0 : addressed / sample_count;
 
   const reversibility_value = readReversibility(contract);
@@ -198,6 +201,8 @@ export function scoreCapability({ outcomes, contract, now = Date.now() } = {}) {
       reversibility_factor,
       confidence_factor,
       penalty_count: penalty,
+      verified_sample_count,
+      unverified_sample_count,
       outcome_kind_counts,
     },
     reason_codes,

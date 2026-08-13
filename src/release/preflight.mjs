@@ -4,6 +4,9 @@ import { stableStringify } from '../registry/schema.mjs';
 
 export const RELEASE_POLICY_VERSION = 'release-preflight-v1';
 export const SUPPORTED_RUNTIMES = Object.freeze(['claude', 'codex']);
+export const ADAPTIVE_RELEASE_POLICY_VERSION = 'adaptive-release-preflight-v1';
+export const ADAPTIVE_RELEASE_LIMITS = Object.freeze({ prompt_latency_ms: 100, context_bytes: 18_432 });
+export const AUTONOMOUS_RELEASE_POLICY_VERSION = 'autonomous-release-preflight-v1';
 
 function digest(value) {
   return createHash('sha256').update(stableStringify(value)).digest('hex');
@@ -59,6 +62,41 @@ export function reconcileReleaseEvidence(evidence = {}) {
 export const V20_RELEASE_EVIDENCE_POLICY_VERSION = 'v2.0-release-evidence-v1';
 
 /**
+ * Reconcile v2.1 adaptive release evidence as independent fail-closed gates.
+ * The input is a bounded projection from runtime/benchmark evidence; raw
+ * prompts, outputs, and paths are deliberately ignored.
+ */
+export function reconcileAdaptiveReleaseEvidence(evidence = {}, limits = ADAPTIVE_RELEASE_LIMITS) {
+  const maxLatency = Number.isSafeInteger(limits?.prompt_latency_ms)
+    ? limits.prompt_latency_ms : ADAPTIVE_RELEASE_LIMITS.prompt_latency_ms;
+  const maxContext = Number.isSafeInteger(limits?.context_bytes)
+    ? limits.context_bytes : ADAPTIVE_RELEASE_LIMITS.context_bytes;
+  const dimensions = {
+    inventory: { pass: evidence.inventory_fresh === true, reason_code: 'stale_inventory' },
+    selected_target: { pass: evidence.selected_target_available === true, reason_code: 'selected_target_unavailable' },
+    required_evidence: { pass: evidence.required_evidence_active === true, reason_code: 'inactive_required_evidence' },
+    privacy: { pass: evidence.privacy === true, reason_code: 'privacy_regression' },
+    safety: { pass: evidence.safety === true, reason_code: 'safety_regression' },
+    latency: { pass: Number.isFinite(evidence.prompt_latency_ms) && evidence.prompt_latency_ms <= maxLatency, reason_code: 'prompt_latency_regression' },
+    context: { pass: Number.isSafeInteger(evidence.context_bytes) && evidence.context_bytes <= maxContext, reason_code: 'context_budget_regression' },
+  };
+  const blockers = Object.values(dimensions).filter(dimension => !dimension.pass).map(dimension => dimension.reason_code).sort();
+  return {
+    schema_version: 1,
+    policy_version: ADAPTIVE_RELEASE_POLICY_VERSION,
+    status: blockers.length ? 'blocked' : 'ready',
+    dimensions,
+    blockers,
+    evidence_fingerprint: digest({
+      policy_version: ADAPTIVE_RELEASE_POLICY_VERSION,
+      dimensions: Object.fromEntries(Object.entries(dimensions).map(([key, value]) => [key, value.pass])),
+      limits: { prompt_latency_ms: maxLatency, context_bytes: maxContext },
+    }),
+    no_composite_score: true,
+  };
+}
+
+/**
  * Reconcile workflow-specific release truth independently from the broader
  * installed-runtime/archive gate. No dimension can be hidden by a score.
  */
@@ -86,6 +124,40 @@ export function reconcileV20ReleaseEvidence(evidence = {}) {
     status: blockers.length ? 'blocked' : 'ready',
     dimensions,
     blockers: [...new Set(blockers)].sort(),
+    no_composite_score: true,
+  };
+}
+
+/** Reconcile final autonomous-release evidence without hiding a failed dimension. */
+export function reconcileAutonomousReleaseEvidence(evidence = {}) {
+  const installed = evidence.installed || {};
+  const adaptiveCount = Number.isSafeInteger(evidence.dispatchable_count) ? evidence.dispatchable_count : 0;
+  const dimensions = {
+    source_install_parity: { pass: evidence.source_install_parity === true, reason_code: 'source_install_parity_missing' },
+    mapping: { pass: evidence.mapping === true, reason_code: 'mapping_evidence_missing' },
+    feedback: { pass: evidence.feedback === true, reason_code: 'feedback_evidence_missing' },
+    privacy: { pass: evidence.privacy === true, reason_code: 'privacy_evidence_missing' },
+    safety: { pass: evidence.safety === true, reason_code: 'safety_evidence_missing' },
+    token: { pass: evidence.token === true, reason_code: 'token_evidence_missing' },
+    latency: { pass: evidence.latency === true, reason_code: 'latency_evidence_missing' },
+    claude: { pass: installed.claude?.pass === true, reason_code: 'installed_claude_evidence_missing' },
+    codex: { pass: installed.codex?.pass === true, reason_code: 'installed_codex_evidence_missing' },
+    adaptive_release: {
+      pass: adaptiveCount > 0 ? evidence.adaptive_release === true : evidence.direct_pass_through_usable === true,
+      reason_code: adaptiveCount > 0 ? 'adaptive_release_evidence_missing' : 'safe_empty_direct_pass_through_missing',
+    },
+    repository: { pass: evidence.repository_tests === true && evidence.security === true && evidence.audit === true, reason_code: 'repository_release_evidence_missing' },
+  };
+  const blockers = Object.values(dimensions).filter(value => !value.pass).map(value => value.reason_code).sort();
+  return {
+    schema_version: 1,
+    policy_version: AUTONOMOUS_RELEASE_POLICY_VERSION,
+    status: blockers.length ? 'blocked' : 'ready',
+    dimensions,
+    blockers,
+    dispatchable_count: adaptiveCount,
+    direct_pass_through_usable: evidence.direct_pass_through_usable === true,
+    evidence_fingerprint: digest(Object.fromEntries(Object.entries(dimensions).map(([key, value]) => [key, value.pass]))),
     no_composite_score: true,
   };
 }

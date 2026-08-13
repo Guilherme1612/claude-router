@@ -588,6 +588,15 @@ test('ambiguous canonical subject fails closed despite optimistic or malformed s
 });
 
 test('incremental/full equivalence compares canonical registry bytes, not schema presence', async () => {
+  const emptyRegistry = {
+    schema_version: 1,
+    records: [],
+    runtime_mappings: [],
+    semantic_activation: {
+      claude: { status: 'inactive', reason_code: 'semantic_records_missing', record_count: 0 },
+      codex: { status: 'inactive', reason_code: 'semantic_records_missing', record_count: 0 },
+    },
+  };
   const emptyAcquisition = {
     claude: { observations: [], diagnostics: [] },
     codex: { observations: [], diagnostics: [] },
@@ -601,11 +610,11 @@ test('incremental/full equivalence compares canonical registry bytes, not schema
     },
   };
   const passing = await PRODUCTION_GATE_RUNNERS.incremental_full_equivalence.run({
-    candidate: { schema_version: 1, records: [] }, equivalence,
+    candidate: emptyRegistry, equivalence,
   });
   assert.equal(passing.passed, true);
   const substituted = await PRODUCTION_GATE_RUNNERS.incremental_full_equivalence.run({
-    candidate: { schema_version: 1, records: [{ id: 'substituted' }] }, equivalence,
+    candidate: { ...emptyRegistry, records: [{ id: 'substituted' }] }, equivalence,
   });
   assert.equal(substituted.passed, false);
 });

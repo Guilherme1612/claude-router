@@ -385,7 +385,7 @@ export async function installRouter(options) {
     // The latency gate runs from the deployed ownedRoot and resolves these
     // runtime sources relative to its fixture cwd.
     'runtime/router.mjs', 'runtime/router.evolve.mjs',
-    'registry/build.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
+    'registry/build.mjs', 'registry/local-map.mjs', 'registry/schema.mjs', 'registry/identity.mjs',
     'registry/fingerprint.mjs', 'registry/diff.mjs', 'registry/watcher.mjs',
     'registry/map.mjs', 'registry/validate.mjs', 'registry/activate.mjs',
     'registry/reconcile.mjs', 'registry/hook-reconcile.mjs',
@@ -395,6 +395,8 @@ export async function installRouter(options) {
     'registry/trust.mjs',
     // v1.8 semantic routing and continuity closure, deployed to both runtimes.
     'intent/classify.mjs', 'intent/semantic.mjs', 'intent/task-family-corpus.mjs',
+    // Private local observer closure. It is inert unless ~/.route-build exists.
+    'observer/local.mjs',
     'orchestrator/compose.mjs', 'orchestrator/preferences.mjs',
     'steward/continuity.mjs',
     // Phase 42 SEM-01/03: semantic resolver + compilation gate deployed to
@@ -430,7 +432,7 @@ export async function installRouter(options) {
   'orchestrator/strategy.mjs', 'evolution/local-learning.mjs', 'lifecycle/migration.mjs',
     'cli/router-control.mjs',
     'context/capsule.mjs', 'context/resolve.mjs', 'context/sources.mjs',
-    'context/prompt-route.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
+    'context/prompt-route.mjs', 'context/continuity.mjs', 'prompt/compile-index.mjs', 'prompt/publish-index.mjs',
     'steward/startup-pointer.mjs', 'steward/startup-ack.mjs', 'steward/state.mjs',
     'steward/draft.mjs', 'steward/refresh.mjs', 'steward/suggestion.mjs',
     'health/thresholds.mjs', 'health/admin.mjs', 'health/catalog.mjs',
@@ -438,6 +440,7 @@ export async function installRouter(options) {
     'orchestrator/select.mjs', 'orchestrator/transitions.mjs', 'orchestrator/budget.mjs',
     'orchestrator/workflow-plan.mjs',
     'orchestrator/workflow-execution.mjs',
+    'orchestrator/autonomy.mjs',
     'evaluation/v20.mjs',
     'orchestrator/approval.mjs',
     'orchestrator/workflow-declarations.json',

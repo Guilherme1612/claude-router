@@ -133,7 +133,7 @@ test('validateEligibility accepts a non-quarantined eligibility without quaranti
   const { ELIGIBILITY_GATES } = {
     ELIGIBILITY_GATES: [
       'target_existence', 'invocation_shape', 'adapter', 'dependency_closure',
-      'permission', 'scope', 'side_effects', 'reversibility', 'risk', 'field_confidence',
+      'authority', 'permission', 'scope', 'side_effects', 'reversibility', 'risk', 'field_confidence',
     ],
   };
   const legacyEligibility = {

@@ -5,12 +5,9 @@
 //   node install-router.mjs --uninstall # remove only proven owned state
 
 import path from 'node:path';
-import os from 'node:os';
-import { fileURLToPath } from 'node:url';
-import { installRouter, restartController, uninstallRouter } from './src/lifecycle/router-lifecycle.mjs';
+import { installNeutralRouter, uninstallNeutralRouter } from './src/lifecycle/neutral-lifecycle.mjs';
 
 const args = process.argv.slice(2);
-const repoRoot = path.dirname(fileURLToPath(import.meta.url));
 
 function has(name) {
   return args.includes(`--${name}`);
@@ -26,24 +23,29 @@ function arg(name, fallback) {
 }
 
 function help() {
-  console.log(`Claude Router — lightweight local lifecycle
+  console.log(`Claude Router — framework-neutral local lifecycle
 
 Usage:
-  node install-router.mjs              # install
-  node install-router.mjs --uninstall  # uninstall owned state
-  node install-router.mjs --restart-controller # restart owned watcher
-  node install-router.mjs --help       # show this help
+  node install-router.mjs              # install after supplying explicit roots
+  node install-router.mjs --state-root <path> [runtime root]
+  node install-router.mjs --uninstall --state-root <path> [runtime root]
+  node install-router.mjs --dry-run --state-root <path> [runtime root]
+  node install-router.mjs --help
 
-Advanced path overrides:
-  --claude-root <path>   Claude configuration root (default ~/.claude)
-  --codex-root <path>    Codex configuration root (default ~/.codex)
-  --source-router <path> bundled router source
-  --settings <path>      Claude settings.json
-  --router <path>        installed router hook
-  --manifest <path>      ownership manifest
+Explicit paths (there are no home-directory defaults):
+  --claude-root <path>   Claude configuration root
+  --codex-root <path>    Codex configuration root
+  --state-root <path>    neutral Router state, logs, and ownership manifest
+  --claude-settings <path> Claude settings.json
+  --codex-hooks <path>  Codex hooks.json
+  --claude-hook <path>  installed Claude hook
+  --codex-hook <path>   installed Codex hook
+  --manifest <path>     neutral ownership manifest
   --node-binary <path>   Node executable used by the hook
-  --project-root <path>  Optional project capability root
   --dry-run              Validate and report candidate changes without writes
+
+Equivalent environment inputs: CLAUDE_CONFIG_ROOT, CODEX_CONFIG_ROOT,
+ROUTER_STATE_ROOT.
 `);
 }
 
@@ -53,32 +55,26 @@ if (has('help')) {
 }
 
 try {
-  const claudeRoot = path.resolve(arg('claude-root', path.join(os.homedir(), '.claude')));
-  const codexRoot = path.resolve(arg('codex-root', path.join(os.homedir(), '.codex')));
+  const optionalPath = (name, environment) => {
+    const value = arg(name, process.env[environment] || null);
+    return value ? path.resolve(value) : null;
+  };
   const options = {
-    claudeRoot,
-    codexRoot,
-    sourceRouter: path.resolve(arg('source-router', path.join(repoRoot, 'src', 'runtime', 'router.mjs'))),
-    sourceEvolve: path.resolve(arg('source-evolve', path.join(repoRoot, 'src', 'runtime', 'router.evolve.mjs'))),
-    settingsPath: path.resolve(arg('settings', path.join(claudeRoot, 'settings.json'))),
-    routerPath: path.resolve(arg('router', path.join(claudeRoot, 'hooks', 'router.mjs'))),
-    manifestPath: path.resolve(arg('manifest', path.join(claudeRoot, 'router', 'install-manifest.json'))),
+    claudeRoot: optionalPath('claude-root', 'CLAUDE_CONFIG_ROOT'),
+    codexRoot: optionalPath('codex-root', 'CODEX_CONFIG_ROOT'),
+    stateRoot: optionalPath('state-root', 'ROUTER_STATE_ROOT'),
+    claudeSettingsPath: optionalPath('claude-settings', 'CLAUDE_SETTINGS_PATH'),
+    codexHooksPath: optionalPath('codex-hooks', 'CODEX_HOOKS_PATH'),
+    claudeHookPath: optionalPath('claude-hook', 'CLAUDE_ROUTER_HOOK_PATH'),
+    codexHookPath: optionalPath('codex-hook', 'CODEX_ROUTER_HOOK_PATH'),
+    manifestPath: optionalPath('manifest', 'ROUTER_MANIFEST_PATH'),
     nodeBinary: path.resolve(arg('node-binary', process.execPath)),
     dryRun: has('dry-run'),
-    // Production first-reconcile scans the full ~/.claude tree and runs the 5
-    // subprocess verify gates (10 `node --test` fixtures), which takes well
-    // past the 5s default. Give the owned controller enough headroom to publish
-    // its first `ready` status before the installer declares readiness failure
-    // and rolls the deploy back.
-    readinessTimeoutMs: 180_000,
-    ...(args.includes('--project-root') ? { projectRoot: path.resolve(arg('project-root')) } : {}),
   };
 
-  if (has('restart-controller')) {
-    const result = await restartController(options);
-    console.log(`CONTROLLER RESTART OK — ready instance ${result.instanceId}.`);
-  } else if (has('uninstall')) {
-    const result = await uninstallRouter(options);
+  if (has('restart-controller')) throw new Error('the neutral installer has no background controller; rerun install to reconcile state');
+  if (has('uninstall')) {
+    const result = await uninstallNeutralRouter(options);
     if (result.status === 'already-uninstalled') {
       console.log('ALREADY UNINSTALLED — no router-owned state found.');
     } else {
@@ -90,24 +86,14 @@ try {
       }
     }
   } else {
-    const result = await installRouter(options);
+    const result = await installNeutralRouter(options);
     if (result.status === 'dry-run') {
       console.log(`DRY RUN OK — ${result.changes.length} candidate change(s), no files written.`);
       process.exit(0);
     }
-    if (result.manifestBuilt === false) {
-      console.warn('MANIFEST BUILDER FAILED — run: node ~/.claude/router/build-manifest.mjs');
-    }
-    if (result.status === 'already-installed') {
-      console.log('ALREADY INSTALLED — verified and ready.');
-    } else if (result.status === 'repaired') {
-      console.log('INSTALL OK — repaired and verified.');
-    } else {
-      console.log('INSTALL OK — installed and verified.');
-    }
+    console.log('INSTALL OK — neutral runtime hook installed and verified.');
     console.log(`Ownership manifest: ${result.manifestPath}`);
-    console.log(`Inactive candidate: ${result.candidatePath}`);
-    console.log(`Registry control: ${result.controlPaths.join(', ')}`);
+    console.log(`Neutral state root: ${result.stateRoot}`);
   }
 } catch (error) {
   console.error(`ROUTER LIFECYCLE FAILED: ${error.message}`);

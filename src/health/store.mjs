@@ -87,6 +87,11 @@ export function createHealthStore({ root, lock: lockOptions } = {}) {
       const lock = mutationLock(healthRoot, lockOptions);
       if (!lock.acquired) return { status: 'denied', reason_code: lock.reason_code };
       try {
+        const duplicate = readOutcomesLines().some((line) => {
+          if (!line) return false;
+          try { return JSON.parse(line)?.fingerprint === validated.signal.fingerprint; } catch { return false; }
+        });
+        if (duplicate) return { status: 'duplicate', reason_code: 'duplicate_fingerprint', fingerprint: validated.signal.fingerprint };
         appendFileSync(outcomesPath, `${JSON.stringify(validated.signal)}\n`, { flag: 'a', mode: 0o600 });
         return { status: 'stored', fingerprint: validated.signal.fingerprint };
       } finally {

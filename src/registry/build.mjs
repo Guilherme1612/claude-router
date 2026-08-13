@@ -232,6 +232,53 @@ function resolveDeclaredWorkflowTargets(declarationsPath) {
   return targetsByName.size ? targetsByName : null;
 }
 
+function runtimeMappingEvidence(records, targets) {
+  if (!(targets instanceof Map)) return [];
+  return records.flatMap(record => {
+    const runtime = record.invocation?.runtime || record.provenance?.[0]?.runtime || null;
+    const source = record.provenance?.[0] || {};
+    const subjects = [...(targets.get(record.name) || [])];
+    return subjects.map(subject_id => ({
+      schema_version: 1,
+      subject_id,
+      target_id: record.id,
+      target_name: record.name,
+      runtime,
+      scope: record.scope?.kind || null,
+      provenance: {
+        logical_root: source.logical_root || null,
+        relative_path: source.relative_path || null,
+        source_fingerprint: source.source_fingerprint || null,
+        adapter: source.adapter || null,
+        parser: source.parser || null,
+      },
+      availability: record.invocation?.availability === 'available' ? 'available' : 'unavailable',
+      eligible: record.eligibility?.eligible === true,
+      dispatchable: record.dispatchable === true,
+      quarantine: [
+        ...(Array.isArray(record.eligibility?.quarantine_reasons) ? record.eligibility.quarantine_reasons : []),
+        ...(record.dispatchable === true ? [] : ['target_not_dispatchable']),
+      ].filter(Boolean).sort(),
+      explicit_route_owner: Array.isArray(record.mapping?.explicit_subjects)
+        && record.mapping.explicit_subjects.includes(subject_id),
+    }));
+  }).sort((left, right) => key(left).localeCompare(key(right)));
+}
+
+function semanticActivationState(options) {
+  const supplied = options?.semanticRecordsByRuntime;
+  return Object.fromEntries(['claude', 'codex'].map(runtime => {
+    const records = supplied && Object.hasOwn(supplied, runtime) ? supplied[runtime] : null;
+    return [runtime, {
+      status: Array.isArray(records) ? (records.length ? 'active' : 'safe_empty') : 'inactive',
+      reason_code: Array.isArray(records)
+        ? (records.length ? null : 'semantic_records_empty')
+        : 'semantic_records_missing',
+      record_count: Array.isArray(records) ? records.length : 0,
+    }];
+  }));
+}
+
 export function acquireRegistry(options = {}) {
   return {
     claude: (options.discoverClaude || discoverClaude)(options),
@@ -357,6 +404,13 @@ export function assembleRegistry(acquisition, options = {}) {
   // the explicit tier, so the explicit claim is unique → mapped.
   const modeMapTargets = resolveModeMapTargets(options.modeMapPath);
   const declaredTargets = resolveDeclaredWorkflowTargets(options.workflowDeclarationsPath);
+  const allTargets = new Map();
+  for (const source of [modeMapTargets, declaredTargets]) {
+    for (const [name, subjects] of source || []) {
+      if (!allTargets.has(name)) allTargets.set(name, new Set());
+      for (const subject of subjects) allTargets.get(name).add(subject);
+    }
+  }
   if (modeMapTargets || declaredTargets) {
     const byName = new Map();
     for (const record of records) {
@@ -410,6 +464,8 @@ export function assembleRegistry(acquisition, options = {}) {
   const registry = {
     schema_version: 1,
     records: enrichedRecords,
+    runtime_mappings: runtimeMappingEvidence(enrichedRecords, allTargets),
+    semantic_activation: semanticActivationState(options),
     ...((relationships.edges.length || relationships.candidates.length) ? { relationships } : {}),
     ...(overlayResolution?.rejected.length ? { rejected_overlays: overlayResolution.rejected } : {}),
     ...(compilation.diagnostics.length ? { compilation } : {}),
@@ -418,6 +474,7 @@ export function assembleRegistry(acquisition, options = {}) {
     schema_version: 1, activated: false, record_count: enrichedRecords.length, diagnostic_count: diagnostics.length,
     dispatchable_count: enrichedRecords.filter(r => r.dispatchable).length,
     runtimes: { claude: claude.observations.length, codex: codex.observations.length },
+    semantic_activation: registry.semantic_activation,
     registry_fingerprint: fingerprint(registry), diagnostics_fingerprint: fingerprint(diagnostics),
   };
   const contracts = {

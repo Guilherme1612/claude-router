@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { stableCapabilityId } from './identity.mjs';
 import { canonicalizeCapability, stableStringify, validateCapability } from './schema.mjs';
 
+export { mapLocalRegistry } from './local-map.mjs';
+
 const MAX_COLLECTION = 128;
 const MAX_TOKEN_LENGTH = 64;
 const SENSITIVE_KEYS = new Set([
@@ -184,6 +186,34 @@ function evidence({ subjectId, targetId, tier, rule, contribution, accepted = fa
   });
 }
 
+function targetEvidence(record, targetId) {
+  const availability = record?.invocation?.availability === 'available' ? 'available' : 'unavailable';
+  const quarantine = [
+    ...(Array.isArray(record?.eligibility?.quarantine_reasons) ? record.eligibility.quarantine_reasons : []),
+    ...(Array.isArray(record?.eligibility?.reason_codes) ? record.eligibility.reason_codes.filter(reason => reason !== 'eligibility_all_gates_passed') : []),
+    ...(record && record.lifecycle !== 'ready' ? ['target_not_ready'] : []),
+    ...(record && record.dispatchable !== true ? ['target_not_dispatchable'] : []),
+    ...(!record || availability !== 'available' ? ['target_unavailable'] : []),
+  ];
+  const provenance = (Array.isArray(record?.provenance) ? record.provenance : []).map(source => ({
+    runtime: source?.runtime || null,
+    scope: source?.scope || null,
+    adapter: source?.adapter || null,
+    parser: source?.parser || null,
+    source_fingerprint: source?.source_fingerprint || null,
+  }));
+  return portable({
+    target_id: targetId || record?.id || null,
+    runtime: record?.invocation?.runtime || record?.provenance?.[0]?.runtime || null,
+    scope: record?.scope?.kind || record?.scope || null,
+    provenance,
+    availability,
+    dispatchable: record?.dispatchable === true,
+    eligible: record?.eligibility ? record.eligibility.eligible === true : record?.dispatchable === true,
+    quarantine: [...new Set(quarantine)].sort(),
+  });
+}
+
 function lexicalScore(subjectId, record) {
   const subjectTokens = tokens(subjectId).filter(token => !['route', 'skill', 'agent', 'command'].includes(token));
   const metadata = mappingMetadata(record);
@@ -305,6 +335,7 @@ function resultForSubject(subjectId, context) {
       ? { reason_code: 'stronger_or_higher_scoring_evidence' } : {}),
   })));
   const margin = Math.max(0, score - runnerUp);
+  const targetIds = [...new Set([...claims.values()].flatMap(items => items.map(item => item.target_id).filter(Boolean)))].sort();
   return {
     schema_version: 1,
     subject_id: subjectId,
@@ -318,6 +349,7 @@ function resultForSubject(subjectId, context) {
     runner_up_score: runnerUp / 10000,
     margin: margin / 10000,
     evidence: orderedEvidence,
+    target_evidence: targetIds.map(targetId => targetEvidence(recordsById.get(targetId), targetId)),
     alternatives: sorted(alternatives),
     policy_version: policy.policy_version,
     policy_fingerprint: policy.policy_fingerprint,
