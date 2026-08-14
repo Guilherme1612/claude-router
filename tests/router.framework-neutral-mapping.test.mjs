@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mapLocalRegistry } from '../src/registry/local-map.mjs';
+import { mapCapabilityManifest, mapLocalRegistry } from '../src/registry/local-map.mjs';
+import { createCapabilityManifest } from '../src/registry/manifest.mjs';
 
 test('MAP-01/02: arbitrary kinds retain runtime-local identity and bounded provenance', () => {
   const report = mapLocalRegistry({
@@ -37,4 +38,47 @@ test('MAP-03/04: paths, roots, aliases, cycles, and incomplete scans are quarant
   assert.ok(first.records.some(row => row.quarantine.includes('missing_root')));
   assert.ok(first.records.some(row => row.quarantine.includes('incomplete_scan')));
   assert.equal(first.safe_empty, true);
+});
+
+test('ONB-01..05: arbitrary framework profiles project into honest runtime-local mapping states', () => {
+  const descriptor = (id, framework, overrides = {}) => ({
+    id, name: id, kind: `${framework}-capability`, runtime: 'claude',
+    scope: { kind: 'global' }, owner: 'owner:fixture',
+    provenance: { source: 'manifest', logical_root: framework, relative_path: `${id}.json` },
+    invocation: { method: 'command', target: id, input_shape: ['text'], output_shape: ['report'] },
+    authority: { ceiling: 'inspect', evidence: 'explicit' },
+    freshness: 'fresh', evidence: { class: 'synthetic', verified: false },
+    availability: { available: true }, eligibility: { eligible: true }, dispatchable: true,
+    ...overrides,
+  });
+  const manifest = createCapabilityManifest({
+    runtime: 'claude', scope: { kind: 'global' }, framework: 'mixed-fixture', epoch: 'epoch:1',
+    records: [
+      descriptor('gsd:plan', 'gsd-like'),
+      descriptor('gstack:review', 'gstack-like', { authority: undefined }),
+      descriptor('custom:future', 'custom', { kind: 'future-kind', symlink: true, symlink_target: 'real/custom.json' }),
+      descriptor('mixed:stale', 'mixed', { freshness: 'stale' }),
+      descriptor('mixed:foreign', 'mixed', { runtime: 'codex' }),
+    ],
+  });
+  const report = mapCapabilityManifest({ manifest, runtime: 'claude', scope: { kind: 'global' } });
+  const byId = new Map(report.records.map(record => [record.stable_id, record]));
+  assert.equal(byId.get('gsd:plan').state, 'dispatchable');
+  assert.equal(byId.get('gstack:review').state, 'recommendation-only');
+  assert.equal(byId.get('custom:future').state, 'dispatchable');
+  assert.equal(byId.get('mixed:stale').state, 'quarantined');
+  assert.ok(byId.get('mixed:stale').quarantine.includes('stale_manifest'));
+  assert.equal(byId.get('mixed:foreign').state, 'quarantined');
+  assert.ok(byId.get('mixed:foreign').quarantine.includes('runtime_mismatch'));
+  assert.equal(report.safe_empty, false);
+  assert.equal(report.counts.dispatchable, 2);
+  assert.equal(JSON.stringify(report).includes('/Users/'), false);
+});
+
+test('ONB-04: an empty neutral manifest maps to safe-empty without inventing a route', () => {
+  const manifest = createCapabilityManifest({ runtime: 'codex', scope: { kind: 'project', repository: 'r', worktree: 'w' } });
+  const report = mapCapabilityManifest({ manifest, runtime: 'codex', scope: manifest.scope });
+  assert.deepEqual(report.records, []);
+  assert.equal(report.safe_empty, true);
+  assert.equal(report.status, 'safe_empty');
 });

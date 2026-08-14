@@ -43,6 +43,11 @@ function latencyValue(candidate) {
   return ({ low: 1, medium: 2, high: 3, unknown: 4 })[candidate?.cost?.value] ?? 4;
 }
 
+function costValue(candidate, field, fallback = 1_000_000_000) {
+  const value = candidate?.cost?.[field] ?? candidate?.[field];
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 function verifiedEvidence(candidate) {
   return candidate?.evidence?.verified === true
     || candidate?.evidence?.strength === 'verified'
@@ -64,7 +69,10 @@ function compareSelection(left, right, { runtime, scope, roles } = {}) {
     left?.dispatchable === true,
     roles.filter(role => leftRoles.has(role)).length,
     verifiedEvidence(left),
+    -costValue(left, 'estimated_tokens'),
+    -costValue(left, 'context_bytes'),
     -latencyValue(left),
+    -costValue(left, 'retries', 1_000_000),
   ];
   const rightTuple = [
     runtime ? right?.runtime === runtime : true,
@@ -74,7 +82,10 @@ function compareSelection(left, right, { runtime, scope, roles } = {}) {
     right?.dispatchable === true,
     roles.filter(role => rightRoles.has(role)).length,
     verifiedEvidence(right),
+    -costValue(right, 'estimated_tokens'),
+    -costValue(right, 'context_bytes'),
     -latencyValue(right),
+    -costValue(right, 'retries', 1_000_000),
   ];
   for (let index = 0; index < leftTuple.length; index += 1) {
     if (leftTuple[index] === rightTuple[index]) continue;
@@ -90,7 +101,12 @@ export function rankSelectionCandidates({
   mode, maxCandidates = 16, maxContextBytes = 12_288,
 } = {}) {
   const source = Array.isArray(candidates) ? candidates : [];
-  const bounded = source.slice(0, Number.isSafeInteger(maxCandidates) && maxCandidates > 0 ? maxCandidates : 16);
+  const roles = list(requiredRoles);
+  const limit = Number.isSafeInteger(maxCandidates) && maxCandidates > 0 ? maxCandidates : 16;
+  const bypass = mode === 'direct' || mode === 'pass_through';
+  const bounded = (bypass || explicitCapability !== undefined)
+    ? source.slice(0, limit)
+    : [...source].sort((left, right) => compareSelection(left, right, { runtime, scope, roles })).slice(0, limit);
   const omitted_candidate_count = Math.max(0, source.length - bounded.length);
   const base = {
     schema_version: 1,
@@ -99,22 +115,21 @@ export function rankSelectionCandidates({
     selected: null,
     candidates: bounded,
     omitted_candidate_count,
-    selection_order: ['explicit', 'runtime', 'scope', 'availability', 'eligibility', 'dispatchability', 'role_fit', 'verified_evidence', 'latency', 'stable_identity'],
+    selection_order: ['explicit', 'runtime', 'scope', 'availability', 'eligibility', 'dispatchability', 'role_fit', 'verified_evidence', 'estimated_tokens', 'context_bytes', 'latency', 'retries', 'stable_identity'],
     budget: { max_candidates: bounded.length, max_context_bytes: maxContextBytes },
   };
-  if (mode === 'direct' || mode === 'pass_through') {
+  if (bypass) {
     return { ...base, status: 'bypassed', reason_codes: [`${mode}_mode_bypass`], candidates: [] };
   }
-  const roles = list(requiredRoles);
   if (explicitCapability !== undefined) {
-    const explicit = bounded.find(candidate => candidateId(candidate) === String(explicitCapability));
+    const explicit = source.find(candidate => candidateId(candidate) === String(explicitCapability));
     if (!explicit) return { ...base, reason_codes: ['explicit_capability_unknown'] };
     if (explicit?.availability?.available !== true) return { ...base, reason_codes: ['explicit_capability_unavailable'] };
     if (explicit?.eligibility?.eligible !== true) return { ...base, reason_codes: ['explicit_capability_ineligible'] };
     if (explicit?.dispatchable !== true) return { ...base, reason_codes: ['explicit_capability_not_dispatchable'] };
     return { ...base, status: 'resolved', dispatch_eligible: true, selected: explicit, reason_codes: ['explicit_capability_selected'] };
   }
-  const ranked = [...bounded].sort((left, right) => compareSelection(left, right, { runtime, scope, roles }));
+  const ranked = bounded;
   const selected = ranked.find(candidate => (
     candidate?.availability?.available === true
     && candidate?.eligibility?.eligible === true
@@ -128,6 +143,87 @@ export function rankSelectionCandidates({
     candidates: ranked,
     reason_codes: selected ? ['adaptive_candidate_selected'] : ['no_dispatchable_candidate'],
   };
+}
+
+function candidateRoles(candidate) {
+  return new Set(list(candidate?.roles).concat(list(candidate?.workflow_coverage?.covered_roles)));
+}
+
+function safeStage(stage, result, candidateCount) {
+  return {
+    stage,
+    status: result?.status || 'unresolved',
+    reason_codes: Array.isArray(result?.reason_codes)
+      ? result.reason_codes.filter(value => /^[a-z0-9_:-]{1,96}$/.test(value)).slice(0, 8)
+      : [result?.reason_code || 'unresolved'],
+    candidate_count: candidateCount,
+    omitted_candidate_count: Number.isSafeInteger(result?.omitted_candidate_count) ? result.omitted_candidate_count : 0,
+  };
+}
+
+/**
+ * Apply the public decision cascade once. It is deliberately separate from
+ * semantic retrieval so direct and explicit users never pay adaptive costs.
+ */
+export function decideCapabilityRoute({
+  explicitCapability,
+  mode,
+  exactCapability,
+  workflow = {},
+  candidates = [],
+  records = [],
+  runtime,
+  scope,
+  limits = {},
+  compose = composeForDecision,
+} = {}) {
+  const source = Array.isArray(candidates) ? candidates : [];
+  const roles = list(workflow.roles || workflow.required_roles);
+  const stages = [];
+  const maxCandidates = limits.max_candidates;
+
+  if (explicitCapability !== undefined) {
+    const explicit = rankSelectionCandidates({ candidates: source, explicitCapability, runtime, scope, requiredRoles: roles, maxCandidates });
+    stages.push(safeStage('explicit', explicit, source.length));
+    return explicit.status === 'resolved'
+      ? { status: 'resolved', dispatch_eligible: true, stage: 'explicit', selected: [candidateId(explicit.selected)], explanation: { cascade: stages } }
+      : { status: 'blocked', dispatch_eligible: false, stage: 'explicit', reason_code: explicit.reason_codes?.[0] || 'explicit_capability_blocked', explanation: { cascade: stages } };
+  }
+
+  if (mode === 'direct' || mode === 'pass_through' || mode === 'trivial') {
+    const bypass = rankSelectionCandidates({ candidates: source, mode: mode === 'trivial' ? 'pass_through' : mode, maxCandidates });
+    stages.push(safeStage('direct-pass-through', bypass, source.length));
+    return { status: 'bypassed', dispatch_eligible: false, stage: 'direct-pass-through', reason_code: `${mode}_mode_bypass`, explanation: { cascade: stages } };
+  }
+
+  if (exactCapability !== undefined) {
+    const exact = rankSelectionCandidates({ candidates: source, explicitCapability: exactCapability, runtime, scope, requiredRoles: roles, maxCandidates });
+    stages.push(safeStage('exact-local-capability', exact, source.length));
+    if (exact.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'exact-local-capability', selected: [candidateId(exact.selected)], explanation: { cascade: stages } };
+  } else {
+    stages.push({ stage: 'exact-local-capability', status: 'skipped', reason_codes: ['exact_capability_not_requested'], candidate_count: source.length, omitted_candidate_count: 0 });
+  }
+
+  const roleCandidates = source.filter(candidate => roles.length > 0 && roles.every(role => candidateRoles(candidate).has(role)));
+  const roleFit = rankSelectionCandidates({ candidates: roleCandidates, runtime, scope, requiredRoles: roles, maxCandidates });
+  stages.push(safeStage('workflow-role', roleFit, roleCandidates.length));
+  if (roleFit.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'workflow-role', selected: [candidateId(roleFit.selected)], explanation: { cascade: stages } };
+
+  const composition = compose({ workflow, candidates: source, records, runtime, limits });
+  stages.push(safeStage('minimal-composition', composition, source.length));
+  if (composition.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'minimal-composition', selected: composition.selected, explanation: { cascade: stages } };
+  return {
+    status: roles.length ? 'clarify' : 'abstained',
+    dispatch_eligible: false,
+    stage: roles.length ? 'clarification' : 'abstention',
+    reason_code: composition.reason_code || roleFit.reason_codes?.[0] || 'no_dispatchable_capability',
+    explanation: { cascade: stages },
+  };
+}
+
+function composeForDecision({ workflow, candidates, records, runtime, limits }) {
+  // Late import would introduce a cycle; the caller supplies this hook below.
+  return { status: 'blocked', dispatch_eligible: false, reason_code: 'composition_unavailable' };
 }
 
 function recordId(record) {

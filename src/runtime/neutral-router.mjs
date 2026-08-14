@@ -47,6 +47,16 @@ function safeId(value) {
   return bounded(value, 128)?.replace(/[^A-Za-z0-9._:@/-]/g, '_') || null;
 }
 
+function dispatchable(capability) {
+  const invocation = capability?.invocation;
+  const authority = capability?.authority;
+  return capability?.state === 'dispatchable'
+    && capability?.dispatchable === true
+    && bounded(invocation?.method || invocation?.kind, 64)
+    && bounded(invocation?.target || invocation?.command, 128)
+    && bounded(authority?.kind || authority, 128);
+}
+
 function selectCapability(root, prompt) {
   if (!root || typeof prompt !== 'string') return null;
   const tokens = new Set(prompt.toLowerCase().match(/[a-z0-9][a-z0-9._:@/-]*/g) || []);
@@ -55,7 +65,7 @@ function selectCapability(root, prompt) {
     const id = safeId(capability?.id || capability?.name);
     const keywords = Array.isArray(capability?.keywords) ? capability.keywords : [];
     const runtimes = Array.isArray(capability?.runtimes) ? capability.runtimes : [];
-    if (!id || capability?.enabled === false || (runtimes.length && !runtimes.includes(activeRuntime)) || !keywords.length) return [];
+    if (!id || !dispatchable(capability) || capability?.enabled === false || (runtimes.length && !runtimes.includes(activeRuntime)) || !keywords.length) return [];
     const score = keywords.reduce((total, keyword) => {
       const token = bounded(keyword, 128)?.toLowerCase();
       return token && [...tokens].some(candidate => candidate === token || candidate.includes(token)) ? total + 1 : total;
@@ -68,11 +78,12 @@ function selectCapability(root, prompt) {
 
 function status(root) {
   const count = capabilityCount(root);
+  const dispatchableCount = capabilities(root).filter(dispatchable).length;
   return {
     done: 'neutral runtime active',
-    current: count ? `explicit neutral capability manifest loaded (${count})` : 'safe pass-through active',
-    blocked: count ? 'none recorded' : 'no explicit neutral capability manifest registered',
-    next: count ? 'owner-controlled capability selection remains available' : 'register capabilities.json only if adaptive selection is needed',
+    current: count ? `explicit neutral capability manifest loaded (${count}; dispatchable=${dispatchableCount})` : 'safe pass-through active',
+    blocked: dispatchableCount ? 'none recorded' : 'no dispatchable capability with invocation and authority evidence registered',
+    next: dispatchableCount ? 'owner-controlled capability selection remains available' : 'register a neutral descriptor with explicit dispatchability, invocation, and authority evidence',
     route: 'pass_through',
     owner_action: count ? 'choose_or_override_route' : 'register_capabilities_if_needed',
   };
@@ -89,6 +100,7 @@ function appendEvent(root, payload, event, route) {
     prompt_hash: bounded(payload?.prompt, 4096) ? digest(payload.prompt) : null,
     route: route?.id || 'pass_through',
     capability_count: capabilityCount(root),
+    dispatchable_count: capabilities(root).filter(dispatchable).length,
   };
   try {
     mkdirSync(root, { recursive: true });

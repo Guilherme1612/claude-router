@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { posix } from 'node:path';
 import { stableStringify } from './schema.mjs';
+import { validateCapabilityManifest, MANIFEST_STATES } from './manifest.mjs';
 
 const MAX = 128;
 const DISPATCHABLE_RUNTIMES = new Set(['claude', 'codex']);
@@ -184,6 +185,58 @@ export function mapLocalRegistry({
     counts,
     safe_empty: counts.dispatchable === 0,
     status: counts.dispatchable === 0 ? 'safe_empty' : 'dispatchable',
+  };
+  return { ...report, fingerprint: hash(report) };
+}
+
+/**
+ * Apply runtime and scope truth to a neutral manifest without rediscovering its
+ * source. A manifest can describe an arbitrary framework, but only the owning
+ * runtime/scope may make one of its records dispatchable.
+ */
+export function mapCapabilityManifest({ manifest, runtime, scope } = {}) {
+  validateCapabilityManifest(manifest);
+  const safeRuntime = text(runtime || manifest.runtime, 32) || 'unknown';
+  const requestedScope = scope || manifest.scope || { kind: 'unknown' };
+  const aliases = {};
+  for (const record of manifest.records) {
+    for (const alias of record.relationships?.aliases || []) aliases[alias] = record.stable_id;
+  }
+  const aliasResult = resolveAliases(aliases);
+  const records = manifest.records.map(input => {
+    const quarantine = new Set(input.quarantine || []);
+    if (input.runtime !== safeRuntime) quarantine.add('runtime_mismatch');
+    if (stableStringify(input.scope) !== stableStringify(requestedScope)) quarantine.add('scope_mismatch');
+    if (input.freshness === 'stale') quarantine.add('stale_manifest');
+    if (input.provenance?.symlink && !input.provenance?.symlink_target) quarantine.add('symlink_target_missing');
+    if (aliasResult.cycle.has(input.stable_id)) quarantine.add('alias_cycle');
+    const dispatchable = input.dispatchable === true && quarantine.size === 0
+      && DISPATCHABLE_RUNTIMES.has(safeRuntime);
+    const state = quarantine.size ? 'quarantined' : (dispatchable ? 'dispatchable' : input.state);
+    return {
+      ...input,
+      runtime: safeRuntime,
+      scope: requestedScope,
+      dispatchable,
+      state: MANIFEST_STATES.includes(state) ? state : 'unknown',
+      alias: aliasResult.resolved.get(input.stable_id) || null,
+      quarantine: [...quarantine].sort(),
+      reason_codes: [...new Set([...(input.reason_codes || []), ...quarantine])].sort().slice(0, MAX),
+    };
+  }).sort((left, right) => stableStringify(left).localeCompare(stableStringify(right)));
+  const counts = records.reduce((result, record) => {
+    result[record.state] = (result[record.state] || 0) + 1;
+    return result;
+  }, {});
+  const report = {
+    schema_version: 2,
+    manifest_fingerprint: manifest.fingerprint,
+    runtime: safeRuntime,
+    scope: requestedScope,
+    records,
+    counts,
+    safe_empty: (counts.dispatchable || 0) === 0,
+    status: (counts.dispatchable || 0) === 0 ? 'safe_empty' : 'dispatchable',
   };
   return { ...report, fingerprint: hash(report) };
 }

@@ -169,8 +169,9 @@ test('one command installs router, binding, Codex marker, and complete ownership
     // + 4 = 1 v2.0 evaluator module × 2 roots × 2 deploy paths
     // + 4 = 1 private local observer module × 2 roots × 2 deploy paths
     // + 8 = 2 new v2.2 modules (local mapping + continuity) × 2 roots × 2 deploy paths
-    // = 363
-    assert.equal(manifest.files.length, 363);
+    // + 4 = v2.4 neutral manifest dependency × 2 roots × 2 deploy paths
+    // = 367
+    assert.equal(manifest.files.length, 367);
     assert.equal(manifest.runtime_state_inventory.immutable.owned_by_version_manifests, true);
     assert.equal(manifest.runtime_state_inventory.mutable.some(path => path.endsWith('/active.json')), true);
     const controllerConfig = JSON.parse(readFileSync(result.controllerConfigPath, 'utf8'));

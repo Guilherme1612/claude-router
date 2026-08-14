@@ -64,6 +64,7 @@ test('neutral installation requires explicit roots and never creates runtime-loc
     assert.equal(existsSync(join(f.codexRoot, 'router')), false);
     assert.equal(existsSync(join(f.root, '.router')), false);
     assert.equal(existsSync(join(f.stateRoot, 'install-manifest.json')), true);
+    assert.equal(readFileSync(result.claudeHookPath, 'utf8'), readFileSync(result.codexHookPath, 'utf8'));
 
     const settings = JSON.parse(readFileSync(f.settingsPath, 'utf8'));
     assert.equal(settings.hooks.UserPromptSubmit.some(group => group.managed_by === 'unrelated'), true);
@@ -128,8 +129,8 @@ test('explicit neutral capability data enables deterministic owner-controlled se
       nodeBinary: process.execPath,
     });
     writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [
-      { id: 'data-inspector', keywords: ['data', 'relationship'], runtimes: ['claude'], enabled: true },
-      { id: 'other', keywords: ['data'], runtimes: ['codex'], enabled: true },
+      { id: 'data-inspector', keywords: ['data', 'relationship'], runtimes: ['claude'], enabled: true, state: 'dispatchable', dispatchable: true, invocation: { method: 'native', target: 'data-inspector' }, authority: { kind: 'owner-controlled' } },
+      { id: 'other', keywords: ['data'], runtimes: ['codex'], enabled: true, state: 'dispatchable', dispatchable: true, invocation: { method: 'native', target: 'other' }, authority: { kind: 'owner-controlled' } },
     ] }));
     const run = runHook(result.claudeHookPath, 'claude', f.stateRoot, {
       hook_event_name: 'UserPromptSubmit',
@@ -140,6 +141,23 @@ test('explicit neutral capability data enables deterministic owner-controlled se
     assert.match(run.stdout, /route=data-inspector/);
     assert.doesNotMatch(run.stdout, /inspect this data relationship/);
     assert.match(readFileSync(join(f.stateRoot, 'events.jsonl'), 'utf8'), /"route":"data-inspector"/);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral runtime quarantines metadata-only and malformed descriptors and preserves pass-through', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [
+      { id: 'metadata-only', keywords: ['data'], enabled: true },
+      { id: 'unsafe', keywords: ['data'], state: 'dispatchable', dispatchable: true, invocation: { method: 'native' } },
+    ] }));
+    const run = runHook(result.claudeHookPath, 'claude', f.stateRoot, { hook_event_name: 'UserPromptSubmit', prompt: 'inspect this data', session_id: 'session-quarantine' });
+    assert.equal(run.status, 0);
+    assert.equal(run.stdout, '');
+    assert.match(readFileSync(join(f.stateRoot, 'events.jsonl'), 'utf8'), /"route":"pass_through"/);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

@@ -1,6 +1,6 @@
 import { stableCapabilityId } from '../registry/identity.mjs';
 import { retrieveSemanticCandidates } from '../registry/semantic.mjs';
-import { rankSelectionCandidates } from './select.mjs';
+import { decideCapabilityRoute as decideCascade, rankSelectionCandidates } from './select.mjs';
 import { applyPreferences } from './preferences.mjs';
 
 export const COMPOSITION_POLICY_VERSION = 'composition-policy-v1';
@@ -38,6 +38,13 @@ function conflictsWith(candidate, selected, records) {
   return [...conflicts].some(value => selectedIds.has(value) || selected.some(item => rolesFor(item, candidateRecord(item, records)).includes(value)));
 }
 
+function candidateDispatchable(candidate) {
+  return candidate?.dispatchable === true
+    || candidate?.native_invocation
+    || candidate?.record?.dispatchable === true
+    || candidate?.record?.invocation?.availability === 'available';
+}
+
 function candidateScore(candidate) {
   const score = Number.isFinite(candidate?.score) ? candidate.score : (candidate?.intent_fit || 0);
   return score + (candidate?.preference_rank > -1 ? (candidate.preference_rank + 1) / 100000 : 0);
@@ -61,14 +68,15 @@ function blocked(reason_code, facts = {}) {
  * otherwise this is a bounded deterministic set-cover pass over eligible
  * candidates. It never makes an ineligible record executable.
  */
-export function composeCapabilities({ workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime } = {}) {
+export function composeCapabilities({ workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime, strictDispatchability = false } = {}) {
   const requiredRoles = textList(workflow?.roles || workflow?.required_roles);
   if (!requiredRoles.length) return blocked('workflow_roles_missing');
   const cap = Number.isSafeInteger(limits.max_capabilities) ? limits.max_capabilities : COMPOSITION_LIMITS.max_capabilities;
   const eligible = (Array.isArray(candidates) ? candidates : [])
     .filter(candidate => candidate?.eligibility?.eligible === true)
     .map(candidate => ({ ...candidate, record: candidateRecord(candidate, records) }))
-    .filter(candidate => candidate.record || candidate.native_invocation);
+    .filter(candidate => (candidate.record || candidate.native_invocation)
+      && (strictDispatchability ? (candidate.dispatchable === true || candidate.native_invocation) : candidateDispatchable(candidate)));
   if (!eligible.length) return blocked('no_eligible_capability');
 
   const selected = [];
@@ -118,6 +126,14 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
     risk,
     bounds: { max_capabilities: cap, max_context_bytes: limits.max_context_bytes, max_tool_calls: limits.max_tool_calls, context_bytes: contextBytes, tool_calls: toolCalls },
   };
+}
+
+/** Public cascade entry point; composition remains the final bounded stage. */
+export function decideCapabilityRoute(options = {}) {
+  return decideCascade({
+    ...options,
+    compose: args => composeCapabilities({ ...args, strictDispatchability: true }),
+  });
 }
 
 export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, explicitCapability, now } = {}) {
