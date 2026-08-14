@@ -26,13 +26,14 @@ function number(value, max = 1_000_000_000) {
   return Number.isFinite(value) && value >= 0 && value <= max ? value : null;
 }
 
-function containsForbidden(value, key = '') {
+function containsForbidden(value, key = '', seen = new Set()) {
   if (FORBIDDEN.test(key)) return true;
   if (typeof value === 'string') return FORBIDDEN.test(value);
-  if (Array.isArray(value)) return value.some(item => containsForbidden(item, key));
-  return value && typeof value === 'object'
-    ? Object.entries(value).some(([childKey, child]) => containsForbidden(child, childKey))
-    : false;
+  if (!value || typeof value !== 'object') return false;
+  if (seen.has(value)) return true;
+  seen.add(value);
+  if (Array.isArray(value)) return value.some(item => containsForbidden(item, key, seen));
+  return Object.entries(value).some(([childKey, child]) => containsForbidden(child, childKey, seen));
 }
 
 function fingerprint(value) {
@@ -117,6 +118,19 @@ export function buildFlywheelChain(events = []) {
   const correlationId = normalized[0].correlation_id;
   if (normalized.some(event => event.correlation_id !== correlationId)) return { status: 'unknown', reason_codes: ['correlation_mismatch'], privacy_safe: true };
   if (normalized.some(event => !sameScope(event, normalized[0]))) return { status: 'unknown', reason_codes: ['scope_mismatch'], privacy_safe: true };
+  const stagesSeen = new Set();
+  if (normalized.some(event => stagesSeen.has(event.stage) || !stagesSeen.add(event.stage))) {
+    return { status: 'unknown', reason_codes: ['duplicate_stage'], privacy_safe: true };
+  }
+  const terminalIndex = normalized.findIndex(event => TERMINAL_STAGES.has(event.stage));
+  if (terminalIndex >= 0 && (terminalIndex !== normalized.length - 1 || normalized.slice(terminalIndex + 1).some(event => TERMINAL_STAGES.has(event.stage)))) {
+    return { status: 'unknown', reason_codes: ['terminal_stage_conflict'], privacy_safe: true };
+  }
+  const receiptId = normalized.find(event => event.stage === 'receipt')?.receipt_id;
+  if (receiptId && normalized.some(event => ['completion', 'verification', 'outcome'].includes(event.stage)
+    && event.receipt_id && event.receipt_id !== receiptId)) {
+    return { status: 'unknown', reason_codes: ['receipt_mismatch'], privacy_safe: true };
+  }
   const orderErrors = [];
   let previous = -1;
   for (const event of normalized) {

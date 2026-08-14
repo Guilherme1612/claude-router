@@ -80,6 +80,36 @@ test('EVD-01: selected-versus-used mismatch and terminal failure are visible', (
   assert.equal(failure.privacy_safe, true);
 });
 
+test('EVD-01: duplicate stages, terminal mixing, and receipt mismatches remain unknown', () => {
+  const duplicate = buildFlywheelChain([
+    ...completeEvents(),
+    event('selected', { capability_ids: ['custom:review'] }),
+  ]);
+  assert.equal(duplicate.status, 'unknown');
+  assert.ok(duplicate.reason_codes.includes('duplicate_stage'));
+
+  const terminalMix = buildFlywheelChain([
+    ...completeEvents().slice(0, 4),
+    event('failure', { reason_code: 'invocation_failed' }),
+    ...completeEvents().slice(4),
+  ]);
+  assert.equal(terminalMix.status, 'unknown');
+  assert.ok(terminalMix.reason_codes.includes('terminal_stage_conflict'));
+
+  const receiptMismatch = buildFlywheelChain(completeEvents().map(item => item.stage === 'completion'
+    ? { ...item, receipt_id: 'receipt:other' }
+    : item));
+  assert.equal(receiptMismatch.status, 'unknown');
+  assert.ok(receiptMismatch.reason_codes.includes('receipt_mismatch'));
+});
+
+test('EVD-02: cyclic event input fails closed without throwing', () => {
+  const cyclic = event('recommendation');
+  cyclic.loop = cyclic;
+  assert.doesNotThrow(() => buildFlywheelChain([cyclic]));
+  assert.equal(buildFlywheelChain([cyclic]).status, 'unknown');
+});
+
 test('EVD-03: scoped summaries keep runtime/project/framework/role/task dimensions separate', () => {
   const first = buildFlywheelChain(completeEvents());
   const second = buildFlywheelChain(completeEvents().map(item => ({ ...item, correlation_id: 'route:2', project_id: 'project:b', framework: 'gsd-like' })));

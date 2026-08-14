@@ -93,6 +93,35 @@ test('DEC-03/05: cost ordering is stable and evidence cannot create dispatchabil
   assert.equal(onlyRecommendation.dispatch_eligible, false);
 });
 
+test('DEC-03: runtime and scope mismatches cannot become selected routes', () => {
+  const codexOnly = candidate('codex-only', ['inspect', 'review'], {
+    runtime: 'codex',
+    scope: { kind: 'project', repository: 'other', worktree: 'main' },
+    record: {
+      canonical_identity: 'codex-only',
+      composition: { roles: ['inspect', 'review'], conflicts: [] },
+      invocation: { runtime: 'codex', availability: 'available', method: 'command', target: 'codex-only' },
+    },
+  });
+  const result = decideCapabilityRoute({
+    workflow, candidates: [codexOnly], runtime: 'claude',
+    scope: { kind: 'project', repository: 'router', worktree: 'main' },
+  });
+  assert.notEqual(result.status, 'resolved');
+  assert.equal(result.dispatch_eligible, false);
+});
+
+test('DEC-04: cyclic scope metadata fails closed without throwing', () => {
+  const cyclic = candidate('cyclic', ['inspect', 'review']);
+  cyclic.scope.loop = cyclic.scope;
+  const options = {
+    workflow, candidates: [cyclic], runtime: 'claude',
+    scope: { kind: 'project', repository: 'router', worktree: 'main' },
+  };
+  assert.doesNotThrow(() => decideCapabilityRoute(options));
+  assert.equal(decideCapabilityRoute(options).dispatch_eligible, false);
+});
+
 test('DEC-04: cascade explanation is bounded reason-code data, not raw prompt or candidate payload', () => {
   const result = decideCapabilityRoute({
     workflow, candidates: [candidate('history-only', ['inspect'], { dispatchable: false })],

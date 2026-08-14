@@ -163,6 +163,108 @@ test('neutral runtime quarantines metadata-only and malformed descriptors and pr
   }
 });
 
+test('neutral runtime never dispatches a descriptor with unknown authority evidence', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [{
+      id: 'unknown-authority', keywords: ['data'], state: 'dispatchable', dispatchable: true,
+      invocation: { method: 'command', target: 'unknown-authority' },
+      authority: { ceiling: 'inspect', evidence: 'unknown' },
+    }] }));
+    const run = runHook(result.claudeHookPath, 'claude', f.stateRoot, {
+      hook_event_name: 'UserPromptSubmit', prompt: 'inspect this data', session_id: 'session-unknown-authority',
+    });
+    assert.equal(run.status, 0);
+    assert.equal(run.stdout, '');
+    assert.match(readFileSync(join(f.stateRoot, 'events.jsonl'), 'utf8'), /"route":"pass_through"/);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral runtime stays pass-through when the active runtime identity is unknown', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [{
+      id: 'unknown-runtime', keywords: ['data'], state: 'dispatchable', dispatchable: true,
+      invocation: { method: 'command', target: 'unknown-runtime' }, authority: { kind: 'inspect' },
+    }] }));
+    const run = runHook(result.claudeHookPath, 'future-runtime', f.stateRoot, {
+      hook_event_name: 'UserPromptSubmit', prompt: 'inspect this data', session_id: 'session-unknown-runtime',
+    });
+    assert.equal(run.status, 0);
+    assert.equal(run.stdout, '');
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral runtime recognizes universal command, agent, and skill identity aliases', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [
+      {
+        id: 'custom:release-command', name: 'Release Command', type: 'command',
+        aliases: ['ship it'], runtime: 'claude', state: 'dispatchable', dispatchable: true,
+        invocation: { method: 'command', target: 'release' },
+        authority: { ceiling: 'owner-controlled', evidence: 'installed' },
+      },
+      {
+        id: 'custom:review-agent', name: 'Review Agent', type: 'agent', role: 'review',
+        relationships: { aliases: ['audit changes'] }, runtime: 'claude', state: 'dispatchable', dispatchable: true,
+        invocation: { method: 'agent', target: 'review-agent' },
+        authority: { ceiling: 'owner-controlled', evidence: 'installed' },
+      },
+      {
+        id: 'custom:test-skill', name: 'Test Skill', type: 'skill', roles: ['verification'],
+        keywords: ['test suite'], runtime: 'claude', state: 'dispatchable', dispatchable: true,
+        invocation: { method: 'skill', target: 'test-skill' },
+        authority: { ceiling: 'owner-controlled', evidence: 'installed' },
+      },
+    ] }));
+
+    const prompts = [
+      ['ship it', 'custom:release-command'],
+      ['audit changes', 'custom:review-agent'],
+      ['run the test suite', 'custom:test-skill'],
+    ];
+    for (const [prompt, id] of prompts) {
+      const run = runHook(result.claudeHookPath, 'claude', f.stateRoot, {
+        hook_event_name: 'UserPromptSubmit', prompt, session_id: `session-${id}`,
+      });
+      assert.equal(run.status, 0);
+      assert.match(run.stdout, new RegExp(`route=${id}`));
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral command recognition is runtime-parity safe for Claude and Codex roots', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, codexRoot: f.codexRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({ capabilities: [{
+      id: 'custom:shared-review', type: 'future-agent', aliases: ['review this'],
+      runtimes: ['claude', 'codex'], state: 'dispatchable', dispatchable: true,
+      invocation: { method: 'command', target: 'shared-review' },
+      authority: { ceiling: 'inspect', evidence: 'installed' },
+    }] }));
+    for (const [runtime, hook] of [['claude', result.claudeHookPath], ['codex', result.codexHookPath]]) {
+      const run = runHook(hook, runtime, f.stateRoot, {
+        hook_event_name: 'UserPromptSubmit', prompt: 'please review this', session_id: `session-${runtime}`,
+      });
+      assert.equal(run.status, 0);
+      assert.match(run.stdout, /route=custom:shared-review/);
+    }
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('neutral uninstall preserves unrelated hooks and user event history', async () => {
   const f = fixture();
   try {

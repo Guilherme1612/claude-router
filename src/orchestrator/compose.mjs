@@ -45,6 +45,28 @@ function candidateDispatchable(candidate) {
     || candidate?.record?.invocation?.availability === 'available';
 }
 
+function scopeKey(value, seen = new Set()) {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'object') return String(value);
+  if (seen.has(value)) return null;
+  seen.add(value);
+  const parts = [];
+  for (const [key, item] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
+    const child = scopeKey(item, seen);
+    if (child === null) return null;
+    parts.push(`${key}=${child}`);
+  }
+  return parts.join('&');
+}
+
+function localCandidate(candidate, scope) {
+  if (scope === undefined || scope === null || scope === '') return true;
+  const candidateKey = scopeKey(candidate?.scope || candidate?.record?.scope);
+  const requestedKey = scopeKey(scope);
+  if (requestedKey === '') return true;
+  return candidateKey !== null && requestedKey !== null && candidateKey === requestedKey;
+}
+
 function candidateScore(candidate) {
   const score = Number.isFinite(candidate?.score) ? candidate.score : (candidate?.intent_fit || 0);
   return score + (candidate?.preference_rank > -1 ? (candidate.preference_rank + 1) / 100000 : 0);
@@ -68,13 +90,19 @@ function blocked(reason_code, facts = {}) {
  * otherwise this is a bounded deterministic set-cover pass over eligible
  * candidates. It never makes an ineligible record executable.
  */
-export function composeCapabilities({ workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime, strictDispatchability = false } = {}) {
+export function composeCapabilities({ workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime, scope, strictDispatchability = false } = {}) {
   const requiredRoles = textList(workflow?.roles || workflow?.required_roles);
   if (!requiredRoles.length) return blocked('workflow_roles_missing');
   const cap = Number.isSafeInteger(limits.max_capabilities) ? limits.max_capabilities : COMPOSITION_LIMITS.max_capabilities;
   const eligible = (Array.isArray(candidates) ? candidates : [])
     .filter(candidate => candidate?.eligibility?.eligible === true)
-    .map(candidate => ({ ...candidate, record: candidateRecord(candidate, records) }))
+    .map(candidate => {
+      const record = candidateRecord(candidate, records);
+      const stableId = candidate?.stable_id || candidate?.canonical_id || candidate?.id || record?.canonical_identity;
+      return { ...candidate, record, stable_id: typeof stableId === 'string' && stableId.trim() ? stableId : null };
+    })
+    .filter(candidate => candidate.stable_id)
+    .filter(candidate => localCandidate(candidate, scope || workflow?.scope))
     .filter(candidate => (candidate.record || candidate.native_invocation)
       && (strictDispatchability ? (candidate.dispatchable === true || candidate.native_invocation) : candidateDispatchable(candidate)));
   if (!eligible.length) return blocked('no_eligible_capability');
@@ -111,7 +139,9 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
   const risks = orderedSelected.map(item => item.risk?.value || item.record?.risk?.level || 'unknown');
   const risk = risks.sort((left, right) => (RISK_ORDER[right] || 0) - (RISK_ORDER[left] || 0))[0] || 'unknown';
   const nativeInvocations = orderedSelected.map(item => item.record?.invocation || item.native_invocation || null).filter(Boolean);
-  if (runtime && nativeInvocations.some(invocation => invocation.runtime !== runtime)) return blocked('native_runtime_mismatch', { runtime });
+  if (runtime && orderedSelected.some(item => (item.runtime || item.record?.invocation?.runtime || item.native_invocation?.runtime) !== runtime)) {
+    return blocked('native_runtime_mismatch', { runtime });
+  }
   return {
     schema_version: 1,
     policy_version: COMPOSITION_POLICY_VERSION,
@@ -181,6 +211,7 @@ export function resolveSemanticRoute({ intent, records = [], workflows, runtime,
     candidates: selection.candidates,
     records,
     runtime,
+    scope: preferenceScope,
     limits,
   });
   return { status: composition.status, dispatch_eligible: composition.dispatch_eligible, reason_code: composition.reason_code, retrieval, selection, composition };

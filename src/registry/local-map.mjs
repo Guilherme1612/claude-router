@@ -106,14 +106,17 @@ export function mapLocalRegistry({
   const safeScope = scope && typeof scope === 'object' && !Array.isArray(scope)
     ? Object.fromEntries(Object.entries(scope).filter(([key, value]) => ['kind', 'identity', 'repository', 'worktree'].includes(key) && text(value, 128)))
     : { kind: 'unknown' };
+  const scanValue = scan && typeof scan === 'object' && !Array.isArray(scan) ? scan : {};
+  const relationList = Array.isArray(relationships) ? relationships : [];
   const rootValue = safeRelative(root).value;
-  const rootMissing = scan.root_exists === false || (!root && scan.root_exists !== true);
-  const incomplete = scan.complete !== true;
+  const rootMissing = scanValue.root_exists === false || (!root && scanValue.root_exists !== true);
+  const incomplete = scanValue.complete !== true;
   const aliasResult = resolveAliases(aliases);
-  const relationCycles = cycleNodes(relationships);
-  const ids = new Set(entries.map(entry => text(entry?.id || entry?.name)).filter(Boolean));
+  const relationCycles = cycleNodes(relationList);
+  const sourceEntries = Array.isArray(entries) ? entries : [];
+  const ids = new Set(sourceEntries.map(entry => text(entry?.id || entry?.name)).filter(Boolean));
   const records = [];
-  for (const input of Array.isArray(entries) ? entries.slice(0, MAX) : []) {
+  for (const input of sourceEntries.slice(0, MAX)) {
     const name = text(input?.name || input?.id);
     const id = text(input?.id || name);
     const kind = text(input?.kind || input?.type, 64) || 'unknown';
@@ -127,7 +130,7 @@ export function mapLocalRegistry({
     const aliasTarget = aliasResult.resolved.get(id) || aliasResult.resolved.get(name);
     if (aliasResult.cycle.has(id) || aliasResult.cycle.has(name)) quarantine.push('alias_cycle');
     if (aliasTarget && !ids.has(aliasTarget)) quarantine.push('alias_target_missing');
-    for (const relation of Array.isArray(relationships) ? relationships : []) {
+    for (const relation of relationList) {
       if (text(relation?.from) !== id && text(relation?.from) !== name) continue;
       if (!ids.has(text(relation?.to))) quarantine.push('relationship_target_missing');
     }
@@ -149,7 +152,7 @@ export function mapLocalRegistry({
         root: rootValue,
         relative_path: path.value,
         source_fingerprint: hash({ runtime: safeRuntime, scope: safeScope, id, name, kind, path: path.value }),
-        freshness: text(input?.freshness, 32) || text(scan.freshness, 32) || 'unknown',
+        freshness: text(input?.freshness, 32) || text(scanValue.freshness, 32) || 'unknown',
       },
       alias: aliasTarget || null,
       available,
@@ -176,10 +179,10 @@ export function mapLocalRegistry({
     runtime: safeRuntime,
     scope: safeScope,
     root: rootValue,
-    scan: { complete: !incomplete, root_exists: !rootMissing, freshness: text(scan.freshness, 32) || 'unknown' },
+    scan: { complete: !incomplete, root_exists: !rootMissing, freshness: text(scanValue.freshness, 32) || 'unknown' },
     records,
     aliases: sorted([...aliasResult.resolved.entries()].map(([alias, target]) => ({ alias, target }))),
-    relationships: sorted((Array.isArray(relationships) ? relationships : []).slice(0, MAX).map(item => ({
+    relationships: sorted(relationList.slice(0, MAX).map(item => ({
       from: text(item?.from), to: text(item?.to), kind: text(item?.kind, 64) || 'unknown',
     }))),
     counts,

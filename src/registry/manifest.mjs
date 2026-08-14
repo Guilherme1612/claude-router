@@ -17,7 +17,7 @@ const SCOPES = new Set(['global', 'user', 'project', 'worktree', 'unknown']);
 const AUTHORITY = new Set(['advice', 'inspect', 'one-turn', 'persistent', 'unknown']);
 const RISK = new Set(['unknown', 'low', 'medium', 'high', 'critical', 'unacceptable']);
 const EVIDENCE = new Set(['explicit', 'inferred', 'synthetic', 'evaluation', 'installed', 'audit', 'live', 'unknown']);
-const INVOCATION_METHODS = new Set(['native', 'command', 'module', 'mcp', 'hook', 'unknown']);
+const INVOCATION_METHODS = new Set(['native', 'command', 'agent', 'skill', 'module', 'mcp', 'hook', 'unknown']);
 
 function token(value, max = 128) {
   return typeof value === 'string' && value.length > 0 && value.length <= max && TOKEN.test(value)

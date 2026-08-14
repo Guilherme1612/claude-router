@@ -44,6 +44,21 @@ test('CAP-01..04: complete future-kind descriptor preserves neutral contract fie
   assert.ok(MANIFEST_STATES.includes(record.state));
 });
 
+test('CAP-01/03: command, agent, and skill invocation methods remain dispatchable', () => {
+  for (const method of ['command', 'agent', 'skill']) {
+    const record = normalizeCapabilityDescriptor({
+      ...complete,
+      id: `custom:${method}`,
+      name: method,
+      kind: method,
+      invocation: { method, target: method },
+    });
+    assert.equal(record.invocation.method, method);
+    assert.equal(record.state, 'dispatchable');
+    assert.equal(record.dispatchable, true);
+  }
+});
+
 test('CAP-03: missing invocation or authority evidence is recommendation-only, never dispatchable', () => {
   const record = normalizeCapabilityDescriptor({
     id: 'custom:unknown', name: 'unknown', kind: 'future-kind', runtime: 'codex',

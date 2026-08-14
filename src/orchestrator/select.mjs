@@ -25,16 +25,31 @@ function list(value) {
   return typeof value === 'string' ? [value] : Array.isArray(value) ? value.filter(item => typeof item === 'string') : [];
 }
 
-function scopeKey(value) {
+function scopeKey(value, seen = new Set()) {
   if (value === undefined || value === null) return '';
   if (typeof value !== 'object') return String(value);
-  return Object.entries(value).sort(([left], [right]) => left.localeCompare(right))
-    .map(([key, item]) => `${key}=${scopeKey(item)}`).join('&');
+  if (seen.has(value)) return null;
+  seen.add(value);
+  const parts = [];
+  for (const [key, item] of Object.entries(value).sort(([left], [right]) => left.localeCompare(right))) {
+    const child = scopeKey(item, seen);
+    if (child === null) return null;
+    parts.push(`${key}=${child}`);
+  }
+  return parts.join('&');
 }
 
 function scopeMatches(candidate, requested) {
   if (requested === undefined || requested === null || requested === '') return true;
-  return scopeKey(candidate?.scope) === scopeKey(requested);
+  const candidateKey = scopeKey(candidate?.scope);
+  const requestedKey = scopeKey(requested);
+  if (requestedKey === '') return true;
+  return candidateKey !== null && requestedKey !== null && candidateKey === requestedKey;
+}
+
+function runtimeMatches(candidate, requested) {
+  if (requested === undefined || requested === null || requested === '') return true;
+  return (candidate?.runtime || candidate?.record?.invocation?.runtime) === requested;
 }
 
 function latencyValue(candidate) {
@@ -62,7 +77,7 @@ function compareSelection(left, right, { runtime, scope, roles } = {}) {
   const leftRoles = new Set(list(left?.roles).concat(list(left?.workflow_coverage?.covered_roles)));
   const rightRoles = new Set(list(right?.roles).concat(list(right?.workflow_coverage?.covered_roles)));
   const leftTuple = [
-    runtime ? left?.runtime === runtime : true,
+    runtimeMatches(left, runtime),
     scopeMatches(left, scope),
     left?.availability?.available === true,
     left?.eligibility?.eligible === true,
@@ -75,7 +90,7 @@ function compareSelection(left, right, { runtime, scope, roles } = {}) {
     -costValue(left, 'retries', 1_000_000),
   ];
   const rightTuple = [
-    runtime ? right?.runtime === runtime : true,
+    runtimeMatches(right, runtime),
     scopeMatches(right, scope),
     right?.availability?.available === true,
     right?.eligibility?.eligible === true,
@@ -104,9 +119,10 @@ export function rankSelectionCandidates({
   const roles = list(requiredRoles);
   const limit = Number.isSafeInteger(maxCandidates) && maxCandidates > 0 ? maxCandidates : 16;
   const bypass = mode === 'direct' || mode === 'pass_through';
+  const local = source.filter(candidate => runtimeMatches(candidate, runtime) && scopeMatches(candidate, scope));
   const bounded = (bypass || explicitCapability !== undefined)
     ? source.slice(0, limit)
-    : [...source].sort((left, right) => compareSelection(left, right, { runtime, scope, roles })).slice(0, limit);
+    : [...local].sort((left, right) => compareSelection(left, right, { runtime, scope, roles })).slice(0, limit);
   const omitted_candidate_count = Math.max(0, source.length - bounded.length);
   const base = {
     schema_version: 1,
@@ -124,6 +140,8 @@ export function rankSelectionCandidates({
   if (explicitCapability !== undefined) {
     const explicit = source.find(candidate => candidateId(candidate) === String(explicitCapability));
     if (!explicit) return { ...base, reason_codes: ['explicit_capability_unknown'] };
+    if (!runtimeMatches(explicit, runtime)) return { ...base, reason_codes: ['explicit_capability_runtime_mismatch'] };
+    if (!scopeMatches(explicit, scope)) return { ...base, reason_codes: ['explicit_capability_scope_mismatch'] };
     if (explicit?.availability?.available !== true) return { ...base, reason_codes: ['explicit_capability_unavailable'] };
     if (explicit?.eligibility?.eligible !== true) return { ...base, reason_codes: ['explicit_capability_ineligible'] };
     if (explicit?.dispatchable !== true) return { ...base, reason_codes: ['explicit_capability_not_dispatchable'] };
@@ -131,7 +149,9 @@ export function rankSelectionCandidates({
   }
   const ranked = bounded;
   const selected = ranked.find(candidate => (
-    candidate?.availability?.available === true
+    runtimeMatches(candidate, runtime)
+    && scopeMatches(candidate, scope)
+    && candidate?.availability?.available === true
     && candidate?.eligibility?.eligible === true
     && candidate?.dispatchable === true
   )) || null;
@@ -209,7 +229,7 @@ export function decideCapabilityRoute({
   stages.push(safeStage('workflow-role', roleFit, roleCandidates.length));
   if (roleFit.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'workflow-role', selected: [candidateId(roleFit.selected)], explanation: { cascade: stages } };
 
-  const composition = compose({ workflow, candidates: source, records, runtime, limits });
+  const composition = compose({ workflow, candidates: source, records, runtime, scope, limits });
   stages.push(safeStage('minimal-composition', composition, source.length));
   if (composition.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'minimal-composition', selected: composition.selected, explanation: { cascade: stages } };
   return {
@@ -221,7 +241,7 @@ export function decideCapabilityRoute({
   };
 }
 
-function composeForDecision({ workflow, candidates, records, runtime, limits }) {
+function composeForDecision({ workflow, candidates, records, runtime, scope, limits }) {
   // Late import would introduce a cycle; the caller supplies this hook below.
   return { status: 'blocked', dispatch_eligible: false, reason_code: 'composition_unavailable' };
 }

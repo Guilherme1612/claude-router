@@ -82,3 +82,11 @@ test('ONB-04: an empty neutral manifest maps to safe-empty without inventing a r
   assert.equal(report.safe_empty, true);
   assert.equal(report.status, 'safe_empty');
 });
+
+test('MAP-04: malformed registry containers fail open as safe-empty reports', () => {
+  const options = { runtime: 'claude', entries: null, scan: null, relationships: null };
+  assert.doesNotThrow(() => mapLocalRegistry(options));
+  const report = mapLocalRegistry(options);
+  assert.equal(report.records.length, 0);
+  assert.equal(report.safe_empty, true);
+});

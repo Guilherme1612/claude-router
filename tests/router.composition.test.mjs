@@ -63,6 +63,15 @@ test('COMP-03: missing roles and native runtime mismatch fail closed', () => {
   assert.equal(mismatch.reason_code, 'native_runtime_mismatch');
 });
 
+test('COMP-03: malformed candidates are ignored without throwing during composition', () => {
+  const malformed = candidate('malformed', ['design']);
+  delete malformed.stable_id;
+  const malformedAgain = candidate('malformed-again', ['design']);
+  delete malformedAgain.stable_id;
+  assert.doesNotThrow(() => composeCapabilities({ workflow, candidates: [malformed, malformedAgain] }));
+  assert.equal(composeCapabilities({ workflow, candidates: [malformed, malformedAgain] }).status, 'blocked');
+});
+
 test('COMP-05/06: causal proof requires actual native invocation, completion, and verification linkage', () => {
   const route = composeCapabilities({ workflow, candidates: [candidate('all', ['design', 'ux', 'implementation', 'review'])] });
   const incomplete = buildCausalProof({ route, invocation: { native_identity: 'wrong' }, completion: { state: 'completed', receipt_id: 'r1' }, verification: { verified: true, receipt_id: 'r1' } });

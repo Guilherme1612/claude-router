@@ -29,6 +29,10 @@ function runtime() {
   return RUNTIMES.has(process.env.ROUTER_RUNTIME) ? process.env.ROUTER_RUNTIME : 'unknown';
 }
 
+function words(value, max = 256) {
+  return bounded(value, max)?.normalize('NFKC').toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) || [];
+}
+
 function capabilities(root) {
   if (!root) return [];
   try {
@@ -39,10 +43,6 @@ function capabilities(root) {
   }
 }
 
-function capabilityCount(root) {
-  return capabilities(root).length;
-}
-
 function safeId(value) {
   return bounded(value, 128)?.replace(/[^A-Za-z0-9._:@/-]/g, '_') || null;
 }
@@ -50,25 +50,48 @@ function safeId(value) {
 function dispatchable(capability) {
   const invocation = capability?.invocation;
   const authority = capability?.authority;
+  const authorityObject = typeof authority === 'object' && authority;
+  const authorityEvidence = authorityObject ? authority.kind || authority.ceiling : authority;
+  const evidence = authorityObject ? authority.evidence || authority.evidence_class : null;
+  const authorityKnown = authorityObject
+    ? authority.kind
+      ? bounded(authority.kind, 128) && (!('evidence' in authority || 'evidence_class' in authority)
+        || (bounded(evidence, 64) && evidence !== 'unknown'))
+      : bounded(authority.ceiling, 128) && bounded(evidence, 64) && evidence !== 'unknown'
+    : bounded(authority, 128);
   return capability?.state === 'dispatchable'
     && capability?.dispatchable === true
     && bounded(invocation?.method || invocation?.kind, 64)
     && bounded(invocation?.target || invocation?.command, 128)
-    && bounded(authority?.kind || authority, 128);
+    && bounded(authorityEvidence, 128)
+    && authorityKnown;
 }
 
-function selectCapability(root, prompt) {
-  if (!root || typeof prompt !== 'string') return null;
-  const tokens = new Set(prompt.toLowerCase().match(/[a-z0-9][a-z0-9._:@/-]*/g) || []);
+function selectCapability(records, prompt) {
+  if (!Array.isArray(records) || typeof prompt !== 'string') return null;
+  const tokens = new Set(words(prompt, 4096));
   const activeRuntime = runtime();
-  const candidates = capabilities(root).flatMap(capability => {
+  if (activeRuntime === 'unknown') return null;
+  const candidates = records.flatMap(capability => {
     const id = safeId(capability?.id || capability?.name);
-    const keywords = Array.isArray(capability?.keywords) ? capability.keywords : [];
-    const runtimes = Array.isArray(capability?.runtimes) ? capability.runtimes : [];
-    if (!id || !dispatchable(capability) || capability?.enabled === false || (runtimes.length && !runtimes.includes(activeRuntime)) || !keywords.length) return [];
-    const score = keywords.reduce((total, keyword) => {
-      const token = bounded(keyword, 128)?.toLowerCase();
-      return token && [...tokens].some(candidate => candidate === token || candidate.includes(token)) ? total + 1 : total;
+    const relationships = capability?.relationships && typeof capability.relationships === 'object'
+      ? capability.relationships
+      : {};
+    const runtimes = [
+      ...(Array.isArray(capability?.runtimes) ? capability.runtimes : []),
+      capability?.runtime,
+    ].filter(Boolean).map(value => bounded(value, 32)?.toLowerCase()).filter(Boolean);
+    const signals = [
+      capability?.id, capability?.name, capability?.command, capability?.agent, capability?.skill,
+      capability?.keywords, capability?.aliases, capability?.role, capability?.roles,
+      relationships.aliases, relationships.equivalents,
+    ].flat(Infinity).filter(value => typeof value === 'string');
+    if (!id || !dispatchable(capability) || capability?.enabled === false || (runtimes.length && !runtimes.includes(activeRuntime)) || !signals.length) return [];
+    const score = signals.reduce((total, signal) => {
+      const signalWords = words(signal, 128);
+      const overlap = signalWords.filter(token => tokens.has(token)).length;
+      if (!overlap) return total;
+      return total + (overlap === signalWords.length ? 4 + signalWords.length : overlap);
     }, 0);
     return score ? [{ id, score }] : [];
   });
@@ -76,9 +99,9 @@ function selectCapability(root, prompt) {
   return candidates[0] || null;
 }
 
-function status(root) {
-  const count = capabilityCount(root);
-  const dispatchableCount = capabilities(root).filter(dispatchable).length;
+function status(records) {
+  const count = Array.isArray(records) ? records.length : 0;
+  const dispatchableCount = (Array.isArray(records) ? records : []).filter(dispatchable).length;
   return {
     done: 'neutral runtime active',
     current: count ? `explicit neutral capability manifest loaded (${count}; dispatchable=${dispatchableCount})` : 'safe pass-through active',
@@ -89,7 +112,7 @@ function status(root) {
   };
 }
 
-function appendEvent(root, payload, event, route) {
+function appendEvent(root, payload, event, route, records) {
   if (!root) return;
   const record = {
     ts: new Date().toISOString(),
@@ -99,8 +122,8 @@ function appendEvent(root, payload, event, route) {
     cwd_hash: bounded(payload?.cwd, 1024) ? digest(payload.cwd) : null,
     prompt_hash: bounded(payload?.prompt, 4096) ? digest(payload.prompt) : null,
     route: route?.id || 'pass_through',
-    capability_count: capabilityCount(root),
-    dispatchable_count: capabilities(root).filter(dispatchable).length,
+    capability_count: Array.isArray(records) ? records.length : 0,
+    dispatchable_count: (Array.isArray(records) ? records : []).filter(dispatchable).length,
   };
   try {
     mkdirSync(root, { recursive: true });
@@ -108,8 +131,8 @@ function appendEvent(root, payload, event, route) {
   } catch { /* lifecycle hooks are fail-open */ }
 }
 
-function briefing(event, root) {
-  const current = status(root);
+function briefing(event, records) {
+  const current = status(records);
   const output = [
     `<!-- router-neutral event=${event} -->`,
     `Done: ${current.done}.`,
@@ -125,8 +148,9 @@ function briefing(event, root) {
 export function handle(payload = {}) {
   const event = bounded(payload.hook_event_name, 64) || 'UserPromptSubmit';
   const root = stateRoot();
-  const route = selectCapability(root, payload.prompt);
-  appendEvent(root, payload, event, route);
+  const records = capabilities(root);
+  const route = selectCapability(records, payload.prompt);
+  appendEvent(root, payload, event, route, records);
   if (event === 'UserPromptSubmit' && route) {
     return { hookSpecificOutput: {
       hookEventName: event,
@@ -137,7 +161,7 @@ export function handle(payload = {}) {
   return {
     hookSpecificOutput: {
       hookEventName: event,
-      additionalContext: briefing(event, root),
+      additionalContext: briefing(event, records),
     },
   };
 }
