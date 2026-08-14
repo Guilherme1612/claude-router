@@ -90,10 +90,12 @@ function blocked(reason_code, facts = {}) {
  * otherwise this is a bounded deterministic set-cover pass over eligible
  * candidates. It never makes an ineligible record executable.
  */
-export function composeCapabilities({ workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime, scope, strictDispatchability = false } = {}) {
+export function composeCapabilities(options = {}) {
+  const { workflow, candidates = [], records = [], limits = COMPOSITION_LIMITS, runtime, scope, strictDispatchability = false } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   const requiredRoles = textList(workflow?.roles || workflow?.required_roles);
   if (!requiredRoles.length) return blocked('workflow_roles_missing');
-  const cap = Number.isSafeInteger(limits.max_capabilities) ? limits.max_capabilities : COMPOSITION_LIMITS.max_capabilities;
+  const policyLimits = limits && typeof limits === 'object' && !Array.isArray(limits) ? limits : COMPOSITION_LIMITS;
+  const cap = Number.isSafeInteger(policyLimits.max_capabilities) ? policyLimits.max_capabilities : COMPOSITION_LIMITS.max_capabilities;
   const eligible = (Array.isArray(candidates) ? candidates : [])
     .filter(candidate => candidate?.eligibility?.eligible === true)
     .map(candidate => {
@@ -133,8 +135,8 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
   const orderedSelected = ordered(selected, requiredRoles);
   const contextBytes = orderedSelected.reduce((sum, item) => sum + (item.cost?.context_bytes ?? item.record?.cost?.context_bytes ?? 0), 0);
   const toolCalls = orderedSelected.reduce((sum, item) => sum + (item.cost?.tool_calls ?? item.record?.cost?.tool_calls ?? 0), 0);
-  if (contextBytes > (limits.max_context_bytes || COMPOSITION_LIMITS.max_context_bytes)) return blocked('context_cap_exceeded', { context_bytes: contextBytes });
-  if (toolCalls > (limits.max_tool_calls || COMPOSITION_LIMITS.max_tool_calls)) return blocked('tool_call_cap_exceeded', { tool_calls: toolCalls });
+  if (contextBytes > (policyLimits.max_context_bytes || COMPOSITION_LIMITS.max_context_bytes)) return blocked('context_cap_exceeded', { context_bytes: contextBytes });
+  if (toolCalls > (policyLimits.max_tool_calls || COMPOSITION_LIMITS.max_tool_calls)) return blocked('tool_call_cap_exceeded', { tool_calls: toolCalls });
   const effects = [...new Set(orderedSelected.flatMap(item => textList(item.record?.effects)))].sort();
   const risks = orderedSelected.map(item => item.risk?.value || item.record?.risk?.level || 'unknown');
   const risk = risks.sort((left, right) => (RISK_ORDER[right] || 0) - (RISK_ORDER[left] || 0))[0] || 'unknown';
@@ -154,7 +156,7 @@ export function composeCapabilities({ workflow, candidates = [], records = [], l
     native_invocations: nativeInvocations,
     effects,
     risk,
-    bounds: { max_capabilities: cap, max_context_bytes: limits.max_context_bytes, max_tool_calls: limits.max_tool_calls, context_bytes: contextBytes, tool_calls: toolCalls },
+    bounds: { max_capabilities: cap, max_context_bytes: policyLimits.max_context_bytes, max_tool_calls: policyLimits.max_tool_calls, context_bytes: contextBytes, tool_calls: toolCalls },
   };
 }
 
@@ -166,7 +168,8 @@ export function decideCapabilityRoute(options = {}) {
   });
 }
 
-export function resolveSemanticRoute({ intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, explicitCapability, now } = {}) {
+export function resolveSemanticRoute(options = {}) {
+  const { intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, explicitCapability, now } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   let retrieval = retrieveSemanticCandidates({ intent, records, workflows });
   const preferenceList = Array.isArray(preferences) ? preferences : [];
   if (retrieval.status === 'ambiguous' && preferenceList.length) {
@@ -221,7 +224,8 @@ export function resolveSemanticRoute({ intent, records = [], workflows, runtime,
  * Bind the decision to actual invocation/completion/verification evidence.
  * A recommendation can be displayed without proof; an executed route cannot.
  */
-export function buildCausalProof({ intent, route, workflow, action, lease, invocation, completion, verification } = {}) {
+export function buildCausalProof(options = {}) {
+  const { intent, route, workflow, action, lease, invocation, completion, verification } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   if (!route || route.status !== 'resolved') return { status: 'incomplete', reason_code: 'route_unresolved' };
   const selected = Array.isArray(route.selected) ? route.selected : [];
   const actual = invocation?.native_identity || invocation?.capability_id;

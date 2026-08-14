@@ -72,6 +72,19 @@ test('COMP-03: malformed candidates are ignored without throwing during composit
   assert.equal(composeCapabilities({ workflow, candidates: [malformed, malformedAgain] }).status, 'blocked');
 });
 
+test('COMP-03: malformed composition limits fail closed to bounded defaults', () => {
+  const result = composeCapabilities({ workflow, candidates: [candidate('all', ['design', 'ux', 'implementation', 'review'])], limits: null });
+  assert.equal(result.status, 'resolved');
+  assert.equal(result.bounds.max_capabilities, 4);
+});
+
+test('COMP-03/05: null composition and proof inputs fail closed without throwing', () => {
+  assert.doesNotThrow(() => composeCapabilities(null));
+  assert.equal(composeCapabilities(null).reason_code, 'workflow_roles_missing');
+  assert.doesNotThrow(() => buildCausalProof(null));
+  assert.equal(buildCausalProof(null).reason_code, 'route_unresolved');
+});
+
 test('COMP-05/06: causal proof requires actual native invocation, completion, and verification linkage', () => {
   const route = composeCapabilities({ workflow, candidates: [candidate('all', ['design', 'ux', 'implementation', 'review'])] });
   const incomplete = buildCausalProof({ route, invocation: { native_identity: 'wrong' }, completion: { state: 'completed', receipt_id: 'r1' }, verification: { verified: true, receipt_id: 'r1' } });

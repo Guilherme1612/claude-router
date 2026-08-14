@@ -111,10 +111,11 @@ function compareSelection(left, right, { runtime, scope, roles } = {}) {
 }
 
 /** Rank bounded candidates by independent gates; never collapse them into an authority score. */
-export function rankSelectionCandidates({
-  candidates = [], explicitCapability, runtime, scope, requiredRoles = [],
-  mode, maxCandidates = 16, maxContextBytes = 12_288,
-} = {}) {
+export function rankSelectionCandidates(options = {}) {
+  const {
+    candidates = [], explicitCapability, runtime, scope, requiredRoles = [],
+    mode, maxCandidates = 16, maxContextBytes = 12_288,
+  } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   const source = Array.isArray(candidates) ? candidates : [];
   const roles = list(requiredRoles);
   const limit = Number.isSafeInteger(maxCandidates) && maxCandidates > 0 ? maxCandidates : 16;
@@ -185,22 +186,24 @@ function safeStage(stage, result, candidateCount) {
  * Apply the public decision cascade once. It is deliberately separate from
  * semantic retrieval so direct and explicit users never pay adaptive costs.
  */
-export function decideCapabilityRoute({
-  explicitCapability,
-  mode,
-  exactCapability,
-  workflow = {},
-  candidates = [],
-  records = [],
-  runtime,
-  scope,
-  limits = {},
-  compose = composeForDecision,
-} = {}) {
+export function decideCapabilityRoute(options = {}) {
+  const {
+    explicitCapability,
+    mode,
+    exactCapability,
+    workflow = {},
+    candidates = [],
+    records = [],
+    runtime,
+    scope,
+    limits = {},
+    compose = composeForDecision,
+  } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   const source = Array.isArray(candidates) ? candidates : [];
   const roles = list(workflow.roles || workflow.required_roles);
   const stages = [];
-  const maxCandidates = limits.max_candidates;
+  const policyLimits = limits && typeof limits === 'object' && !Array.isArray(limits) ? limits : {};
+  const maxCandidates = policyLimits.max_candidates;
 
   if (explicitCapability !== undefined) {
     const explicit = rankSelectionCandidates({ candidates: source, explicitCapability, runtime, scope, requiredRoles: roles, maxCandidates });
@@ -229,7 +232,9 @@ export function decideCapabilityRoute({
   stages.push(safeStage('workflow-role', roleFit, roleCandidates.length));
   if (roleFit.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'workflow-role', selected: [candidateId(roleFit.selected)], explanation: { cascade: stages } };
 
-  const composition = compose({ workflow, candidates: source, records, runtime, scope, limits });
+  const composition = typeof compose === 'function'
+    ? compose({ workflow, candidates: source, records, runtime, scope, limits })
+    : composeForDecision({ workflow, candidates: source, records, runtime, scope, limits });
   stages.push(safeStage('minimal-composition', composition, source.length));
   if (composition.status === 'resolved') return { status: 'resolved', dispatch_eligible: true, stage: 'minimal-composition', selected: composition.selected, explanation: { cascade: stages } };
   return {
@@ -286,7 +291,8 @@ function closureBlocked(reason_code, id, kind = 'unknown') {
 }
 
 /** Resolve only declared registry edges into a pure, deterministic closure. */
-export function resolveDependencies({ roots = [], registry, requestedScope } = {}) {
+export function resolveDependencies(options = {}) {
+  const { roots = [], registry, requestedScope } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   if (!registry || !Array.isArray(registry.records)) return blocked('registry_invalid', { closure: [] });
   const records = [...registry.records].sort(compareNodes);
   const recordsById = new Map();
@@ -383,18 +389,19 @@ function declarationFor(workflowId, declarations) {
  * prompt text and registry names are deliberately not selection inputs.
  */
 export function selectCapabilities(options = {}) {
-  const token = resolvedToken(options.workflow);
+  const input = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
+  const token = resolvedToken(input.workflow);
   if (!token) return blocked('workflow_not_dispatch_eligible');
 
-  const declaration = declarationFor(token.workflow_id, options.workflowDeclarations);
+  const declaration = declarationFor(token.workflow_id, input.workflowDeclarations);
   if (!declaration) return blocked('workflow_declaration_invalid', { workflow_id: token.workflow_id });
 
-  const registry = typeof options.getRegistry === 'function' ? options.getRegistry() : options.registry;
+  const registry = typeof input.getRegistry === 'function' ? input.getRegistry() : input.registry;
   if (!registry || !Array.isArray(registry.records)) {
     return blocked('registry_invalid', { workflow_id: token.workflow_id });
   }
 
-  const explicit = options.explicitCapability;
+  const explicit = input.explicitCapability;
   if (explicit !== undefined && (!validId(explicit) || !declaration.compatible.includes(explicit))) {
     return blocked('explicit_capability_incompatible', {
       workflow_id: token.workflow_id,
@@ -405,7 +412,7 @@ export function selectCapabilities(options = {}) {
   const roots = explicit === undefined
     ? canonicalIds([...declaration.owners, ...declaration.requirements])
     : canonicalIds([explicit, ...declaration.requirements]);
-  const closure = resolveDependencies({ roots, registry, requestedScope: options.requestedScope });
+  const closure = resolveDependencies({ roots, registry, requestedScope: input.requestedScope });
   return {
     ...closure,
     workflow_id: token.workflow_id,

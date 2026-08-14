@@ -33,6 +33,13 @@ function selectedWorkflow(overrides = {}) {
   };
 }
 
+test('malformed dependency and capability selection input fails closed without throwing', () => {
+  assert.doesNotThrow(() => resolveDependencies(null));
+  assert.equal(resolveDependencies(null).reason_code, 'registry_invalid');
+  assert.doesNotThrow(() => selectCapabilities(null));
+  assert.equal(selectCapabilities(null).reason_code, 'workflow_not_dispatch_eligible');
+});
+
 function workflowDeclaration(overrides = {}) {
   return {
     workflow_id: 'gsd-execute-phase',

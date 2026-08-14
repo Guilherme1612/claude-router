@@ -122,6 +122,18 @@ test('DEC-04: cyclic scope metadata fails closed without throwing', () => {
   assert.equal(decideCapabilityRoute(options).dispatch_eligible, false);
 });
 
+test('DEC-04: malformed decision limits fail open to bounded defaults', () => {
+  const result = decideCapabilityRoute({ workflow, candidates: [candidate('all', ['inspect', 'review'])], runtime: 'claude', limits: null });
+  assert.equal(result.status, 'resolved');
+  assert.deepEqual(result.selected, ['all']);
+});
+
+test('DEC-04: null decision input abstains without throwing', () => {
+  assert.doesNotThrow(() => decideCapabilityRoute(null));
+  assert.equal(decideCapabilityRoute(null).status, 'abstained');
+  assert.equal(decideCapabilityRoute(null).dispatch_eligible, false);
+});
+
 test('DEC-04: cascade explanation is bounded reason-code data, not raw prompt or candidate payload', () => {
   const result = decideCapabilityRoute({
     workflow, candidates: [candidate('history-only', ['inspect'], { dispatchable: false })],

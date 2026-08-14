@@ -90,3 +90,10 @@ test('MAP-04: malformed registry containers fail open as safe-empty reports', ()
   assert.equal(report.records.length, 0);
   assert.equal(report.safe_empty, true);
 });
+
+test('MAP-04: null onboarding inputs fail open without inventing capability authority', () => {
+  assert.doesNotThrow(() => mapLocalRegistry(null));
+  assert.doesNotThrow(() => createCapabilityManifest(null));
+  assert.equal(mapLocalRegistry(null).safe_empty, true);
+  assert.equal(createCapabilityManifest(null).safe_empty, true);
+});

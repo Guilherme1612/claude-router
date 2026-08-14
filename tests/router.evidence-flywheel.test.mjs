@@ -141,3 +141,10 @@ test('EVD-02/05: raw content is rejected before it can enter a chain or learning
   assert.ok(chain.reason_codes.includes('event_privacy_forbidden'));
   assert.doesNotMatch(JSON.stringify(chain), /private prompt/);
 });
+
+test('EVD-04/05: null improvement inputs remain denied or unknown without throwing', () => {
+  assert.doesNotThrow(() => proposeShadowImprovement(null));
+  assert.equal(proposeShadowImprovement(null).status, 'denied');
+  assert.doesNotThrow(() => closeFlywheel(null));
+  assert.equal(closeFlywheel(null).status, 'unknown');
+});

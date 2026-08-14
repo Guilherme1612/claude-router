@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { rankSelectionCandidates } from '../src/orchestrator/select.mjs';
+import { decideCapabilityRoute, rankSelectionCandidates } from '../src/orchestrator/select.mjs';
 
 function candidate(stable_id, overrides = {}) {
   return {
@@ -55,4 +55,22 @@ test('candidate and context budgets are explicit and bounded', () => {
   assert.equal(result.candidates.length, 2);
   assert.equal(result.omitted_candidate_count, 1);
   assert.deepEqual(result.budget, { max_candidates: 2, max_context_bytes: 2048 });
+});
+
+test('malformed selection input fails closed without throwing', () => {
+  assert.doesNotThrow(() => rankSelectionCandidates(null));
+  const result = rankSelectionCandidates(null);
+  assert.equal(result.status, 'unresolved');
+  assert.equal(result.dispatch_eligible, false);
+});
+
+test('malformed composition hook fails closed without throwing', () => {
+  const candidateValue = candidate('composition-fallback', { roles: undefined });
+  candidateValue.record = { canonical_identity: 'composition-fallback', composition: { roles: ['review'] } };
+  assert.doesNotThrow(() => decideCapabilityRoute({
+    workflow: { roles: ['review'] }, candidates: [candidateValue], compose: null,
+  }));
+  assert.equal(decideCapabilityRoute({
+    workflow: { roles: ['review'] }, candidates: [candidateValue], compose: null,
+  }).reason_code, 'composition_unavailable');
 });

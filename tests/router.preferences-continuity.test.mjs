@@ -48,6 +48,12 @@ test('PREF-04: an applicable preference resolves an otherwise ambiguous semantic
   assert.deepEqual(result.retrieval.reason_codes, ['preference_tiebreak_resolved']);
 });
 
+test('PREF-04: null semantic route input remains safe-empty', () => {
+  assert.doesNotThrow(() => resolveSemanticRoute(null));
+  assert.equal(resolveSemanticRoute(null).status, 'unresolved');
+  assert.equal(resolveSemanticRoute(null).dispatch_eligible, false);
+});
+
 test('PREF-01/02: narrower preferences win only among eligible candidates', () => {
   const result = applyPreferences({
     candidates,

@@ -188,7 +188,8 @@ export function summarizeScopedEvidence(chains = []) {
   return [...summary.values()].sort((left, right) => stableStringify(left.scope).localeCompare(stableStringify(right.scope)));
 }
 
-export function proposeShadowImprovement({ chain, proposal, minimum_verified = 1 } = {}) {
+export function proposeShadowImprovement(options = {}) {
+  const { chain, proposal, minimum_verified = 1 } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   if (!chain || chain.privacy_safe !== true || chain.verified_outcomes < minimum_verified) {
     return { status: 'denied', reason_code: 'verified_evidence_insufficient', authority_unchanged: true };
   }
@@ -216,7 +217,8 @@ export function proposeShadowImprovement({ chain, proposal, minimum_verified = 1
   return { ...result, fingerprint: fingerprint(result) };
 }
 
-export function closeFlywheel({ chain, shadow, canary = 'pending', snapshot_epoch = null } = {}) {
+export function closeFlywheel(options = {}) {
+  const { chain, shadow, canary = 'pending', snapshot_epoch = null } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   if (!chain || chain.status === 'unknown' || chain.verified_outcomes < 1) return { status: 'unknown', reason_code: 'verified_outcome_missing', authority_unchanged: true };
   if (!shadow || shadow.status !== 'shadow') return { status: 'unknown', reason_code: 'shadow_proposal_missing', authority_unchanged: true };
   if (canary === 'promoted') return { status: 'promoted', next_snapshot_epoch: token(snapshot_epoch), authority_unchanged: true, permission_unchanged: true };

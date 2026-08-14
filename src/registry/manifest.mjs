@@ -275,7 +275,8 @@ export function validateCapabilityManifest(manifest) {
   return true;
 }
 
-export function createCapabilityManifest({ runtime = 'unknown', scope = { kind: 'unknown' }, framework = 'unknown', owner = null, epoch = 'unknown', records = [], defaults = {} } = {}) {
+export function createCapabilityManifest(options = {}) {
+  const { runtime = 'unknown', scope = { kind: 'unknown' }, framework = 'unknown', owner = null, epoch = 'unknown', records = [], defaults = {} } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   const normalized = (Array.isArray(records) ? records : []).slice(0, MAX_RECORDS)
     .map(record => normalizeCapabilityDescriptor(record, { runtime, scope, owner, ...defaults }))
     .sort((left, right) => left.stable_id.localeCompare(right.stable_id));

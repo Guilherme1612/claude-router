@@ -93,15 +93,16 @@ function stateFor({ unknown, quarantined, diagnosticOnly, dispatchable, eligible
  * Map already-gathered arbitrary local registry data without invoking or
  * discovering anything. Native adapters remain responsible for acquisition.
  */
-export function mapLocalRegistry({
-  runtime = 'unknown',
-  scope = { kind: 'unknown' },
-  root = null,
-  scan = {},
-  entries = [],
-  aliases = {},
-  relationships = [],
-} = {}) {
+export function mapLocalRegistry(options = {}) {
+  const {
+    runtime = 'unknown',
+    scope = { kind: 'unknown' },
+    root = null,
+    scan = {},
+    entries = [],
+    aliases = {},
+    relationships = [],
+  } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
   const safeRuntime = text(runtime, 32) || 'unknown';
   const safeScope = scope && typeof scope === 'object' && !Array.isArray(scope)
     ? Object.fromEntries(Object.entries(scope).filter(([key, value]) => ['kind', 'identity', 'repository', 'worktree'].includes(key) && text(value, 128)))
