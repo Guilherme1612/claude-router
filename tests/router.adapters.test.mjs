@@ -125,6 +125,25 @@ test('native discovery is deterministic, inert, contained, and ignores arbitrary
   } finally { rmSync(f.root, { recursive: true, force: true }); }
 });
 
+test('known shared skill symlinks retain virtual provenance while arbitrary links stay quarantined', () => {
+  const f = fixture();
+  try {
+    put(join(f.root, '.agents/skills/shared/SKILL.md'), markdown('shared-skill', '/shared-skill'));
+    symlinkSync(join(f.root, '.agents/skills/shared'), join(f.claudeRoot, 'skills/shared'));
+    symlinkSync(join(f.root, '.agents/skills/shared'), join(f.codexRoot, 'skills/shared'));
+    const result = claude.discoverRoots({ claudeRoot: f.claudeRoot });
+    const codexResult = codex.discoverRoots({ codexRoot: f.codexRoot });
+    const shared = result.observations.find((entry) => entry.name === 'shared-skill');
+    assert.ok(shared);
+    assert.equal(shared.provenance[0].relative_path, 'skills/shared/SKILL.md');
+    assert.equal(result.diagnostics.some((entry) => entry.relative_path === 'skills/shared'), false);
+    assert.ok(result.diagnostics.some((entry) => entry.relative_path === 'skills/escape.json'));
+    assert.ok(codexResult.observations.some((entry) => entry.name === 'shared-skill'));
+    assert.equal(codexResult.diagnostics.some((entry) => entry.relative_path === 'skills/shared'), false);
+    assertPortable(result, f.root);
+  } finally { rmSync(f.root, { recursive: true, force: true }); }
+});
+
 test('Claude discovery ignores plugin metadata and keeps installed plugin skills', () => {
   const root = mkdtempSync(join(tmpdir(), 'router-adapters-plugin-metadata-'));
   const claudeRoot = join(root, 'claude');

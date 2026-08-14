@@ -1522,7 +1522,6 @@ function readTelemetryMetadata(path) {
       records.push({
         ts: typeof row.ts === 'number' ? row.ts : Date.parse(row.ts) || 0,
         prompt_signature: row.prompt_signature || null,
-        cwd: row.cwd || null,
         suggested_mode: row.suggested_mode || row.selected_route?.id || null,
         confidence_tier: row.confidence_tier || null,
         selected_route: row.selected_route && typeof row.selected_route === 'object' ? {
@@ -2295,6 +2294,10 @@ export function saveCache(cache, path = CACHE) {
 // form would silently miss (CR-02). The 20-char AWS key also falls below the
 // 32+ char generic fallback, so without the `i` flag it leaked into the hash.
 const SECRET_RE = /(?:sk-[A-Za-z0-9]{20,}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{36}|xoxb-[0-9A-Za-z]+|gho_[A-Za-z0-9]{36}|glpat-[A-Za-z0-9_-]{20}|[A-Za-z0-9_\-]{32,}={0,2})/gi;
+const PRIVATE_TELEMETRY_FIELDS = new Set([
+  'prompt', 'raw_prompt', 'cwd', 'working_directory', 'transcript_path',
+  'session_id', 'tool_input', 'tool_response', 'stdout', 'stderr', 'downstream_event',
+]);
 export function redact(s) {
   return String(s).replace(SECRET_RE, '[REDACTED]');
 }
@@ -2316,7 +2319,10 @@ export function promptSignature(normalizedPrompt, intentKeywords) {
 // (fail-open: still return the additionalContext to the caller).
 export function logTelemetry(entry, telemetryPath = TELEMETRY) {
   try {
-    const line = JSON.stringify(entry) + '\n';
+    const safeEntry = entry && typeof entry === 'object'
+      ? Object.fromEntries(Object.entries(entry).filter(([key]) => !PRIVATE_TELEMETRY_FIELDS.has(String(key).toLowerCase())))
+      : {};
+    const line = JSON.stringify(safeEntry) + '\n';
     const existedBefore = existsSync(telemetryPath);
     appendFileSync(telemetryPath, line, { flag: 'a' });
     if (!existedBefore) {
@@ -3481,7 +3487,6 @@ export function telemetryEntryFromState(decision, startNs) {
     evolved_after: decision.evolvedAfter || null,
     surface_status: decision.surface_status || 'unconfigured',
     surface_disabled_count: typeof decision.surface_disabled_count === 'number' ? decision.surface_disabled_count : 0,
-    cwd: decision.cwd,
     // SAF-01: derived mtime-fingerprint of the mode-map/manifest/weights mtimes
     // that produced this route's cache key. Observability only — no prompt text.
     routing_version: decision.routing_version || null,
@@ -4042,8 +4047,6 @@ function main(payload, { additionalContext = '', skipRouting = false } = {}) {
       startNs,
       source: {
         session_id: payload?.session_id || null,
-        cwd: payload?.cwd || process.cwd(),
-        transcript_path: payload?.transcript_path || null,
       },
     });
   } catch { /* observer is strictly fail-open */ }
@@ -4100,7 +4103,6 @@ export function explainLastDecision(options = {}) {
     evolved_after: latest.evolved_after || null,
     surface_status: latest.surface_status || 'unconfigured',
     surface_disabled_count: typeof latest.surface_disabled_count === 'number' ? latest.surface_disabled_count : 0,
-    cwd: latest.cwd || null,
     outcome: latest.outcome ?? null,
     downstream_invocations: latest.downstream_invocations ?? null,
   };
@@ -4134,7 +4136,6 @@ export function explainLastDecision(options = {}) {
     evolved_after: decision.evolved_after,
     surface_status: decision.surface_status,
     surface_disabled_count: decision.surface_disabled_count,
-    cwd: decision.cwd,
     privacy_note: privacy.note,
   };
 }

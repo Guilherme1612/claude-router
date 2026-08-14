@@ -1,14 +1,17 @@
 // Plan 03-02 / Task 1: 4 new telemetry fields + Phase 1 regression preservation.
-// Verifies weight_applied, outcomes, evolved_after, cwd land on each entry
+// Verifies weight_applied, outcomes, and evolved_after land on each entry
 // (D-23 / RESEARCH §11), and that the existing 13-field schema is preserved.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 
-const HOOK = join(homedir(), '.claude', 'hooks', 'router.mjs');
+const HOOK_ROOT = mkdtempSync(join(tmpdir(), 'router-telemetry-evolved-source-'));
+const HOOK = join(HOOK_ROOT, 'router.mjs');
+writeFileSync(HOOK, readFileSync(new URL('../src/runtime/router.mjs', import.meta.url)));
+writeFileSync(join(HOOK_ROOT, 'router.evolve.mjs'), readFileSync(new URL('../src/runtime/router.evolve.mjs', import.meta.url)));
+process.on('exit', () => rmSync(HOOK_ROOT, { recursive: true, force: true }));
 const R = await import(HOOK);
 const { logTelemetry } = R;
 
@@ -20,7 +23,7 @@ const SCHEMA_FIELDS = [
   'suggested_agents', 'confidence_tier', 'invoke_kind', 'graphify_queried',
   'graph_status', 'guards_fired', 'downstream_invocations', 'outcome', 'latency_ms',
 ];
-const NEW_FIELDS = ['weight_applied', 'outcomes', 'evolved_after', 'cwd'];
+const NEW_FIELDS = ['weight_applied', 'outcomes', 'evolved_after'];
 
 test('telemetry: 13 legacy fields still present after the Phase 3 add', () => {
   const dir = mkdtempSync(join(tmpdir(), 'router-tel-evo-legacy-'));
@@ -96,7 +99,7 @@ test('telemetry: weight_applied + outcomes are null on first run (before worker 
   }
 });
 
-test('telemetry: cwd field matches process.cwd()', () => {
+test('telemetry: raw cwd is not persisted by the router entry builder', () => {
   const dir = mkdtempSync(join(tmpdir(), 'router-tel-evo-cwd-'));
   try {
     const tPath = join(dir, 'telemetry.jsonl');
@@ -108,7 +111,10 @@ test('telemetry: cwd field matches process.cwd()', () => {
       weight_applied: null, outcomes: null, evolved_after: null, cwd: process.cwd(),
     }, tPath);
     const p = JSON.parse(readFileSync(tPath, 'utf8').trim());
-    assert.equal(p.cwd, process.cwd());
+    assert.equal('cwd' in p, false);
+    logTelemetry({ CWD: '/private/project' }, tPath);
+    const lines = readFileSync(tPath, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal('CWD' in lines.at(-1), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

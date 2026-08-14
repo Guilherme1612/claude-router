@@ -10,6 +10,10 @@ export const DEFAULT_OBSERVER_ROOT = join(homedir(), '.route-build');
 const MAX_TEXT = 32 * 1024;
 const MAX_VALUE = 4096;
 const SUCCESS = new Set(['completed', 'success', 'succeeded', 'verified']);
+const PRIVATE_KEYS = new Set([
+  'prompt', 'raw_prompt', 'cwd', 'working_directory', 'transcript_path',
+  'session_id', 'tool_input', 'tool_response', 'stdout', 'stderr', 'downstream_event',
+]);
 
 const secretPatterns = [
   /(bearer\s+)[a-z0-9._~+/=-]+/gi,
@@ -32,9 +36,16 @@ function safeValue(value, depth = 0) {
   }
   if (Array.isArray(value)) return value.slice(0, 32).map(item => safeValue(item, depth + 1));
   if (typeof value !== 'object') return null;
-  return Object.fromEntries(Object.entries(value).slice(0, 32).map(([key, item]) => [
+  return Object.fromEntries(Object.entries(value)
+    .filter(([key]) => !PRIVATE_KEYS.has(String(key).toLowerCase()))
+    .slice(0, 32).map(([key, item]) => [
     safeText(key, 128), safeValue(item, depth + 1),
   ]));
+}
+
+function privateHash(value) {
+  if (value === undefined || value === null || value === '') return null;
+  return createHash('sha256').update(String(value), 'utf8').digest('hex').slice(0, 32);
 }
 
 function numberOrNull(value) {
@@ -56,13 +67,25 @@ function feedbackIdentity(input = {}) {
     receipt_id: technicalId(input.receipt_id || source.receipt_id || outcome.receipt_id),
     verification_id: technicalId(input.verification_id || source.verification_id || outcome.verification_id),
     runtime: technicalId(input.runtime || source.runtime || input.framework?.runtime, 32),
-    session_id: technicalId(input.session_id || source.session_id, 128),
+    session_id: privateHash(input.session_id || source.session_id),
   };
   const material = Object.fromEntries(Object.entries(identity).filter(([, value]) => value));
   if (!Object.keys(material).length) return null;
   const correlation_id = createHash('sha256')
     .update(stableStringify(material), 'utf8').digest('hex').slice(0, 32);
   return { ...material, correlation_id };
+}
+
+function safeSource(value = {}) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return {
+    event: safeText(value.event, 128),
+    seam: safeText(value.seam, 128),
+    session_hash: privateHash(value.session_id || value.session_hash),
+    tool_use_hash: privateHash(value.tool_use_id || value.tool_use_hash),
+    receipt_id: technicalId(value.receipt_id),
+    verification_id: technicalId(value.verification_id),
+  };
 }
 
 function metricRecord(value = {}) {
@@ -115,7 +138,7 @@ export function normalizeEvent(input = {}, { now = Date.now, id = randomUUID } =
     feedback: feedbackIdentity(input),
     cost,
     outcome: safeValue(input.outcome || {}),
-    source: safeValue(input.source || {}),
+    source: safeSource(input.source),
     metadata: safeMetadata(input.metadata),
   };
 }
@@ -228,7 +251,7 @@ export function recordDecision(prompt, decision, { runtime = null, startNs = nul
     },
     cost: { ...telemetry, wall_ms: wallMs },
     outcome: { status: 'routed', verified: null },
-    source: { seam: 'router.main', cwd: process.cwd(), ...source },
+    source: { seam: 'router.main', ...source },
   });
 }
 
@@ -260,7 +283,6 @@ export function recordHook(payload, { runtime = null } = {}) {
       event: payload.hook_event_name || null,
       session_id: payload.session_id || null,
       tool_use_id: payload.tool_use_id || null,
-      cwd: payload.cwd || process.cwd(),
       receipt_id: payload.receipt_id || null,
       verification_id: payload.verification_id || null,
     },
@@ -274,28 +296,54 @@ export function correlateEvents(events = []) {
     : [];
   const active = new Map();
   for (const row of rows) {
-    const sessionId = row.feedback?.correlation_id || row.source?.session_id;
-    if (!sessionId) continue;
+    const correlationKeys = [...new Set([
+      row.feedback?.correlation_id,
+      row.source?.session_hash,
+      row.source?.session_id,
+    ].filter(Boolean))];
+    if (!correlationKeys.length) continue;
     if (row.event_type === 'prompt') {
       row.outcome = {
         ...(row.outcome || {}), status: 'routed', verified: null,
         correlation: row.feedback?.correlation_id ? 'feedback_id' : 'session_id',
       };
-      active.set(sessionId, row);
+      for (const key of correlationKeys) active.set(key, row);
       continue;
     }
-    const prompt = active.get(sessionId);
+    const prompt = correlationKeys.map((key) => active.get(key)).find(Boolean);
     if (!prompt) continue;
     const eventName = row.source?.event;
     const previous = prompt.outcome?.status;
+    const selected = [
+      prompt.route?.selected,
+      ...(Array.isArray(prompt.route?.skills) ? prompt.route.skills : []),
+      ...(Array.isArray(prompt.route?.agents) ? prompt.route.agents : []),
+    ].map(value => typeof value === 'string' ? value.trim().toLowerCase() : '').filter(Boolean);
+    const observed = [
+      row.capability_kind,
+      row.action_contract,
+      ...(Array.isArray(row.metadata?.capabilities) ? row.metadata.capabilities : []),
+    ].map(value => typeof value === 'string' ? value.trim().toLowerCase() : '').filter(Boolean);
+    const matchedCapability = ['PostToolUse', 'PostToolUseFailure'].includes(eventName)
+      ? observed.find(value => selected.includes(value)) || null
+      : null;
+    const correlation = row.feedback?.correlation_id ? 'feedback_id' : 'session_id';
+    const invocationEvidence = matchedCapability
+      ? {
+        downstream_invoked: true,
+        observed_capability: matchedCapability,
+        ...(eventName === 'PostToolUse' ? { actual_used: true } : { invocation_failed: true }),
+      }
+      : {};
     if (eventName === 'PostToolUseFailure') {
-      prompt.outcome = { status: 'failed', verified: false, correlation: row.feedback?.correlation_id ? 'feedback_id' : 'session_id', failure_event: row.event_id };
+      prompt.outcome = { ...(prompt.outcome || {}), ...invocationEvidence, status: 'failed', verified: false, correlation, failure_event: row.event_id };
     } else if (eventName === 'Stop' && previous !== 'failed') {
       prompt.outcome = {
-        status: 'completed', verified: true,
-        correlation: row.feedback?.correlation_id ? 'feedback_id' : 'session_id',
+        ...(prompt.outcome || {}), status: 'completed', verified: true, correlation,
         verification: 'observed_stop',
       };
+    } else if (eventName === 'PostToolUse' && matchedCapability) {
+      prompt.outcome = { ...(prompt.outcome || {}), ...invocationEvidence, status: 'routed', verified: null, correlation };
     }
     prompt.cost = {
       ...(prompt.cost || {}),

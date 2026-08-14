@@ -1,4 +1,4 @@
-import { basename, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { createAdapter } from './claude.mjs';
 
 function layout(rel) {
@@ -45,7 +45,9 @@ export const normalizeArtifact = adapter.normalizeArtifact;
 export const compileInvocation = adapter.compileInvocation;
 export function discoverRoots(options = {}) {
   if (!options.codexRoot) throw new TypeError('codexRoot is required');
-  const roots = [{ root: options.codexRoot, logicalRoot: 'codex_home', scope: { kind: 'global' } }];
+  const home = dirname(resolve(options.codexRoot));
+  const trustedRoots = options.trustedRoots || [join(home, '.agents', 'skills'), join(home, '.claude', 'skill-sources')];
+  const roots = [{ root: options.codexRoot, logicalRoot: 'codex_home', scope: { kind: 'global' }, trustedRoots }];
   if (options.projectRoot) { const id = String(options.scopeId || basename(resolve(options.projectRoot))); roots.push({ root: join(options.projectRoot, '.codex'), logicalRoot: `project:${id}:codex`, scope: { kind: 'project', repository: `repo:${id}`, worktree: `worktree:${id}` } }); }
   return adapter.discover(roots);
 }

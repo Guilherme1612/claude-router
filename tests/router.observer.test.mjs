@@ -6,6 +6,7 @@ import {
   compareEvidence,
   correlateEvents,
   createLocalObserver,
+  normalizeEvent,
   observerPaths,
   proposeChanges,
   readReceipts,
@@ -62,6 +63,33 @@ test('enabled observer persists ordered private events outside the repository', 
   assert.equal(statSync(paths.data).mode & 0o777, 0o700);
   assert.equal(statSync(paths.events).mode & 0o777, 0o600);
   assert.equal(observer.stats().written, 2);
+});
+
+test('observer drops sensitive fields and pseudonymizes session identity', async () => {
+  const root = join(tempRoot(), '.route-build');
+  mkdirSync(root);
+  const observer = createLocalObserver({ root });
+  observer.record(event({
+    source: {
+      session_id: 'session-1',
+      cwd: '/private/project',
+      transcript_path: '/private/transcript.jsonl',
+    },
+    metadata: {
+      tool_input: { secret: 'private tool input' },
+      downstream_event: 'private downstream output',
+    },
+  }));
+  await observer.flush();
+  const raw = readFileSync(observerPaths(root).events, 'utf8');
+  const row = JSON.parse(raw);
+  assert.equal(raw.includes('/private/project'), false);
+  assert.equal(raw.includes('/private/transcript.jsonl'), false);
+  assert.equal(raw.includes('session-1'), false);
+  assert.equal(raw.includes('private tool input'), false);
+  assert.equal(raw.includes('private downstream output'), false);
+  assert.match(row.feedback.session_id, /^[a-f0-9]{32}$/);
+  assert.equal(row.source.session_hash, row.feedback.session_id);
 });
 
 test('queue overflow and writer failure are explicit and fail open', async () => {
@@ -144,6 +172,50 @@ test('correlation marks only observed completion or failure, never inferred succ
   assert.equal(rows[0].outcome.correlation, 'session_id');
   assert.equal(rows[0].cost.tool_calls, 1);
   assert.equal(rows[3].outcome.status, 'routed');
+});
+
+test('correlation records matched downstream use before observed completion', () => {
+  const rows = correlateEvents([
+    event({
+      ts: 1,
+      source: { session_id: 'use-session' },
+      route: { selected: 'implementation', skills: ['debug-skill'], agents: [] },
+    }),
+    event({
+      ts: 2,
+      event_type: 'hook',
+      prompt: null,
+      source: { session_id: 'use-session', event: 'PostToolUse' },
+      capability_kind: 'Skill',
+      metadata: { capabilities: ['Skill', 'debug-skill'] },
+      cost: { tool_calls: 1 },
+    }),
+    event({ ts: 3, event_type: 'hook', prompt: null, source: { session_id: 'use-session', event: 'Stop' } }),
+  ]);
+  assert.equal(rows[0].outcome.status, 'completed');
+  assert.equal(rows[0].outcome.verified, true);
+  assert.equal(rows[0].outcome.actual_used, true);
+  assert.equal(rows[0].outcome.downstream_invoked, true);
+  assert.equal(rows[0].outcome.observed_capability, 'debug-skill');
+});
+
+test('correlation falls back to the pseudonymous session when feedback IDs differ', () => {
+  const rows = correlateEvents([
+    normalizeEvent({
+      event_type: 'prompt',
+      source: { session_id: 'same-session' },
+      route: { selected: 'implementation', skills: ['debug-skill'] },
+    }),
+    normalizeEvent({
+      event_type: 'hook',
+      source: { session_id: 'same-session', event: 'PostToolUse' },
+      capability_kind: 'Skill',
+      metadata: { capabilities: ['Skill', 'debug-skill'] },
+    }),
+    normalizeEvent({ event_type: 'hook', source: { session_id: 'same-session', event: 'Stop' } }),
+  ]);
+  assert.equal(rows[0].outcome.actual_used, true);
+  assert.equal(rows[0].outcome.verified, true);
 });
 
 test('offline analysis consumes existing local receipts without copying them into observer data', () => {

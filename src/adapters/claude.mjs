@@ -23,41 +23,45 @@ function diagnostic(code, runtime, logicalRoot, path, reason, severity = 'build-
   return { code, runtime, logical_root: logicalRoot, relative_path: portable(path), reason, severity,
     ...(localPath ? { local_path: localPath } : {}) };
 }
-function walk(root, runtime, logicalRoot) {
+function walk(root, runtime, logicalRoot, trustedRoots = []) {
   const files = [], diagnostics = [], visited = new Set();
   // Prune dependency trees and VCS metadata: these never carry router-relevant
   // capabilities, and descending into them makes the scanner parse JSONC
   // tsconfig.json files inside plugin package caches as strict JSON, which
   // dispatch-blocks the whole registry candidate.
-  const PRUNE = new Set(['node_modules', '.git', 'tests', 'fixtures']);
-  function visit(path) {
+  const PRUNE = new Set(['node_modules', '.git', 'tests', 'fixtures', '.venv', 'venv', 'tmp']);
+  const trusted = trustedRoots.map((value) => {
+    try { return realpathSync(resolve(value)); } catch { return null; }
+  }).filter(Boolean);
+  const allowed = (value) => within(root, value) || trusted.some((trustedRoot) => within(trustedRoot, value));
+  function visit(path, virtualPath = path) {
     const stat = lstatSync(path);
     let actual = path;
     let effective = stat;
     if (stat.isSymbolicLink()) {
       try {
         actual = realpathSync(path);
-        if (!within(root, actual)) {
-          diagnostics.push(diagnostic('path_escape', runtime, logicalRoot, relative(root, path), 'resolved artifact leaves supplied root'));
+        if (!allowed(actual)) {
+          diagnostics.push(diagnostic('path_escape', runtime, logicalRoot, relative(root, virtualPath), 'resolved artifact leaves supplied root'));
           return;
         }
         effective = statSync(actual);
       } catch (error) {
-        diagnostics.push(diagnostic('unsafe_link', runtime, logicalRoot, relative(root, path), error?.code || 'unreadable_link'));
+        diagnostics.push(diagnostic('unsafe_link', runtime, logicalRoot, relative(root, virtualPath), error?.code || 'unreadable_link'));
         return;
       }
     }
-    if (effective.isFile()) files.push(path);
+    if (effective.isFile()) files.push({ path: virtualPath, actual });
     else if (effective.isDirectory()) {
       const canonical = realpathSync(actual);
       if (visited.has(canonical)) {
-        diagnostics.push(diagnostic('cycle', runtime, logicalRoot, relative(root, path) || '.', 'canonical directory already visited'));
+        diagnostics.push(diagnostic('cycle', runtime, logicalRoot, relative(root, virtualPath) || '.', 'canonical directory already visited'));
         return;
       }
       visited.add(canonical);
       for (const name of readdirSync(canonical).sort()) {
       if (PRUNE.has(name)) continue;
-        visit(join(canonical, name));
+        visit(join(canonical, name), join(virtualPath, name));
       }
     }
   }
@@ -358,8 +362,13 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     try { actual = realpathSync(requested); } catch (error) {
       return { diagnostic: diagnostic('unreadable_artifact', runtime, logicalRoot, relative(root, requested), error.message, 'build-blocking', requested) };
     }
-    if (!within(root, actual)) return { diagnostic: diagnostic('path_escape', runtime, logicalRoot, relative(root, requested), 'resolved artifact leaves supplied root', 'build-blocking', requested) };
-    const relativePath = portable(relative(root, actual));
+    const trustedRoots = (options.trustedRoots || []).map((value) => {
+      try { return realpathSync(resolve(value)); } catch { return null; }
+    }).filter(Boolean);
+    if (!within(root, actual) && !trustedRoots.some((trustedRoot) => within(trustedRoot, actual))) {
+      return { diagnostic: diagnostic('path_escape', runtime, logicalRoot, relative(root, requested), 'resolved artifact leaves supplied root', 'build-blocking', requested) };
+    }
+    const relativePath = portable(options.relativePath || relative(root, actual));
     const recognized = layout(relativePath);
     if (!recognized) return { ignored: true };
     const bytes = readFileSync(actual);
@@ -480,12 +489,18 @@ export function createAdapter({ runtime, adapterVersion, layout, configExpander 
     const observations = [], diagnostics = [];
     for (const spec of [...rootSpecs].sort((a, b) => a.logicalRoot.localeCompare(b.logicalRoot))) {
       let canonicalRoot; try { canonicalRoot = realpathSync(resolve(spec.root)); } catch (error) { if (error?.code === 'ENOENT') continue; throw error; }
-      const walked = walk(canonicalRoot, runtime, spec.logicalRoot);
+      const walked = walk(canonicalRoot, runtime, spec.logicalRoot, spec.trustedRoots);
       diagnostics.push(...walked.diagnostics);
-      for (const path of walked.files.sort()) {
-        const rel = portable(relative(canonicalRoot, path));
+      for (const file of walked.files.sort((a, b) => a.path.localeCompare(b.path))) {
+        const rel = portable(relative(canonicalRoot, file.path));
         if (!layout(rel)) continue;
-        const parsed = parseArtifact(path, { root: canonicalRoot, logicalRoot: spec.logicalRoot, scope: spec.scope });
+        const parsed = parseArtifact(file.actual, {
+          root: canonicalRoot,
+          logicalRoot: spec.logicalRoot,
+          scope: spec.scope,
+          relativePath: rel,
+          trustedRoots: spec.trustedRoots,
+        });
         if (parsed.diagnostic) diagnostics.push(parsed.diagnostic);
         if (parsed.partial) observations.push(normalizePartial(parsed.partial));
         else for (const record of parsed.records || (parsed.data ? [parsed] : [])) observations.push(normalizeArtifact(record, canonicalRoot));
@@ -505,7 +520,9 @@ export const normalizeArtifact = adapter.normalizeArtifact;
 export const compileInvocation = adapter.compileInvocation;
 export function discoverRoots(options = {}) {
   if (!options.claudeRoot) throw new TypeError('claudeRoot is required');
-  const roots = [{ root: options.claudeRoot, logicalRoot: 'claude_global', scope: { kind: 'global' } }];
+  const home = dirname(resolve(options.claudeRoot));
+  const trustedRoots = options.trustedRoots || [join(home, '.agents', 'skills')];
+  const roots = [{ root: options.claudeRoot, logicalRoot: 'claude_global', scope: { kind: 'global' }, trustedRoots }];
   if (options.projectRoot) { const id = String(options.scopeId || basename(resolve(options.projectRoot))); roots.push({ root: join(options.projectRoot, '.claude'), logicalRoot: `project:${id}:claude`, scope: { kind: 'project', repository: `repo:${id}`, worktree: `worktree:${id}` } }); }
   return adapter.discover(roots);
 }

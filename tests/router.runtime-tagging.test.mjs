@@ -117,6 +117,7 @@ test('telemetry: telemetryEntryFromState emits a runtime field in {claude, codex
     `runtime field must be claude|codex, got ${entry.runtime}`,
   );
   assert.equal(entry.route_id, 'gsd-debug', 'telemetry must carry the selected route anchor');
+  assert.equal('cwd' in entry, false, 'telemetry must not persist raw cwd');
 });
 
 // --- Fail-open enum clamp (V5 input validation boundary / T-31-01) ----------

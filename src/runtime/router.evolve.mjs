@@ -89,7 +89,7 @@ export const DEFAULT_MAX_SIGNAL_PATTERNS = 15;
  * @param {RegExp} [opts.badPhrases=BAD_PHRASES]
  * @param {Set<string>} [opts.goodCommands=GOOD_COMMANDS]
  * @param {Set<string>} [opts.badCommands=BAD_COMMANDS]
- * @returns {Array<{prompt_signature, ts, cwd, suggested_mode, outcome, downstream_event: string|null}>}
+ * @returns {Array<{prompt_signature, ts, suggested_mode, outcome, downstream_event: string|null}>}
  */
 export function correlateOutcomes(telemetry, opts = {}) {
   const winMs = (opts.windowMinutes ?? WINDOW_MINUTES) * 60 * 1000;
@@ -133,7 +133,6 @@ export function correlateOutcomes(telemetry, opts = {}) {
     out.push({
       prompt_signature: E.prompt_signature,
       ts: E.ts,
-      cwd: E.cwd || null,
       suggested_mode: E.suggested_mode,
       outcome,
       downstream_event,

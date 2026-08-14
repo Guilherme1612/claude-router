@@ -380,7 +380,8 @@ test('explainLastDecision export reads latest valid telemetry line without raw p
     assert.equal(out.evolved_after, '2026-07-10T00:00:00.000Z');
     assert.equal(out.surface_status, 'configured');
     assert.equal(out.surface_disabled_count, 4);
-    assert.equal(out.cwd, dir);
+    assert.equal('cwd' in out, false, 'explain-last must not expose raw cwd');
+    assert.equal('cwd' in out.decision, false, 'explain-last decision must not expose raw cwd');
     assert.equal(out.decision.prompt_signature, signature);
     assert.equal(out.decision.selected_route.mode, 'gsd-debug');
     assert.equal(out.privacy.raw_prompt_stored, false);
