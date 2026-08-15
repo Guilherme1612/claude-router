@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -93,6 +93,70 @@ test('active and one LKG capsule persist privately and recover only corrupt acti
     assert.doesNotMatch(JSON.stringify(recovered), new RegExp(canary));
     writeFileSync(paths.active, 'x'.repeat(CAPSULE_LIMITS.bytes + 1));
     assert.equal(loadCapsule({ ownedRoot: root }).status, 'recovered_lkg');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('repeated capsule reads reuse an unchanged snapshot and observe mutations', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-capsule-cache-'));
+  try {
+    saveCapsule({ ownedRoot: root, capsule: capsule() });
+    const paths = capsulePaths(root);
+    let reads = 0;
+    const io = {
+      existsSync,
+      lstatSync,
+      statSync,
+      readFileSync(...args) {
+        reads += 1;
+        return readFileSync(...args);
+      },
+    };
+    assert.equal(loadCapsule({ ownedRoot: root, fs: io }).status, 'active');
+    assert.equal(loadCapsule({ ownedRoot: root, fs: io }).status, 'active');
+    assert.equal(reads, 1, 'unchanged capsule reads should parse once');
+
+    writeFileSync(paths.active, stableCapsuleStringify(capsule({ freshness: { captured_at: 200, generation: 'phase-15-b' } })) + '\n');
+    const changed = loadCapsule({ ownedRoot: root, fs: io });
+    assert.equal(changed.status, 'active');
+    assert.equal(changed.capsule.freshness.captured_at, 200);
+    assert.equal(reads, 2, 'a changed capsule must be re-read');
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('capsule storage I/O errors fail closed instead of escaping the loader', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-capsule-io-'));
+  try {
+    const io = {
+      existsSync: () => true,
+      lstatSync: () => { throw new Error('permission denied'); },
+      statSync,
+      readFileSync,
+    };
+    assert.deepEqual(loadCapsule({ ownedRoot: root, fs: io }), {
+      status: 'corrupt', reason_code: 'capsule_corrupt',
+    });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('transient capsule read errors are retried instead of being cached as corruption', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'router-capsule-retry-'));
+  try {
+    saveCapsule({ ownedRoot: root, capsule: capsule() });
+    let fail = true;
+    const io = {
+      existsSync,
+      lstatSync,
+      statSync,
+      readFileSync(...args) {
+        if (fail) {
+          fail = false;
+          throw new Error('transient read failure');
+        }
+        return readFileSync(...args);
+      },
+    };
+    assert.equal(loadCapsule({ ownedRoot: root, fs: io }).status, 'corrupt');
+    assert.equal(loadCapsule({ ownedRoot: root, fs: io }).status, 'active');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

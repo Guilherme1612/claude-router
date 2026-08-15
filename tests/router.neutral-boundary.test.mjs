@@ -146,6 +146,30 @@ test('explicit neutral capability data enables deterministic owner-controlled se
   }
 });
 
+test('neutral runtime accepts the normalized manifest records shape without changing trust gates', async () => {
+  const f = fixture();
+  try {
+    const result = await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    writeFileSync(join(f.stateRoot, 'capabilities.json'), JSON.stringify({
+      schema_version: 1,
+      records: [{
+        stable_id: 'manifest:data-inspector', name: 'data inspector', type: 'skill',
+        roles: ['relationship'], runtime: 'claude', state: 'dispatchable', dispatchable: true,
+        invocation: { method: 'skill', target: 'data-inspector' },
+        authority: { ceiling: 'inspect', evidence: 'installed' },
+        privacy: { raw_content: false },
+      }],
+    }));
+    const run = runHook(result.claudeHookPath, 'claude', f.stateRoot, {
+      hook_event_name: 'UserPromptSubmit', prompt: 'inspect this relationship', session_id: 'manifest-record',
+    });
+    assert.equal(run.status, 0);
+    assert.match(run.stdout, /route=manifest:data-inspector/);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
 test('neutral runtime quarantines metadata-only and malformed descriptors and preserves pass-through', async () => {
   const f = fixture();
   try {
@@ -286,6 +310,52 @@ test('neutral uninstall preserves unrelated hooks and user event history', async
     assert.equal(existsSync(join(f.stateRoot, 'install-manifest.json')), false);
     const settings = JSON.parse(readFileSync(f.settingsPath, 'utf8'));
     assert.equal(settings.hooks.UserPromptSubmit.some(group => group.managed_by === 'unrelated'), true);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral uninstall rejects a manifest binding outside the installed runtime before mutation', async () => {
+  const f = fixture();
+  try {
+    await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    const foreignSettings = join(f.root, 'foreign-settings.json');
+    const foreignBytes = JSON.stringify({ hooks: { SessionStart: [{ managed_by: 'sentinel' }] } }, null, 2) + '\n';
+    writeFileSync(foreignSettings, foreignBytes);
+    const manifestPath = join(f.stateRoot, 'install-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.bindings.push({ settings_path: foreignSettings, event: 'SessionStart', router_path: join(f.root, 'foreign-hook.mjs') });
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    const settingsBefore = readFileSync(f.settingsPath, 'utf8');
+    await assert.rejects(
+      uninstallNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot }),
+      /neutral ownership manifest path is invalid/,
+    );
+    assert.equal(readFileSync(f.settingsPath, 'utf8'), settingsBefore);
+    assert.equal(readFileSync(foreignSettings, 'utf8'), foreignBytes);
+  } finally {
+    rmSync(f.root, { recursive: true, force: true });
+  }
+});
+
+test('neutral uninstall rejects a manifest file outside the installed state before mutation', async () => {
+  const f = fixture();
+  try {
+    await installNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot, nodeBinary: process.execPath });
+    const foreignFile = join(f.root, 'foreign-router.mjs');
+    const foreignBytes = 'preserve this file\n';
+    writeFileSync(foreignFile, foreignBytes);
+    const manifestPath = join(f.stateRoot, 'install-manifest.json');
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    manifest.files.push({ path: foreignFile, fingerprint: '0'.repeat(64) });
+    writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
+    const settingsBefore = readFileSync(f.settingsPath, 'utf8');
+    await assert.rejects(
+      uninstallNeutralRouter({ claudeRoot: f.claudeRoot, stateRoot: f.stateRoot }),
+      /neutral ownership manifest path is invalid/,
+    );
+    assert.equal(readFileSync(f.settingsPath, 'utf8'), settingsBefore);
+    assert.equal(readFileSync(foreignFile, 'utf8'), foreignBytes);
   } finally {
     rmSync(f.root, { recursive: true, force: true });
   }

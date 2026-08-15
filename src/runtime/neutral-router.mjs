@@ -37,7 +37,8 @@ function capabilities(root) {
   if (!root) return [];
   try {
     const value = JSON.parse(readFileSync(join(root, 'capabilities.json'), 'utf8'));
-    return Array.isArray(value?.capabilities) ? value.capabilities.slice(0, 128) : [];
+    const records = Array.isArray(value?.capabilities) ? value.capabilities : value?.records;
+    return Array.isArray(records) ? records.slice(0, 128) : [];
   } catch {
     return [];
   }
@@ -73,7 +74,7 @@ function selectCapability(records, prompt) {
   const activeRuntime = runtime();
   if (activeRuntime === 'unknown') return null;
   const candidates = records.flatMap(capability => {
-    const id = safeId(capability?.id || capability?.name);
+    const id = safeId(capability?.id || capability?.stable_id || capability?.name);
     const relationships = capability?.relationships && typeof capability.relationships === 'object'
       ? capability.relationships
       : {};

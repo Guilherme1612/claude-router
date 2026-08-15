@@ -15,6 +15,7 @@ export const CAPSULE_LIMITS = Object.freeze({
 const STATUSES = ['active', 'blocked', 'paused', 'completed', 'cancelled', 'superseded'];
 const TERMINAL = new Set(['completed', 'cancelled', 'superseded']);
 const WITNESSES = new Set(['mtime', 'sha256', 'version', 'generation']);
+const CAPSULE_CACHE = new Map();
 const byteLength = value => Buffer.byteLength(value, 'utf8');
 const digest = value => createHash('sha256').update(value, 'utf8').digest('hex');
 const diagnostic = (reason_code, path) => ({ valid: false, reason_code, path });
@@ -148,12 +149,37 @@ function durable(path, bytes) {
   const fd = openSync(path, 'wx', 0o600);
   try { writeFileSync(fd, bytes, 'utf8'); fsyncSync(fd); } finally { closeSync(fd); }
 }
-function parsePath(path) {
-  if (!existsSync(path)) return { status: 'missing' };
-  if (unsafe(path) || !lstatSync(path).isFile()) return { status: 'unsafe' };
-  if (statSync(path).size > CAPSULE_LIMITS.bytes) return { status: 'corrupt' };
+function capsuleIo(fs = {}) {
+  return {
+    existsSync: fs.existsSync || existsSync,
+    lstatSync: fs.lstatSync || lstatSync,
+    statSync: fs.statSync || statSync,
+    readFileSync: fs.readFileSync || readFileSync,
+  };
+}
+
+function fileSignature(path, io) {
   try {
-    const value = JSON.parse(readFileSync(path, 'utf8'));
+    if (!io.existsSync(path)) return 'missing';
+    const link = io.lstatSync(path);
+    if (link.isSymbolicLink()) return 'symlink';
+    if (!link.isFile()) return 'not-file';
+    const info = io.statSync(path);
+    return `file:${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+  } catch {
+    return 'error';
+  }
+}
+
+function parsePath(path, io = capsuleIo()) {
+  try {
+    if (!io.existsSync(path)) return { status: 'missing' };
+    const link = io.lstatSync(path);
+    if (link.isSymbolicLink() || !link.isFile()) return { status: 'unsafe' };
+    if (io.statSync(path).size > CAPSULE_LIMITS.bytes) return { status: 'corrupt' };
+    let bytes;
+    try { bytes = io.readFileSync(path, 'utf8'); } catch { return { status: 'unavailable' }; }
+    const value = JSON.parse(bytes);
     const valid = validateCapsule(value);
     return valid.valid ? { status: 'valid', capsule: canonicalizeCapsule(value) } : { status: 'corrupt' };
   } catch { return { status: 'corrupt' }; }
@@ -163,6 +189,7 @@ export function saveCapsule({ ownedRoot, capsule }) {
   const bytes = stableCapsuleStringify(capsule) + '\n';
   if (typeof ownedRoot === 'string' && existsSync(ownedRoot) && lstatSync(ownedRoot).isSymbolicLink()) return { status: 'blocked', reason_code: 'unsafe_owned_root' };
   const p = capsulePaths(ownedRoot);
+  CAPSULE_CACHE.delete(p.root);
   mkdirSync(p.root, { recursive: true, mode: 0o700 });
   if (unsafe(p.active) || unsafe(p.lkg)) return { status: 'blocked', reason_code: 'unsafe_capsule_path' };
   const prior = parsePath(p.active);
@@ -183,16 +210,27 @@ export function saveCapsule({ ownedRoot, capsule }) {
   }
 }
 
-export function loadCapsule({ ownedRoot }) {
+export function loadCapsule({ ownedRoot, fs = {} }) {
   if (typeof ownedRoot === 'string' && existsSync(ownedRoot) && lstatSync(ownedRoot).isSymbolicLink()) return { status: 'blocked', reason_code: 'unsafe_owned_root' };
   let p;
   try { p = capsulePaths(ownedRoot); } catch { return { status: 'blocked', reason_code: 'owned_root_invalid' }; }
-  const active = parsePath(p.active);
-  if (active.status === 'valid') return { status: 'active', reason_code: 'capsule_valid', capsule: active.capsule };
-  if (active.status === 'unsafe') return { status: 'blocked', reason_code: 'unsafe_capsule_path' };
-  if (active.status === 'missing') return { status: 'missing', reason_code: 'capsule_missing' };
-  const lkg = parsePath(p.lkg);
-  if (lkg.status === 'valid') return { status: 'recovered_lkg', reason_code: 'active_corrupt', capsule: lkg.capsule };
-  if (lkg.status === 'unsafe') return { status: 'blocked', reason_code: 'unsafe_capsule_path' };
-  return { status: 'corrupt', reason_code: 'capsule_corrupt' };
+  const io = capsuleIo(fs);
+  const signature = `${fileSignature(p.active, io)}|${fileSignature(p.lkg, io)}`;
+  const cached = CAPSULE_CACHE.get(p.root);
+  if (cached?.signature === signature) return cached.result;
+  const active = parsePath(p.active, io);
+  let cacheable = active.status !== 'unavailable';
+  let result;
+  if (active.status === 'valid') result = { status: 'active', reason_code: 'capsule_valid', capsule: active.capsule };
+  else if (active.status === 'unsafe') result = { status: 'blocked', reason_code: 'unsafe_capsule_path' };
+  else if (active.status === 'missing') result = { status: 'missing', reason_code: 'capsule_missing' };
+  else {
+    const lkg = parsePath(p.lkg, io);
+    cacheable &&= lkg.status !== 'unavailable';
+    if (lkg.status === 'valid') result = { status: 'recovered_lkg', reason_code: 'active_corrupt', capsule: lkg.capsule };
+    else if (lkg.status === 'unsafe') result = { status: 'blocked', reason_code: 'unsafe_capsule_path' };
+    else result = { status: 'corrupt', reason_code: 'capsule_corrupt' };
+  }
+  if (cacheable) CAPSULE_CACHE.set(p.root, { signature, result });
+  return result;
 }

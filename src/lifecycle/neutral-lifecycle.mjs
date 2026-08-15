@@ -216,6 +216,19 @@ export async function uninstallNeutralRouter(options = {}) {
   if (!existsSync(p.manifestPath)) return { status: 'already-uninstalled', removed: [], retained: [] };
   const manifest = jsonObject(p.manifestPath, null, 'neutral ownership manifest');
   if (manifest?.managed_by !== OWNER || manifest.schema_version !== NEUTRAL_MANIFEST_SCHEMA_VERSION) throw new Error('neutral ownership manifest is invalid; no files were removed');
+  const allowedBindings = new Set([
+    ...(p.claudeSettingsPath ? EVENTS.claude.map(event => `${p.claudeSettingsPath}\0${event}\0${p.claudeHookPath}`) : []),
+    ...(p.codexHooksPath ? EVENTS.codex.map(event => `${p.codexHooksPath}\0${event}\0${p.codexHookPath}`) : []),
+  ]);
+  for (const entry of manifest.bindings || []) {
+    if (!allowedBindings.has(`${entry?.settings_path}\0${entry?.event}\0${entry?.router_path}`)) {
+      throw new Error('neutral ownership manifest path is invalid; no files were removed');
+    }
+  }
+  const allowedFiles = new Set(files(p));
+  for (const entry of manifest.files || []) {
+    if (!allowedFiles.has(entry?.path)) throw new Error('neutral ownership manifest path is invalid; no files were removed');
+  }
   const removed = [];
   for (const entry of manifest.bindings || []) {
     if (!existsSync(entry.settings_path)) continue;

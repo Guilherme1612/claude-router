@@ -49,6 +49,14 @@ export const SEMANTIC_WORKFLOWS = Object.freeze([
     evidence_needs: Object.freeze(['tests', 'report']), max_capabilities: 3,
   }),
   Object.freeze({
+    workflow_id: 'website-build-verification', goal: 'build',
+    subjects: Object.freeze(['web', 'website', 'browser', 'interface']),
+    operations: Object.freeze(['build', 'implement', 'verify', 'test']),
+    roles: Object.freeze(['implementation', 'browser-verification']),
+    aliases: Object.freeze(['build and verify a website', 'website browser acceptance']),
+    evidence_needs: Object.freeze(['browser', 'screenshots', 'report']), max_capabilities: 2,
+  }),
+  Object.freeze({
     workflow_id: 'bug-diagnosis-fix', goal: 'diagnose-fix',
     subjects: Object.freeze(['codebase', 'bug']),
     operations: Object.freeze(['diagnose', 'fix', 'verify']),
@@ -250,6 +258,13 @@ function workflowFor(intent, declarations) {
     hints.has(workflow.workflow_id)
     || (workflow.goal === intent?.goal && overlap(workflow.subjects, intent?.subjects) > 0)
   ));
+  const taskFamilies = new Set(textValues(intent?.task_family_candidates));
+  const derived = matching.filter(workflow => (
+    hints.has(workflow.workflow_id)
+    && !taskFamilies.has(workflow.workflow_id)
+    && workflow.workflow_id !== 'coordinator-workflow'
+  ));
+  if (derived.length) return derived.slice(0, RETRIEVAL_LIMITS.max_candidates);
   return (matching.length ? matching : workflows.filter(workflow => (
     overlap(workflow.subjects, intent?.subjects) > 0
     || overlap(workflow.operations, intent?.operations) > 0
@@ -313,7 +328,7 @@ function candidateDiagnostics(record, intent, workflow, eligibility) {
  * Discovery and contract construction stay off this path; eligibility remains
  * the single execution gate and every diagnostic dimension is independent.
  */
-export function retrieveSemanticCandidates({ intent, records = [], relationships = {}, workflows } = {}) {
+export function retrieveSemanticCandidates({ intent, records = [], relationships = {}, workflows, allowPartial = false } = {}) {
   if (!intent || typeof intent !== 'object') {
     return { schema_version: 1, policy_version: SEMANTIC_RETRIEVAL_POLICY_VERSION, status: 'unresolved', dispatch_eligible: false, reason_codes: ['invalid_structured_intent'], candidates: [] };
   }
@@ -329,7 +344,10 @@ export function retrieveSemanticCandidates({ intent, records = [], relationships
   }
   diagnostics.sort((left, right) => right.score - left.score || left.stable_id.localeCompare(right.stable_id));
   const candidates = diagnostics.slice(0, RETRIEVAL_LIMITS.max_candidates);
-  const eligible = candidates.filter(candidate => candidate.eligibility.eligible && candidate.workflow_coverage.complete);
+  const complete = candidates.filter(candidate => candidate.eligibility.eligible && candidate.workflow_coverage.complete);
+  const eligible = allowPartial
+    ? candidates.filter(candidate => candidate.eligibility.eligible)
+    : complete;
   if (!eligible.length) {
     return {
       schema_version: 1,

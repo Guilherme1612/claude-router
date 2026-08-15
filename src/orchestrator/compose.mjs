@@ -1,5 +1,5 @@
 import { stableCapabilityId } from '../registry/identity.mjs';
-import { retrieveSemanticCandidates } from '../registry/semantic.mjs';
+import { retrieveSemanticCandidates, SEMANTIC_WORKFLOWS } from '../registry/semantic.mjs';
 import { decideCapabilityRoute as decideCascade, rankSelectionCandidates } from './select.mjs';
 import { applyPreferences } from './preferences.mjs';
 
@@ -170,7 +170,7 @@ export function decideCapabilityRoute(options = {}) {
 
 export function resolveSemanticRoute(options = {}) {
   const { intent, records = [], workflows, runtime, limits, preferences = [], preferenceScope = {}, explicitCapability, now } = options && typeof options === 'object' && !Array.isArray(options) ? options : {};
-  let retrieval = retrieveSemanticCandidates({ intent, records, workflows });
+  let retrieval = retrieveSemanticCandidates({ intent, records, workflows, allowPartial: true });
   const preferenceList = Array.isArray(preferences) ? preferences : [];
   if (retrieval.status === 'ambiguous' && preferenceList.length) {
     const tiedIds = new Set(retrieval.fallback?.candidates || []);
@@ -198,7 +198,7 @@ export function resolveSemanticRoute(options = {}) {
     }
   }
   if (retrieval.status !== 'resolved') return { status: retrieval.status, dispatch_eligible: false, reason_code: retrieval.reason_codes?.[0] || 'semantic_retrieval_blocked', retrieval };
-  const workflow = (workflows || []).find(item => item.workflow_id === retrieval.workflow_id)
+  const workflow = (workflows || SEMANTIC_WORKFLOWS).find(item => item.workflow_id === retrieval.workflow_id)
     || { workflow_id: retrieval.workflow_id, roles: retrieval.selected.workflow_coverage.required_roles };
   const selection = rankSelectionCandidates({
     candidates: retrieval.candidates.filter(candidate => candidate.workflow_id === retrieval.workflow_id),

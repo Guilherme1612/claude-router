@@ -342,14 +342,26 @@ function _inventoryToStemMap(manifest) {
   return out;
 }
 
-const _surfaceCaches = new Map(); // runtimeConfigDir -> { mtimeMs, enabledSet, surfaceStatus, disabledCount }
+function _surfaceInventoryKey(manifest) {
+  const rows = [];
+  const lists = ['skills', 'plugin_skills', 'agents_store_skills', 'project_scoped_skills', 'agents', 'commands'];
+  for (const key of lists) {
+    for (const entry of (Array.isArray(manifest?.[key]) ? manifest[key] : [])) {
+      if (!entry?.name) continue;
+      rows.push(`${key}:${entry.name}:${entry.scope || ''}:${entry.project || ''}`);
+    }
+  }
+  return rows.sort().join('\u001f');
+}
+
+const _surfaceCaches = new Map(); // runtimeConfigDir -> { mtimeMs, manifestKey, enabledSet, surfaceStatus, disabledCount }
 export function _resetSurfaceCache() {
   _surfaceCaches.clear();
 }
 function _getCache(runtimeConfigDir) {
   let c = _surfaceCaches.get(runtimeConfigDir);
   if (!c) {
-    c = { mtimeMs: 0, enabledSet: null, surfaceStatus: 'unconfigured', disabledCount: 0 };
+    c = { mtimeMs: 0, manifestKey: null, enabledSet: null, surfaceStatus: 'unconfigured', disabledCount: 0 };
     _surfaceCaches.set(runtimeConfigDir, c);
   }
   return c;
@@ -415,9 +427,13 @@ export function applySurfaceFilter(corpus, manifest, modeMap, runtimeConfigDir =
     // → resolveSurface reads .gsd-profile and falls through to 'full' default.
     let mtime = 0;
     try { mtime = statSync(surfaceFile).mtimeMs; } catch (_) { /* missing */ }
-    const cacheHit = mtime === cache.mtimeMs && cache.enabledSet !== null;
+    const manifestKey = _surfaceInventoryKey(manifest);
+    const cacheHit = mtime === cache.mtimeMs
+      && manifestKey === cache.manifestKey
+      && cache.enabledSet !== null;
     if (!cacheHit) {
       cache.mtimeMs = mtime;
+      cache.manifestKey = manifestKey;
       // Cold path: call resolveSurface. On any throw → set sentinel, return.
       // The router's inventory manifest is the { skills:[], agents:[], ... }
       // shape; surface.cjs's normalizeSkillManifest expects a stem-dep map
@@ -646,7 +662,7 @@ function readStdin(onDone) {
 const STOP = new Set([
   'the', 'a', 'an', 'and', 'or', 'to', 'of', 'in', 'for', 'on', 'with',
   'is', 'are', 'be', 'by', 'at', 'it', 'this', 'that', 'from', 'as',
-  'your', 'you', 'i', 'via', 'using', 'use',
+  'your', 'you', 'i', 'via', 'using', 'use', 'app', 'improve',
 ]);
 
 export function tokenize(text) {
@@ -3148,7 +3164,9 @@ function buildReasoning(route) {
   if (skills.length) parts.push(`${skills.length} skill${skills.length > 1 ? 's' : ''} fit`);
   if (agents.length) parts.push(`${agents.length} agent${agents.length > 1 ? 's' : ''} fit`);
   if (parts.length === 0) parts.push('best available route for this prompt');
-  return parts.join('; ') + '.';
+  return parts.join('; ') + (route.recommendation_only
+    ? '; local capability is unmapped, so this is recommendation-only.'
+    : '.');
 }
 
 // The slash instruction line at column 0, no backticks, no leading whitespace.
@@ -3400,6 +3418,168 @@ function routeToInspectShape(state) {
   };
 }
 
+const ROUTE_GENERIC_TOKENS = new Set([
+  'all', 'an', 'and', 'a', 'at', 'be', 'best', 'build', 'built', 'capability',
+  'code', 'create', 'current', 'do', 'every', 'files', 'find', 'findings',
+  'fix', 'for', 'from', 'help', 'improve', 'in', 'installed', 'local', 'me', 'modify',
+  'of', 'on', 'or', 'project', 'real', 'report', 'review', 'run', 'test',
+  'tests', 'the', 'this', 'to', 'update', 'use', 'verify', 'way', 'with',
+]);
+
+const ROUTE_PROMPT_ALIASES = Object.freeze({
+  readme: ['documentation', 'docs'],
+  redesign: ['design'],
+});
+
+const ROUTE_WEAK_SINGLE_TOKENS = new Set([
+  'document', 'image', 'pdf', 'presentation', 'report', 'template', 'visual',
+]);
+
+const NON_AUTHORIZING_DISPOSITIONS = new Set([
+  'quoted', 'hypothetical', 'negated', 'prohibited', 'preview', 'explain',
+]);
+
+function routeStem(token) {
+  const value = String(token || '');
+  if (value.length > 4 && value.endsWith('ies')) return `${value.slice(0, -3)}y`;
+  if (value.length > 4 && value.endsWith('s')) return value.slice(0, -1);
+  return value;
+}
+
+function routeTextTokens(value) {
+  return tokenize(value).map(routeStem);
+}
+
+function templateCapability(entry) {
+  const name = String(entry?.name || '').toLowerCase();
+  const description = String(entry?.description || '').toLowerCase();
+  return name.includes('template')
+    || name.startsWith('artifact-') && description.includes('template');
+}
+
+function templateRequested(prompt) {
+  return /\b(template|reference|reusable|selected|select|named|name)\b/i.test(String(prompt || ''));
+}
+
+function promptNamesCapability(prompt, entry) {
+  const promptTokens = new Set(routeTextTokens(prompt));
+  const nameTokens = routeTextTokens(entry?.name)
+    .filter(token => !['artifact', 'template', 'creator'].includes(token));
+  return nameTokens.filter(token => promptTokens.has(token)).length >= 2;
+}
+
+// Native artifact-template capabilities are explicit-template tools, not
+// general-purpose substitutes for a website, browser, document, or spreadsheet
+// capability. Keep them available when the prompt names the template or asks
+// for a reusable/reference template; otherwise remove them before BM25 scoring.
+function filterPromptCorpus(prompt, corpus) {
+  if (!Array.isArray(corpus) || templateRequested(prompt)) return corpus;
+  return corpus.filter(candidate => (
+    !templateCapability(candidate?.entry)
+    || promptNamesCapability(prompt, candidate?.entry)
+  ));
+}
+
+function promptSpecificMatch(prompt, entry) {
+  const promptTokens = promptEvidenceTokens(prompt);
+  if (!promptTokens.size || !entry) return false;
+  const nameTokens = new Set(routeTextTokens(entry.name));
+  const candidateTokens = new Set(routeTextTokens([
+    entry.name,
+    entry.description,
+    entry.summary,
+  ].filter(Boolean).join(' ')));
+  const hits = [...promptTokens].filter(token => candidateTokens.has(token));
+  const nameHits = hits.filter(token => nameTokens.has(token));
+  return nameHits.length > 0
+    || hits.length >= 2
+    || hits.length === 1
+      && hits[0].length >= 5
+      && !ROUTE_WEAK_SINGLE_TOKENS.has(hits[0]);
+}
+
+function promptEvidenceTokens(prompt) {
+  const rawPromptTokens = routeTextTokens(prompt);
+  return new Set([...rawPromptTokens, ...rawPromptTokens.flatMap(token => (
+    ROUTE_PROMPT_ALIASES[token] || []
+  ))]
+    .filter(token => !ROUTE_GENERIC_TOKENS.has(token)));
+}
+
+function promptQueryTokens(prompt) {
+  const rawPromptTokens = tokenize(prompt);
+  return [...new Set([...rawPromptTokens, ...rawPromptTokens.flatMap(token => (
+    ROUTE_PROMPT_ALIASES[token] || []
+  ))])];
+}
+
+function primaryTaskFitScore(prompt, entry) {
+  const source = String(prompt || '').toLowerCase();
+  const candidate = [entry?.name, entry?.description, entry?.summary]
+    .filter(Boolean).join(' ').toLowerCase();
+  let score = 0;
+  const buildRequest = /\b(?:build|create|implement|develop)\b/.test(source);
+  const websiteRequest = /\b(?:website|websites|site|landing|portfolio)\b/.test(source);
+  const dataArtifactRequest = /\b(?:spreadsheet|dashboard|workbook|csv|tsv)\b/.test(source);
+  const candidateAction = /\b(?:build|create|implement|develop)\b/.test(candidate);
+  if (buildRequest && websiteRequest) {
+    if (candidateAction && /\b(?:website|websites|site|landing|portfolio)\b/.test(candidate)) score += 4;
+    else if (!candidateAction && /\b(?:browser|control|inspect|verify|testing)\b/.test(candidate)) score -= 2;
+  }
+  if (buildRequest && dataArtifactRequest) {
+    if (candidateAction && /\b(?:spreadsheet|workbook|excel|csv|tsv|dashboard)\b/.test(candidate)) score += 4;
+    else if (/\b(?:graph|knowledge graph|code graph)\b/.test(candidate)) score -= 2;
+  }
+  if (/\b(?:redesign|design|polish|improve)\b/.test(source)
+    && /\b(?:app|interface|ui|ux|frontend|website|dashboard|user experience)\b/.test(source)) {
+    if (/\b(?:design|interface|ui|ux|frontend|visual|polish)\b/.test(candidate)) score += 4;
+    else if (/\b(?:profile|profiler|behavioral)\b/.test(candidate)) score -= 2;
+  }
+  if (/\bautonom(?:ous|ously)\b/.test(source)
+    && /\bautonom(?:ous|ously)\b/.test(candidate)) score += 4;
+  return score;
+}
+
+function promptSpecificityScore(prompt, entry) {
+  const promptTokens = promptEvidenceTokens(prompt);
+  if (!promptTokens.size || !entry) return 0;
+  const nameTokens = new Set(routeTextTokens(entry.name));
+  const candidateTokens = new Set(routeTextTokens([
+    entry.name,
+    entry.description,
+    entry.summary,
+  ].filter(Boolean).join(' ')));
+  const hits = [...promptTokens].filter(token => candidateTokens.has(token));
+  const nameHits = hits.filter(token => nameTokens.has(token));
+  const longHits = hits.filter(token => token.length >= 5);
+  return (nameHits.length * 1.5) + (longHits.length * 0.8) + (hits.length >= 2 ? 0.5 : 0)
+    + primaryTaskFitScore(prompt, entry);
+}
+
+function applyPromptSpecificityBoost(scored, prompt) {
+  if (!Array.isArray(scored) || !scored.length) return [];
+  return scored.map(candidate => {
+    const boost = promptSpecificityScore(prompt, candidate.entry);
+    return boost > 0 ? { ...candidate, score: candidate.score + boost } : { ...candidate };
+  }).sort((left, right) => right.score - left.score);
+}
+
+function nonAuthorizingDisposition(prompt) {
+  const source = String(prompt || '');
+  const discussionMarker = /\b(?:explain|what does|how does|why|compare|difference|do not|don't|never|if|suppose|imagine|preview|dry[- ]?run|simulate)\b/i.test(source);
+  const whatIsQuestion = /\bwhat is\b/i.test(source);
+  const actionMarker = /\b(?:open|inspect|verify|review|run|build|create|fix|modify|update|design|redesign|report|generate|implement|continue|execute|write|analy[sz]e)\b/i.test(source);
+  if (!_semanticMod?.parseSemanticIntent || (!discussionMarker && (!whatIsQuestion || actionMarker))) {
+    return null;
+  }
+  try {
+    const disposition = _semanticMod.parseSemanticIntent(prompt)?.disposition;
+    return NON_AUTHORIZING_DISPOSITIONS.has(disposition) ? disposition : null;
+  } catch {
+    return null;
+  }
+}
+
 // ponytail: bounded token/keyword heuristic keeps adaptive semantic fallback cheap;
 // replace with measured routing calibration only if this produces false routes.
 function adaptiveNeedsSemantic(prompt) {
@@ -3435,16 +3615,86 @@ function candidateRows(scored, boosted, blended, modeMap) {
   });
 }
 
-function modeMapEntryForName(modeMap, name) {
+function modeMapEntryForName(modeMap, name, promptTokens = []) {
   const target = String(name || '').toLowerCase();
   if (!target || !modeMap || !Array.isArray(modeMap.entries)) return null;
-  return modeMap.entries.find((e) => {
+  const matches = modeMap.entries.filter((e) => {
     if (!e) return false;
     if (e.id && String(e.id).toLowerCase() === target) return true;
     if (e.mode && String(e.mode).toLowerCase() === target) return true;
     const recs = [...(e.recommended_skills || []), ...(e.recommended_agents || [])];
     return recs.some((r) => String(r || '').toLowerCase() === target);
-  }) || null;
+  });
+  if (!matches.length) return null;
+  const direct = matches.find((e) => (
+    String(e.id || '').toLowerCase() === target
+    || String(e.mode || '').toLowerCase() === target
+  ));
+  if (direct) return direct;
+  if (!Array.isArray(promptTokens) || promptTokens.length === 0) return matches[0];
+  const promptSet = new Set(promptTokens);
+  const ranked = matches.map((entry, index) => {
+    const signalTokens = new Set((entry.signal_patterns || [])
+      .flatMap((signal) => tokenize(typeof signal === 'string' ? signal : signal?.value || '')));
+    let overlap = 0;
+    for (const token of signalTokens) if (promptSet.has(token)) overlap += 1;
+    return { entry, overlap, index };
+  }).sort((left, right) => right.overlap - left.overlap || left.index - right.index);
+  // A recommended capability is not evidence that its parent workflow matches.
+  // Keep the direct capability recommendation when the parent signal has no
+  // lexical support; this avoids turning a website build into a UI review.
+  return ranked[0].overlap >= 2 ? ranked[0].entry : null;
+}
+
+function graphFirstModeMapEntry(modeMap, promptTokens) {
+  if (!modeMap || !Array.isArray(modeMap.entries) || !Array.isArray(promptTokens)) return null;
+  const promptSet = new Set(promptTokens);
+  const inspection = new Set(['trace', 'inspect', 'map', 'understand', 'analyze', 'analyse', 'update']);
+  const architecture = new Set(['architecture', 'repository', 'dependencies', 'dependency', 'data', 'flow', 'symbols', 'call', 'structure', 'codebase', 'diagram']);
+  if (![...inspection].some((token) => promptSet.has(token))
+    || ![...architecture].some((token) => promptSet.has(token))) return null;
+  const candidates = modeMap.entries.filter((entry) => (
+    entry?.invoke_kind === 'slash'
+    && (entry.recommended_skills || []).some((skill) => String(skill).toLowerCase() === 'graphify')
+  ));
+  return candidates.map((entry, index) => {
+    const signalTokens = new Set((entry.signal_patterns || [])
+      .flatMap((signal) => tokenize(typeof signal === 'string' ? signal : signal?.value || '')));
+    let overlap = 0;
+    for (const token of signalTokens) if (promptSet.has(token)) overlap += 1;
+    return { entry, overlap, index };
+  }).sort((left, right) => right.overlap - left.overlap
+    || String(left.entry.id || '').localeCompare(String(right.entry.id || ''))
+    || left.index - right.index)[0]?.entry || null;
+}
+
+function unmappedCapabilityRoute(manifest, top, tier, modeMap) {
+  if (!manifest || !top?.name || tier === 'low') return null;
+  const name = stripLeadingSlash(top.name);
+  if (!name) return null;
+  const indexes = buildTargetIndexes(manifest);
+  const skills = knownSkillTargets(indexes);
+  let invoke_kind = null;
+  if (indexes.commands.has(name)) invoke_kind = 'slash';
+  else if (indexes.safeAgents.has(name)) invoke_kind = 'agent';
+  else if (skills.has(name)) invoke_kind = 'skill';
+  if (!invoke_kind) return null;
+  const route = {
+    id: `capability:${name}`,
+    mode: invoke_kind === 'slash' ? name : null,
+    invoke_kind,
+    recommended_skills: invoke_kind === 'skill' ? [name] : [],
+    recommended_agents: invoke_kind === 'agent' ? [name] : [],
+    tier: 'medium',
+    args_hint: null,
+    warning: null,
+    weight_applied: typeof top.weight_applied === 'number' ? top.weight_applied : null,
+    scores: [],
+    recommendation_only: true,
+    route_reason: 'unmapped_capability',
+    resolved_slash: invoke_kind === 'slash' ? name : null,
+  };
+  return routeTargetsExist(route, manifest, modeMap, indexes) ? route : null;
 }
 
 export function telemetryEntryFromState(decision, startNs) {
@@ -3683,6 +3933,7 @@ export function inspectDecision(prompt, options = {}) {
         record_count: semanticRecords.length,
       }
       : { status: 'inactive', reason_code: 'semantic_records_missing', record_count: 0 };
+    const nonAuthorizing = nonAuthorizingDisposition(prompt);
     if (routingSelection.mode === 'semantic' && !semanticRecords) {
       state.tier = 'low';
       state.passThroughReason = 'semantic_inactive';
@@ -3732,6 +3983,12 @@ export function inspectDecision(prompt, options = {}) {
         causal_proof_required: true,
       };
       state.invoke_kind = 'semantic';
+      return finish();
+    }
+    if (nonAuthorizing) {
+      state.tier = 'low';
+      state.passThroughReason = `intent_${nonAuthorizing}`;
+      state.decision_trace.push(`pass_through:intent:${nonAuthorizing}`);
       return finish();
     }
     // INVC-03: epoch-guarded threshold consult. Runs AFTER manifest is loaded
@@ -3833,13 +4090,17 @@ export function inspectDecision(prompt, options = {}) {
     const _sf = applySurfaceFilter(corpus, manifest, modeMap, opts.runtimeConfigDir);
     state.surface_status = _sf.surface_status;
     state.surface_disabled_count = _sf.surface_disabled_count;
-    const filteredCorpus = _sf.corpus;
-    const queryTokens = tokenize(prompt);
+    const filteredCorpus = filterPromptCorpus(prompt, _sf.corpus);
+    if (filteredCorpus.length !== _sf.corpus.length) {
+      state.decision_trace.push('score:prompt_scope_filtered');
+    }
+    const queryTokens = promptQueryTokens(prompt);
     const scored = bm25Score(queryTokens, filteredCorpus);
+    const promptScored = applyPromptSpecificityBoost(scored, prompt);
     const manifestIdSet = new Set((filteredCorpus || []).map((c) => String(c.name || '').toLowerCase()));
     const boosted = (graph.boostIds && graph.boostIds.size > 0)
-      ? applyGraphBoost(scored, graph.boostIds, manifestIdSet, GRAPH_BOOST)
-      : scored;
+      ? applyGraphBoost(promptScored, graph.boostIds, manifestIdSet, GRAPH_BOOST)
+      : promptScored;
     const normed = normalize(boosted);
     const blended = applyWeightBlend(normed, weights, blendFactor);
     state.candidates = candidateRows(scored, boosted, blended, modeMap);
@@ -3867,7 +4128,12 @@ export function inspectDecision(prompt, options = {}) {
           .filter(Boolean).map((x) => String(x).toLowerCase());
         return recs.includes(topName);
       }));
-    const tier = confidenceTier(top.norm, runnerUp ? runnerUp.norm : 0, state.thresholds, hasCanonicalMatch);
+    const tier = confidenceTier(
+      top.norm,
+      runnerUp ? runnerUp.norm : 0,
+      state.thresholds,
+      hasCanonicalMatch || promptSpecificMatch(prompt, top.entry),
+    );
     state.tier = tier;
     state.score_debug.margin_rule_affected_tier = (
       tier === 'low'
@@ -3894,8 +4160,11 @@ export function inspectDecision(prompt, options = {}) {
       state.passThroughReason = state.margin < (state.thresholds.M || 0) ? 'margin_tie' : 'low_threshold';
     }
 
-    const mmEntry = modeMapEntryForName(modeMap, topName);
-    let route = {
+    const graphFirst = graph.queried && graph.status === 'ok'
+      ? graphFirstModeMapEntry(modeMap, queryTokens)
+      : null;
+    const mmEntry = graphFirst || modeMapEntryForName(modeMap, topName, queryTokens);
+    let route = mmEntry ? {
       id: mmEntry ? mmEntry.id || null : null,
       mode: mmEntry ? mmEntry.mode : null,
       invoke_kind: mmEntry ? mmEntry.invoke_kind : null,
@@ -3906,8 +4175,13 @@ export function inspectDecision(prompt, options = {}) {
       warning: mmEntry ? mmEntry.warning || null : null,
       weight_applied: typeof top.weight_applied === 'number' ? top.weight_applied : null,
       scores: blended.slice(0, 3).map((s) => ({ name: s.name, norm: s.norm })),
-    };
-    if (route.invoke_kind === 'slash') {
+    } : unmappedCapabilityRoute(manifest, top, tier, modeMap);
+    if (!mmEntry && route) {
+      route.scores = blended.slice(0, 3).map((s) => ({ name: s.name, norm: s.norm }));
+      state.tier = route.tier;
+      state.decision_trace.push('route:unmapped:recommendation_only');
+    }
+    if (route?.invoke_kind === 'slash' && mmEntry) {
       const resolved = resolveSlashRoute(mmEntry, manifest, { tier });
       state.resolvedSlash = resolved?.suggested_slash || null;
       state.resolveQuarantined = Array.isArray(resolved?.quarantined)

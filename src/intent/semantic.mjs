@@ -194,8 +194,11 @@ export function parseSemanticIntent(prompt, { policyVersion } = {}) {
   const constraintsWithCategories = constraintsFor(inputTokens, source);
   const workflow = inferWorkflow(subjects, operations);
   const broadRequest = taskFamilyCandidates.length > 1;
+  const websiteBuildVerification = taskFamilyCandidates.includes('feature-build')
+    && taskFamilyCandidates.includes('browser-interaction-verification');
   const workflowHints = bounded([
     ...taskFamilyCandidates,
+    ...(websiteBuildVerification ? ['website-build-verification'] : []),
     ...(broadRequest ? ['coordinator-workflow'] : []),
     ...(workflow ? [workflow] : []),
   ], SEMANTIC_INTENT_LIMITS.workflow_hints);
