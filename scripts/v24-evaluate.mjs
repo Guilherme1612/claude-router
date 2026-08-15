@@ -1,4 +1,4 @@
-import { runEvaluation } from '../src/evaluation/v18.mjs';
+import { runEvaluation } from '../src/evaluation/v24.mjs';
 
 const runtime = process.env.ROUTER_EVAL_RUNTIME || 'claude';
 const report = runEvaluation({ runtime });

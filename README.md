@@ -2,6 +2,8 @@
 
 Claude Router is a zero-dependency, framework-neutral local routing layer for Claude Code and Codex. It discovers and maps available local capabilities—hooks, commands, agents, skills, tools, and integrations—and only resolves targets that are valid in the active runtime.
 
+Current release: v2.4 — Universal Capability Onboarding and Evidence-Driven Routing.
+
 The focus is practical autonomy: less prompt overhead, lower token use, fast routing, better workflow selection, and reliable continuity across session start, stop, compaction, and restart. It is intended for anyone using Claude Code or Codex, from users who describe an outcome in plain language to experts who want to inspect or override a route.
 
 ## What it does
@@ -103,6 +105,6 @@ The public entry point is `install-router.mjs`. No package manager or hosted con
 Verify both runtime paths locally:
 
 ```bash
-node scripts/v18-evaluate.mjs
-ROUTER_EVAL_RUNTIME=codex node scripts/v18-evaluate.mjs
+node scripts/v24-evaluate.mjs
+ROUTER_EVAL_RUNTIME=codex node scripts/v24-evaluate.mjs
 ```

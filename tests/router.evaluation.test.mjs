@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { EVALUATION_VERSION, evaluateGates, runEvaluation } from '../src/evaluation/v18.mjs';
+import { EVALUATION_VERSION, evaluateGates, runEvaluation } from '../src/evaluation/v24.mjs';
 
 test('EVAL-01/02/04/05/07: isolated evaluation returns fingerprinted independent dimensions', () => {
+  assert.equal(EVALUATION_VERSION, 'v2.4-evaluation-v1');
   const report = runEvaluation({ runtime: 'claude', now: 1_800_000_000_000 });
   assert.equal(report.status, 'passed');
   assert.equal(report.evaluation_version, EVALUATION_VERSION);
