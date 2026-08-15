@@ -1,6 +1,8 @@
 # Claude Router
 
-Claude Router is a local, autonomous, bounded decision layer for AI coding harnesses such as Claude Code and Codex.
+Claude Router is a zero-dependency, framework-neutral local routing layer for Claude Code and Codex. It discovers and maps available local capabilities—hooks, commands, agents, skills, tools, and integrations—and only resolves targets that are valid in the active runtime.
+
+Current release: v2.4 — Universal Capability Onboarding and Evidence-Driven Routing.
 
 It chooses the smallest safe command, skill, agent, or workflow from capabilities that actually exist in the current runtime and project. If evidence is missing or the target is not dispatchable, it recommends, passes through, or asks for clarification instead of fabricating a route.
 
@@ -114,63 +116,95 @@ It cannot guarantee the perfect route every time. Its purpose is to make the cho
 
 ## Requirements
 
-- Node.js with ES module support; a current LTS release is recommended.
-- At least one supported AI coding harness installed locally: Claude Code or Codex.
-
-There is no npm install step.
+Node.js 20+ and at least one installed Claude Code or Codex runtime. No npm install step is required; the project uses Node's standard library.
 
 ## Install
 
-Clone the repository and run the lifecycle entry point:
+Requirements: Node.js 20+ and at least one installed Claude Code or Codex runtime. There is no `npm install` step; the project uses Node's standard library.
+
+Clone the repository and provide one or both runtime roots plus an external neutral state root. Omit the runtime option for a runtime that is not installed:
 
 ```bash
 git clone https://github.com/Guilherme1612/claude-router.git
 cd claude-router
-node install-router.mjs
+
+node install-router.mjs \
+  --claude-root /path/to/claude-runtime \
+  --codex-root /path/to/codex-runtime \
+  --state-root /path/to/router-state
 ```
 
-The installer is idempotent. It installs or repairs only Claude Router-owned hooks, runtime modules, manifests, controller state, and related files. Existing unrelated user configuration is preserved.
+Use only the runtime root that exists. The state root must be explicit, outside this repository and the runtime roots, and must not be named `.router`.
 
-For a project-specific capability root:
+Equivalent environment variables are `CLAUDE_CONFIG_ROOT`, `CODEX_CONFIG_ROOT`, and `ROUTER_STATE_ROOT`.
+
+Preview without writing:
 
 ```bash
-node install-router.mjs --project-root /path/to/project
+node install-router.mjs --dry-run \
+  --claude-root /path/to/claude-runtime \
+  --state-root /path/to/router-state
 ```
 
-Preview candidate changes without writing:
+Remove only Router-owned bindings and files:
 
 ```bash
-node install-router.mjs --dry-run
+node install-router.mjs --uninstall \
+  --claude-root /path/to/claude-runtime \
+  --codex-root /path/to/codex-runtime \
+  --state-root /path/to/router-state
 ```
 
-## Verify
+## Runtime behavior
 
-From the repository root:
+The default route is safe pass-through. `UserPromptSubmit` remains untouched unless the owner has supplied an explicit neutral capability manifest. `SessionStart`, `Stop`, and `PreCompact` can receive a short status containing what is done, current, blocked, next, route, and owner action.
+
+For explicit neutral selection, create `capabilities.json` under the state root:
+
+```json
+{
+  "schema_version": 1,
+  "capabilities": [
+    {
+      "id": "data-inspector",
+      "keywords": ["data", "relationship"],
+      "runtimes": ["claude", "codex"],
+      "enabled": true,
+      "state": "dispatchable",
+      "dispatchable": true,
+      "invocation": { "method": "native", "target": "data-inspector" },
+      "authority": { "kind": "owner-controlled" }
+    }
+  ]
+}
+```
+
+Selection is deterministic and owner-controlled; it provides a route signal and does not execute a command. Metadata-only or malformed entries remain pass-through or recommendation-only. The manifest may also use the normalized `records` root and `stable_id` identifiers. The event log stores lifecycle type, runtime, hashes, timestamps, route state, and bounded counts. It does not store raw prompts, working-directory paths, or downstream output.
+
+## Safety and portability
+
+- No home-directory discovery or personal framework assumptions.
+- No dependency on GSD, Superpowers, GStack, Graphify, or any other plugin collection.
+- Claude and Codex keep separate runtime-local hook bindings.
+- Existing unrelated hooks and settings are preserved.
+- Installation records ownership and fingerprints so uninstall removes only Router-owned state.
+- Prompt-time work is read-only; mutations fail closed and preserve last-known-good state.
+
+The adaptive registry, continuity, health, orchestration, and bounded-autonomy implementation lives under `src/`. The public installer deliberately keeps the installed bridge neutral and explicit so it can run on arbitrary Claude/Codex layouts.
+
+## Development
+
+Run the tests with Node's built-in runner:
 
 ```bash
-node --check install-router.mjs
-node install-router.mjs --help
-node --test --test-concurrency=1 tests/*.test.mjs tests/phase-*/*.test.mjs
+node --test --test-concurrency=1 tests/*.test.mjs
 ```
 
-The test command exercises the serial runtime, lifecycle, routing, observer, adapter, and phase contract suites.
+The public entry point is `install-router.mjs`. No package manager or hosted control plane is required.
 
-## Uninstall
-
-From the repository root, run:
+Verify both runtime paths locally:
 
 ```bash
-node install-router.mjs --uninstall
+node scripts/v24-evaluate.mjs
+ROUTER_EVAL_RUNTIME=codex node scripts/v24-evaluate.mjs
 ```
-
-The installer removes only files, hooks, and state that Claude Router can prove it owns. Modified or ambiguous files are kept and reported. Claude Code, Codex, and your installed capabilities are not removed.
-
-## Safety model
-
-- Prompt-time routing is bounded and read-only.
-- Each harness keeps its own runtime-local artifacts.
-- Route targets and dependencies are checked before they can be suggested.
-- Context, permission, and approval gates run before risky work.
-- File changes are debounced and reconciled before activation.
-- Invalid, stale, or untrusted candidates remain inactive.
-- Uninstall is ownership-aware and refuses to delete ambiguous state.
